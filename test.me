@@ -1,0 +1,163 @@
+// central concepts for pointers/references
+
+// unique refs   RVAL's?
+// scoped refs   may not escape, scope returns have narrowest life of inputs
+// ref-counted refs
+// raw/unbound pointers/refs (GC?)
+// auto-pointer for templates...?
+
+// pointer *
+// rc      ^
+// borrow  &
+
+
+module x.y;
+
+
+// definitions
+
+def I32 : int;                         // typedef/alias
+def S : { var x : int; };              // struct
+def x(T) : T;                          // template typedef/alias
+def x(S : size_t) : int[S];            // typed template param
+def x(Types...) : [ Types ];           // variadic template
+
+def f : void(int) = (x) {};            // function
+def f : void(x : int) {};              // function - shorthand
+def f(T) : void(x : T) {};             // template function
+def f = (x) {};                        // inferred function (ie, template)
+
+
+// declarations
+
+var x;                                 // variable
+var x = 10;                            // infer type
+var x : int = 10;                      // explicit type
+var x : int[] = [ 10, 20, 30 ];        // array
+var x : int[3] = [ 10, 20, 30 ];       // fixed array
+var x : [ int, float ] = [ 10, 1.0 ];  // tuple
+
+def x = 10;                            // literal, infer type
+def x : int = 10;                      // literal, explicit type
+def x(U) : U = U(10);                  // template literal
+
+
+// reference types
+var xref : int*;  // raw ref
+var xref : int&;  // borrowed ref
+var xref : int^;  // owned ref
+
+
+// type construction
+var x : const int;             // const int
+var x : const int*;			   // const pointer to const int
+var x : const(int)*;		   // mutable pointer to const int
+var x : int const*;			   // const pointer to mutable int
+var x : Template!int;		   // instantiation of Template with 'int'
+var x : Template!(int, float); // instantiation of Template with 'int' and 'float'
+var x : Template!int*;		   // pointer to an instantiation of Template with 'int'
+var x : Template!(int*);	   // instantiation of Template with 'int*'
+var x : Template!const(int)*;  // pointer to an instantiation of Template with 'const(int)'
+var x : const Template!int*;   // pointer to const instantiation of Template with 'int'
+var x : int[]*;                // pointer to an dynamic array of ints
+var x : int*[];                // dynamic array of pointers to ints
+var x : int[3][];              // dynamic array of arrays of 3 ints
+
+
+// statements
+
+def f : void(x : int)
+{
+  f(10);  // call f
+
+  var x = 10;
+  x = 20;
+
+  def y = 30;
+  x = x + y;
+
+  var s : { var x : int; var y : float; };
+  s.x = 10;
+  assert(s.y == 0);
+  assert(s.tupleof == [ 10, 0 ]);
+
+  var p : int&;      // p is null reference
+  p := x;            // rebind p to 'x'
+  p = 20;            // assign value 20 to p (ie, to x)
+
+}
+
+
+// make something useful
+
+def delegate(T, R, Args...)) : {
+  var fptr : R(T&, Args);
+  var arg : T&;
+
+  this(this : T&, func : R(T&, Args)) {}
+};
+
+
+/*
+
+valtype(y) == int;
+decltype(y) == int*;
+typeof(y.addr) == size_t
+
+def f : int(x: int)& {
+
+}
+
+
+
+struct delegate(R(Args...), T = void)
+{
+  this(T &)
+  {
+  }
+
+  var fptr : R(T&, Args...);
+  var arg : T&;
+}
+
+contract C(T)
+{
+	static assert(hasMember!(T, Read));
+}
+
+int x = if(x) { return 10; } else { return 1; }
+
+struct I
+{
+	def x { return 10; } // -> int()
+	def y : void() = null;
+	def z : void() = null;
+}
+
+struct Base : I&
+{
+	x = {};
+}
+
+struct Type : Base
+{
+
+}
+
+
+;
+;;
+
+;
+
+
+def x : int = 5;
+def x : T;
+
+var x = 10;
+
+alias Array(T) = T[];
+
+def x(T, U) : int(float, T, U)
+
+*/
