@@ -60,6 +60,9 @@ match          { return MATCH; }
 "||="          { return OREQ; }
 "&&="          { return ANDEQ; }
 "^^="          { return XOREQ; }
+"<<="          { return SHLEQ; }
+">>="          { return ASREQ; }
+">>>="         { return LSREQ; }
 
 \"(\\.|[^\\"])*\" { yylval.sval = _strdup(yytext); return STRING; }
 

@@ -41,12 +41,55 @@ enum class Type
 	DefConst,
 	Var,
 
-	OpAssign,
-
 	Elipsis,
 
 	MemberLookup,
+	Call,
 	OpIndex,
+	OpPostInc,
+	OpPostDec,
+	OpPreInc,
+	OpPreDec,
+	OpUnaryPlus,
+	OpUnaryMinus,
+	OpUnaryNot,
+	OpUnaryComp,
+	OpMul,
+	OpDiv,
+	OpMod,
+	OpAdd,
+	OpSub,
+	OpASL,
+	OpASR,
+	OpLSR,
+	OpLt,
+	OpGt,
+	OpLe,
+	OpGe,
+	OpEq,
+	OpNe,
+	OpBitAnd,
+	OpBitXor,
+	OpBitOr,
+	OpAnd,
+	OpXor,
+	OpOr,
+	OpAssign,
+	OpBind,
+	OpMulEq,
+	OpDivEq,
+	OpModEq,
+	OpAddEq,
+	OpSubEq,
+	OpBitAndEq,
+	OpBitXorEq,
+	OpBitOrEq,
+	OpAndEq,
+	OpXorEq,
+	OpOrEq,
+	OpASLEq,
+	OpASREq,
+	OpLSREq,
 };
 
 struct Node;
@@ -64,8 +107,7 @@ Node* UInt(unsigned __int64 i);
 Node* Float(double f);
 
 Node* Add(Type type, Node *l = nullptr, Node *r = nullptr);
-Node* SetLeft(Node *node, Node *l);
-Node* SetRight(Node *node, Node *r);
+Node* SetChildren(Node *node, Node *l = nullptr, Node *r = nullptr);
 
 void Print(Node *n);
 }
@@ -88,7 +130,7 @@ void Print(Node *n);
 %token DEF VAR
 %token IF ELSE FOR FOREACH WHILE MATCH
 %token ELIPSIS SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR XOR
-%token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ XOREQ
+%token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ XOREQ SHLEQ ASREQ LSREQ
 
 
 // define the "terminal symbol" token types I'm going to use (in CAPS
@@ -137,8 +179,8 @@ code_statement:
 	def_statement
 	| var_statement
 	| control_statement
-	| empty_statement
 	| expression_statement
+	| empty_statement
 	;
 
 empty_statement:
@@ -194,13 +236,16 @@ array_index:
 	;
 
 control_statement:
-	IF body ELSE body
-	| IF body
+	IF '(' value_expression ')' body ELSE body
+	| IF '(' value_expression ')' body
+	| WHILE '(' value_expression ')' body
+	;
+/*
 	| FOR body
 	| FOREACH body
-	| WHILE body
 	| MATCH body
 	;
+*/
 
 body:
 	'{' '}'                   { Push(Add(Type::List)); }
@@ -288,132 +333,135 @@ primary_value_expression:
 
 postfix_value_expression:
 	primary_value_expression
-	| postfix_value_expression '[' ']'
-	| postfix_value_expression '[' value_expression_list ']'
-	| postfix_value_expression function_call
-	| type_expression function_call
-	| postfix_value_expression INCOP
-	| postfix_value_expression DECOP
-	| postfix_value_expression '.' postfix_value_expression
+	| postfix_value_expression '[' ']'						 { Push(Add(Type::OpIndex, Pop(), Add(Type::List))); }
+	| postfix_value_expression '[' value_expression_list ']' { Push(Add(Type::OpIndex, Pop(), Pop())); }
+	| postfix_value_expression function_call				 { Push(Add(Type::Call, Pop(), Pop())); }
+	| type_expression function_call							 { Push(Add(Type::Call, Pop(), Pop())); }
+	| postfix_value_expression INCOP						 { Push(Add(Type::OpPostInc, Pop())); }
+	| postfix_value_expression DECOP						 { Push(Add(Type::OpPostDec, Pop())); }
+	| postfix_value_expression '.' postfix_value_expression	 { Push(Add(Type::MemberLookup, Pop(), Pop())); }
 	;
 
 unary_operator:	 
- 	'+'
- 	| '-'
- 	| '!'
- 	| '~'
+ 	'+'   { Push(Add(Type::OpUnaryPlus)); }
+ 	| '-' { Push(Add(Type::OpUnaryMinus)); }
+ 	| '!' { Push(Add(Type::OpUnaryNot)); }
+ 	| '~' { Push(Add(Type::OpUnaryComp)); }
 	;
 
 unary_value_expression:
 	postfix_value_expression
-	| INCOP postfix_value_expression
-	| DECOP postfix_value_expression
-	| unary_operator unary_value_expression
+	| INCOP postfix_value_expression        { Push(Add(Type::OpPreInc, Pop())); }
+	| DECOP postfix_value_expression		{ Push(Add(Type::OpPreDec, Pop())); }
+	| unary_operator unary_value_expression { Push(SetChildren(Pop(), Pop())); }
 	;
 
 mul_operator:	 
- 	'*'
- 	| '/'
- 	| '%'
+ 	'*'   { Push(Add(Type::OpMul)); }
+ 	| '/' { Push(Add(Type::OpDiv)); }
+ 	| '%' { Push(Add(Type::OpMod)); }
 	;
 
 mul_value_expression:
 	unary_value_expression
-	| mul_value_expression mul_operator unary_value_expression
+	| mul_value_expression mul_operator unary_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 add_operator:
- 	'+'
- 	| '-'
+ 	'+'   { Push(Add(Type::OpAdd)); }
+ 	| '-' { Push(Add(Type::OpSub)); }
 	;
 
 add_value_expression:
 	mul_value_expression
-	| add_value_expression add_operator mul_value_expression
+	| add_value_expression add_operator mul_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 shift_operator:
- 	SHL
- 	| ASR
- 	| LSR
+ 	SHL   { Push(Add(Type::OpASL)); }
+ 	| ASR { Push(Add(Type::OpASR)); }
+ 	| LSR { Push(Add(Type::OpLSR)); }
 	;
 
 shift_value_expression:
  	add_value_expression
- 	| shift_value_expression shift_operator add_value_expression
+ 	| shift_value_expression shift_operator add_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 cmp_operator:
- 	'<'
-	| '>'
-	| LEQ
-	| GEQ
+ 	'<'   { Push(Add(Type::OpLt)); }
+	| '>' { Push(Add(Type::OpGt)); }
+	| LEQ { Push(Add(Type::OpLe)); }
+	| GEQ { Push(Add(Type::OpGe)); }
 	;
 
 cmp_value_expression:
  	shift_value_expression
- 	| cmp_value_expression cmp_operator shift_value_expression
+ 	| cmp_value_expression cmp_operator shift_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 eq_operator:
- 	EQ
-	| NEQ
+ 	EQ    { Push(Add(Type::OpEq)); }
+	| NEQ { Push(Add(Type::OpNe)); }
 	;
 
 eq_value_expression:
  	cmp_value_expression
- 	| eq_value_expression eq_operator cmp_value_expression
+ 	| eq_value_expression eq_operator cmp_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 bitand_value_expression:
  	eq_value_expression
- 	| bitand_value_expression '&' eq_value_expression
+ 	| bitand_value_expression '&' eq_value_expression     { Push(Add(Type::OpBitAnd, Pop(), Pop())); }
 	;
 
 bitxor_value_expression:
  	bitand_value_expression
- 	| bitxor_value_expression '^' bitand_value_expression
+ 	| bitxor_value_expression '^' bitand_value_expression { Push(Add(Type::OpBitXor, Pop(), Pop())); }
 	;
 
 bitor_value_expression:
  	bitxor_value_expression
- 	| bitor_value_expression '|' bitxor_value_expression
+ 	| bitor_value_expression '|' bitxor_value_expression  { Push(Add(Type::OpBitOr, Pop(), Pop())); }
 	;
 
 and_value_expression:
  	bitor_value_expression
- 	| and_value_expression AND bitor_value_expression
+ 	| and_value_expression AND bitor_value_expression     { Push(Add(Type::OpAnd, Pop(), Pop())); }
 	;
 
 xor_value_expression:
  	and_value_expression
- 	| xor_value_expression XOR and_value_expression
+ 	| xor_value_expression XOR and_value_expression       { Push(Add(Type::OpXor, Pop(), Pop())); }
 	;
 
 or_value_expression:
  	xor_value_expression
- 	| or_value_expression OR xor_value_expression
+ 	| or_value_expression OR xor_value_expression         { Push(Add(Type::OpOr, Pop(), Pop())); }
 	;
 
 assign_operator:
-	'='
-	| BINDEQ
-	| MULEQ
-	| DIVEQ
-	| MODEQ
-	| ADDEQ
-	| SUBEQ
-	| BITOREQ
-	| BITANDEQ
-	| BITXOREQ
-	| OREQ
-	| ANDEQ
-	| XOREQ
+	'='        { Push(Add(Type::OpAssign)); }
+	| BINDEQ   { Push(Add(Type::OpBind)); }
+	| MULEQ	   { Push(Add(Type::OpMulEq)); }
+	| DIVEQ	   { Push(Add(Type::OpDivEq)); }
+	| MODEQ	   { Push(Add(Type::OpModEq)); }
+	| ADDEQ	   { Push(Add(Type::OpAddEq)); }
+	| SUBEQ	   { Push(Add(Type::OpSubEq)); }
+	| BITOREQ  { Push(Add(Type::OpBitAndEq)); }
+	| BITANDEQ { Push(Add(Type::OpBitXorEq)); }
+	| BITXOREQ { Push(Add(Type::OpBitOrEq)); }
+	| OREQ	   { Push(Add(Type::OpAndEq)); }
+	| ANDEQ	   { Push(Add(Type::OpXorEq)); }
+	| XOREQ	   { Push(Add(Type::OpOrEq)); }
+	| SHLEQ	   { Push(Add(Type::OpASLEq)); }
+	| ASREQ	   { Push(Add(Type::OpASREq)); }
+	| LSREQ	   { Push(Add(Type::OpLSREq)); }
 	;
 
 assign_value_expression:
 	or_value_expression
-	| or_value_expression assign_operator or_value_expression
+	| or_value_expression assign_operator or_value_expression { Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
 	;
 
 value_expression:

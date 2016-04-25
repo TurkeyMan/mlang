@@ -33,12 +33,55 @@ enum Type
 	DefConst,
 	Var,
 
-	OpAssign,
-
 	Elipsis,
 
 	MemberLookup,
+	Call,
 	OpIndex,
+	OpPostInc,
+	OpPostDec,
+	OpPreInc,
+	OpPreDec,
+	OpUnaryPlus,
+	OpUnaryMinus,
+	OpUnaryNot,
+	OpUnaryComp,
+	OpMul,
+	OpDiv,
+	OpMod,
+	OpAdd,
+	OpSub,
+	OpASL,
+	OpASR,
+	OpLSR,
+	OpLt,
+	OpGt,
+	OpLe,
+	OpGe,
+	OpEq,
+	OpNe,
+	OpBitAnd,
+	OpBitXor,
+	OpBitOr,
+	OpAnd,
+	OpXor,
+	OpOr,
+	OpAssign,
+	OpBind,
+	OpMulEq,
+	OpDivEq,
+	OpModEq,
+	OpAddEq,
+	OpSubEq,
+	OpBitAndEq,
+	OpBitXorEq,
+	OpBitOrEq,
+	OpAndEq,
+	OpXorEq,
+	OpOrEq,
+	OpASLEq,
+	OpASREq,
+	OpLSREq,
 }
 
 struct Node
@@ -74,6 +117,7 @@ extern (C) Node* Pop()
 }
 extern (C) Node* Top()
 {
+	assert(depth > 0);
 	return stack[depth-1];
 }
 
@@ -127,21 +171,19 @@ extern (C) Node* Add(Type type, Node* l =  null, Node* r = null)
 	pN.r = r;
 	return pN;
 }
-extern (C) Node* SetLeft(Node* node, Node* l)
+extern (C) Node* SetChildren(Node* node, Node* l, Node* r)
 {
-	node.l = l;
-	return node;
-}
-extern (C) Node* SetRight(Node* node, Node* r)
-{
-	node.r = r;
+	if(l)
+		node.l = l;
+	if(r)
+		node.r = r;
 	return node;
 }
 
 string ListAsString(Node* n)
 {
-	return AsString(n.l) ~
-		(n.r ? ", " ~ (n.r.t == Type.List ? ListAsString(n.r) : AsString(n.r)) : null);
+	return (n.l && n.l.t == Type.List ? ListAsString(n.l) : AsString(n.l)) ~
+		(n.r ? ", " ~ AsString(n.r) : null);
 }
 string AsString(Node* n)
 {
