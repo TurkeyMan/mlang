@@ -6,7 +6,6 @@
 
 %x BLOCK_COMMENT
 %x BLOCK_DISABLE
-%x LINE_COMMENT
 
 D			[0-9]
 L			[a-zA-Z_]
@@ -32,13 +31,44 @@ while          { return WHILE; }
 match          { return MATCH; }
 
 "..."          { return ELIPSIS; }
+".."           { return SLICE; }
 "++"           { return INCOP; }
 "--"           { return DECOP; }
 
+"<<"           { return SHL; }
+">>"           { return ASR; }
+">>>"          { return LSR; }
+
+"=="           { return EQ; }
+"!="           { return NEQ; }
+">="           { return GEQ; }
+"<="           { return LEQ; }
+
+"&&"           { return AND; }
+"||"           { return OR; }
+"^^"           { return XOR; }
+
+":="           { return BINDEQ; }
+"*="           { return MULEQ; }
+"/="           { return DIVEQ; }
+"%="           { return MODEQ; }
+"+="           { return ADDEQ; }
+"-="           { return SUBEQ; }
+"|="           { return BITOREQ; }
+"&="           { return BITANDEQ; }
+"^="           { return BITXOREQ; }
+"||="          { return OREQ; }
+"&&="          { return ANDEQ; }
+"^^="          { return XOREQ; }
+
 \"(\\.|[^\\"])*\" { yylval.sval = _strdup(yytext); return STRING; }
 
-{L}{I}*        { yylval.sval = _strdup(yytext); return IDENTIFIER; }
+{D}+\.{D}+{E}  { yylval.fval = atof(yytext); return FLOAT; }
+{D}+\.{D}+     { yylval.fval = atof(yytext); return FLOAT; }
+{D}+{E}        { yylval.fval = atof(yytext); return FLOAT; }
+{D}+           { yylval.ival = atoi(yytext); return INT; }
 
+{L}{I}*        { yylval.sval = _strdup(yytext); return IDENTIFIER; }
 
 "/*"           BEGIN(BLOCK_COMMENT);
 <BLOCK_COMMENT>{
@@ -86,60 +116,3 @@ match          { return MATCH; }
 .              ;
 
 %%
-
-/*
-
-%%
-"+"                  { return PLUS;       }
-"-"                  { return MINUS;      }
-"*"                  { return TIMES;      }
-"/"                  { return SLASH;      }
-"~"                  { return TILDE;      }
-"`"                  { return GRAVE;      }
-"!"                  { return BANG;       }
-"@"                  { return AT;         }
-"#"                  { return HASH;       }
-"$"                  { return DOLLAR;     }
-"%"                  { return PERCENT;    }
-"^"                  { return HAT;        }
-"&"                  { return AMP;        }
-"'"                  { return APOS;       }
-"\""                 { return QUOTE;      }
-"\\"                 { return BACKSLASH;  }
-"|"                  { return PIPE;       }
-"?"                  { return QUESTION;   }
-
-"->"                 { return ARROW;      }
-"=="                 { return EQL;        }
-"!="                 { return NEQ;        }
-"<"                  { return LSS;        }
-">"                  { return GTR;        }
-"<="                 { return LEQ;        }
-">="                 { return GEQ;        }
-
-"begin"              { return BEGINSYM;   }
-"call"               { return CALLSYM;    }
-"const"              { return CONSTSYM;   }
-"do"                 { return DOSYM;      }
-"end"                { return ENDSYM;     }
-"if"                 { return IFSYM;      }
-"odd"                { return ODDSYM;     }
-"procedure"          { return PROCSYM;    }
-"then"               { return THENSYM;    }
-"var"                { return VARSYM;     }
-"while"              { return WHILESYM;   }
-
-%%
-
-
-void main()
-{
-	while(1)
-	{
-		int x = yylex();
-		if (x == TERMINATE)
-			break;
-		printf("%d\n", x);
-	}
-}
-*/

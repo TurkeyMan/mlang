@@ -11,7 +11,7 @@
 // borrow  &
 
 
-module x.y;
+module x.y.z;
 
 
 // definitions
@@ -22,9 +22,9 @@ def x(T) : T;                          // template typedef/alias
 def x(S : size_t) : int[S];            // typed template param
 def x(Types...) : [ Types ];           // variadic template
 
-def f : void(int) = (x) {};            // function
-def f : void(x : int) {};              // function - shorthand
-def f(T) : void(x : T) {};             // template function
+def f : void(int) = 10;            // function
+//def f : void(x : int) {};              // function - shorthand
+//def f(T) : void(x : T) {};             // template function
 def f = (x) {};                        // inferred function (ie, template)
 
 
