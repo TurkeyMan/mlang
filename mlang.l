@@ -1,5 +1,33 @@
 %{
 #include "mlang.tab.h"
+
+long long htoi(const char *text)
+{
+	if(text[0] == '0' && text[1] == 'x')
+		text += 2;
+	long long v = 0;
+	while(*text)
+	{
+		v <<= 4;
+		if(*text >= '0' && *text <= '9')
+			v |= *text - '0';
+		else
+			v |= 10 + (*text | 0x20) - 'a';
+		++text;
+	}
+	return v;
+}
+
+long long charval(const char *text)
+{
+	if(text[0] == '\'')
+		++text;
+	long long v = *text;
+	// TODO: decode UTF8...
+	//       handle char sequences? (fourcc?)
+	return v;
+}
+
 %}
 
 %option yylineno noyywrap
@@ -15,81 +43,89 @@ E			[Ee][+-]?{D}+
 
 %%
 
-[ \t\r\n]      ;
+[ \t\r\n]	;
 
-module         { return MODULE; }
-static         { return STATIC; }
+module		{ return MODULE; }
+static		{ return STATIC; }
 
-def            { return DEF; }
-var            { return VAR; }
+def			{ return DEF; }
+var			{ return VAR; }
 
-if             { return IF; }
-else           { return ELSE;   }
-for            { return FOR; }
-foreach        { return FOREACH; }
-while          { return WHILE; }
-match          { return MATCH; }
+const		{ return CONST; }
 
-"..."          { return ELIPSIS; }
-".."           { return SLICE; }
-"++"           { return INCOP; }
-"--"           { return DECOP; }
+if			{ return IF; }
+else		{ return ELSE;   }
+for			{ return FOR; }
+foreach		{ return FOREACH; }
+while		{ return WHILE; }
+match		{ return MATCH; }
+return		{ return RETURN; }
+break		{ return BREAK; }
 
-"<<"           { return SHL; }
-">>"           { return ASR; }
-">>>"          { return LSR; }
+"..."		{ return ELIPSIS; }
+".."		{ return SLICE; }
+"++"		{ return INCOP; }
+"--"		{ return DECOP; }
 
-"=="           { return EQ; }
-"!="           { return NEQ; }
-">="           { return GEQ; }
-"<="           { return LEQ; }
+"<<"		{ return SHL; }
+">>"		{ return ASR; }
+">>>"		{ return LSR; }
 
-"&&"           { return AND; }
-"||"           { return OR; }
-"^^"           { return XOR; }
+"=="		{ return EQ; }
+"!="		{ return NEQ; }
+">="		{ return GEQ; }
+"<="		{ return LEQ; }
 
-":="           { return BINDEQ; }
-"*="           { return MULEQ; }
-"/="           { return DIVEQ; }
-"%="           { return MODEQ; }
-"+="           { return ADDEQ; }
-"-="           { return SUBEQ; }
-"|="           { return BITOREQ; }
-"&="           { return BITANDEQ; }
-"^="           { return BITXOREQ; }
-"||="          { return OREQ; }
-"&&="          { return ANDEQ; }
-"^^="          { return XOREQ; }
-"<<="          { return SHLEQ; }
-">>="          { return ASREQ; }
-">>>="         { return LSREQ; }
+"&&"		{ return AND; }
+"||"		{ return OR; }
+"^^"		{ return XOR; }
+
+":="		{ return BINDEQ; }
+"*="		{ return MULEQ; }
+"/="		{ return DIVEQ; }
+"%="		{ return MODEQ; }
+"+="		{ return ADDEQ; }
+"-="		{ return SUBEQ; }
+"~="		{ return CONCATEQ; }
+"|="		{ return BITOREQ; }
+"&="		{ return BITANDEQ; }
+"^="		{ return BITXOREQ; }
+"||="		{ return OREQ; }
+"&&="		{ return ANDEQ; }
+"^^="		{ return XOREQ; }
+"<<="		{ return SHLEQ; }
+">>="		{ return ASREQ; }
+">>>="		{ return LSREQ; }
 
 \"(\\.|[^\\"])*\" { yylval.sval = _strdup(yytext); return STRING; }
+\`(\\.|[^\\`])*\` { yylval.sval = _strdup(yytext); return STRING; }
+\'(\\.|[^\\'])*\' { yylval.ival = charval(yytext); return CHAR; }
 
-{D}+\.{D}+{E}  { yylval.fval = atof(yytext); return FLOAT; }
-{D}+\.{D}+     { yylval.fval = atof(yytext); return FLOAT; }
-{D}+{E}        { yylval.fval = atof(yytext); return FLOAT; }
-{D}+           { yylval.ival = atoi(yytext); return INT; }
+{D}+\.{D}+{E}	{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+\.{D}+		{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+{E}			{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+			{ yylval.ival = atoi(yytext); return INT; }
+"0x"{H}+		{ yylval.ival = htoi(yytext); return INT; }
 
-{L}{I}*        { yylval.sval = _strdup(yytext); return IDENTIFIER; }
+{L}{I}*			{ yylval.sval = _strdup(yytext); return IDENTIFIER; }
 
-"/*"           BEGIN(BLOCK_COMMENT);
+"/*"			BEGIN(BLOCK_COMMENT);
 <BLOCK_COMMENT>{
-	"*/"       BEGIN(INITIAL);
-	[^*\n]+    // eat comment in chunks
-	"*"        // eat the lone star
-	\n         yylineno++;
+	"*/"		BEGIN(INITIAL);
+	[^*\n]+		// eat comment in chunks
+	"*"			// eat the lone star
+	\n			yylineno++;
 }
 
-"/+"           BEGIN(BLOCK_DISABLE);
+"/+"			BEGIN(BLOCK_DISABLE);
 <BLOCK_DISABLE>{
-	"\+/"       BEGIN(INITIAL);
-	[^\+\n]+    // eat comment in chunks
-	"\+"        // eat the lone star
-	\n         yylineno++;
+	"\+/"		BEGIN(INITIAL);
+	[^\+\n]+	// eat comment in chunks
+	"\+"		// eat the lone star
+	\n			yylineno++;
 }
 
-"//".*         ;
+"//".*			;
 
 ";"				{ return(';'); }
 "{"				{ return('{'); }
@@ -116,6 +152,6 @@ match          { return MATCH; }
 "|"				{ return('|'); }
 "?"				{ return('?'); }
 
-.              ;
+.				;
 
 %%

@@ -17,6 +17,11 @@ enum Type
 	TempalteId,
 	Type,
 	FunctionType,
+	Instantiate,
+
+	Const,
+	Pointer,
+	Ref,
 
 	TypedId,
 
@@ -51,6 +56,7 @@ enum Type
 	OpMod,
 	OpAdd,
 	OpSub,
+	OpConcat,
 	OpASL,
 	OpASR,
 	OpLSR,
@@ -73,6 +79,7 @@ enum Type
 	OpModEq,
 	OpAddEq,
 	OpSubEq,
+	OpConcatEq,
 	OpBitAndEq,
 	OpBitXorEq,
 	OpBitOrEq,
@@ -82,6 +89,9 @@ enum Type
 	OpASLEq,
 	OpASREq,
 	OpLSREq,
+
+	Return,
+	Break,
 }
 
 struct Node
