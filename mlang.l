@@ -1,4 +1,6 @@
 %{
+#include "src/ast.h"
+
 #include "mlang.tab.h"
 
 long long htoi(const char *text)
@@ -61,6 +63,19 @@ while		{ return WHILE; }
 match		{ return MATCH; }
 return		{ return RETURN; }
 break		{ return BREAK; }
+
+void		{ return VOID; }
+bool		{ return U1; }
+byte		{ return I8; }
+ubyte		{ return U8; }
+short		{ return I16; }
+ushort		{ return U16; }
+int			{ return I32; }
+uint		{ return U32; }
+long		{ return I64; }
+ulong		{ return U64; }
+float		{ return F32; }
+double		{ return F64; }
 
 "..."		{ return ELIPSIS; }
 ".."		{ return SLICE; }

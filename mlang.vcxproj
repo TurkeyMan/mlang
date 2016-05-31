@@ -29,9 +29,22 @@
   <ItemGroup>
     <ClCompile Include="mlang.flex.cpp" />
     <ClCompile Include="mlang.tab.cpp" />
+    <ClCompile Include="src\ast.cpp" />
+    <ClCompile Include="src\codegen_llvm.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\semantic.cpp" />
+    <ClCompile Include="src\toy.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="KaleidoscopeJIT.h" />
     <ClInclude Include="mlang.tab.h" />
+    <ClInclude Include="src\ast.h" />
+    <ClInclude Include="src\astvisitor.h" />
+    <ClInclude Include="src\codegen_llvm.h" />
+    <ClInclude Include="src\common_llvm.h" />
+    <ClInclude Include="src\semantic.h" />
+    <ClInclude Include="src\sourceloc.h" />
+    <ClInclude Include="src\util.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{10CA5159-86DE-4F3B-A3F1-41DAC9B8BCD7}</ProjectGuid>
@@ -54,13 +67,13 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -105,7 +118,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -118,14 +131,15 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_ITERATOR_DEBUG_LEVEL=0;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\dev\LLVM\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>LLVMX86Disassembler.lib;LLVMX86AsmParser.lib;LLVMX86CodeGen.lib;LLVMSelectionDAG.lib;LLVMAsmPrinter.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMInstrumentation.lib;LLVMProfileData.lib;LLVMTransformUtils.lib;LLVMBitWriter.lib;LLVMX86Desc.lib;LLVMMCDisassembler.lib;LLVMX86Info.lib;LLVMX86AsmPrinter.lib;LLVMX86Utils.lib;LLVMMCJIT.lib;LLVMExecutionEngine.lib;LLVMTarget.lib;LLVMAnalysis.lib;LLVMRuntimeDyld.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMMC.lib;LLVMCore.lib;LLVMSupport.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -138,7 +152,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -152,19 +166,21 @@
       <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Disabled</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>
-      </AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\dev\LLVM\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>LLVMX86Disassembler.lib;LLVMX86AsmParser.lib;LLVMX86CodeGen.lib;LLVMSelectionDAG.lib;LLVMAsmPrinter.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMInstrumentation.lib;LLVMProfileData.lib;LLVMTransformUtils.lib;LLVMBitWriter.lib;LLVMX86Desc.lib;LLVMMCDisassembler.lib;LLVMX86Info.lib;LLVMX86AsmPrinter.lib;LLVMX86Utils.lib;LLVMMCJIT.lib;LLVMExecutionEngine.lib;LLVMTarget.lib;LLVMAnalysis.lib;LLVMRuntimeDyld.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMMC.lib;LLVMCore.lib;LLVMSupport.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

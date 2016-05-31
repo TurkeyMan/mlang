@@ -9,118 +9,10 @@ extern "C" int yyparse();
 extern int yylex();
 extern FILE *yyin;
 extern int yylineno;
- 
+
 void yyerror(const char *s);
 
-enum class Type
-{
-	Int,
-	UInt,
-	Double,
-	String,
-
-	List,
-
-	Id,
-	TempalteId,
-	Type,
-	FunctionType,
-	Instantiate,
-
-	Const,
-	Pointer,
-	Ref,
-
-	TypedId,
-
-	Struct,
-	Tuple,
-
-	Array,
-
-	ArrayLiteral,
-	FunctionLiteral,
-
-	Module,
-	DefType,
-	DefConst,
-	Var,
-
-	Elipsis,
-
-	MemberLookup,
-	Call,
-	OpIndex,
-	OpPostInc,
-	OpPostDec,
-	OpPreInc,
-	OpPreDec,
-	OpUnaryPlus,
-	OpUnaryMinus,
-	OpUnaryNot,
-	OpUnaryComp,
-	OpMul,
-	OpDiv,
-	OpMod,
-	OpAdd,
-	OpSub,
-	OpConcat,
-	OpASL,
-	OpASR,
-	OpLSR,
-	OpLt,
-	OpGt,
-	OpLe,
-	OpGe,
-	OpEq,
-	OpNe,
-	OpBitAnd,
-	OpBitXor,
-	OpBitOr,
-	OpAnd,
-	OpXor,
-	OpOr,
-	OpAssign,
-	OpBind,
-	OpMulEq,
-	OpDivEq,
-	OpModEq,
-	OpAddEq,
-	OpSubEq,
-	OpConcatEq,
-	OpBitAndEq,
-	OpBitXorEq,
-	OpBitOrEq,
-	OpAndEq,
-	OpXorEq,
-	OpOrEq,
-	OpASLEq,
-	OpASREq,
-	OpLSREq,
-
-	Return,
-	Break,
-};
-
-struct Node;
-
-extern "C" {
-Node* Push(Node *n);
-Node* Pop();
-Node* Top();
-
-Node* String(const char* s);
-Node* Identifier(const char* i);
-Node* TypeId(const char* i);
-Node* Int(__int64 i);
-Node* UInt(unsigned __int64 i);
-Node* Float(double f);
-
-Node* Add(Type type, Node *l = nullptr, Node *r = nullptr);
-Node* SetChildren(Node *node, Node *l = nullptr, Node *r = nullptr);
-
-void Print(Node *n);
-}
+#include "src/ast.h"
 
 %}
 
@@ -133,6 +25,12 @@ void Print(Node *n);
 	long long ival;
 	double fval;
 	const char *sval;
+	Expr *expr;
+	ExprList exprList;
+	TypeExpr *type;
+	TypeExprList typeExprList;
+	Statement *statement;
+	StatementList statementList;
 }
 
 // define the constant-string tokens:
@@ -143,14 +41,22 @@ void Print(Node *n);
 %token ELIPSIS SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR XOR
 %token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ XOREQ SHLEQ ASREQ LSREQ
 
+%token VOID U1 I8 U8 I16 U16 I32 U32 I64 U64 F32 F64
 
 // define the "terminal symbol" token types I'm going to use (in CAPS
 // by convention), and associate each with a field of the union:
-%token <ival> INT
+%token <ival> INT CHAR
 %token <fval> FLOAT
-%token <sval> STRING
-%token <ival> CHAR
-%token <sval> IDENTIFIER
+%token <sval> STRING IDENTIFIER
+
+%type <expr> literal array_literal value_expression
+%type <exprList> value_expression_list
+
+%type <type> primitive_type type_expression
+%type <typeExprList> type_expression_list
+
+%type <statement> var_statement
+//%type <statementList> module_statements struct_statements code_statements
 
 %%
 mlang:
@@ -158,38 +64,45 @@ mlang:
 	;
 
 module_statements:
-	module_statement						{ Push(Add(Type::List, Pop())); }
-	| module_statements module_statement	{ Push(Add(Type::List, Pop(), Pop())); }
+	module_statement						{ Push(Add(Generic::Type::List, Pop())); }
+	| module_statements module_statement	{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 struct_statements:
-	struct_statement						{ Push(Add(Type::List, Pop())); }
-	| struct_statements struct_statement	{ Push(Add(Type::List, Pop(), Pop())); }
+	struct_statement						{ Push(Add(Generic::Type::List, Pop())); }
+	| struct_statements struct_statement	{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 code_statements:
-	code_statement							{ Push(Add(Type::List, Pop())); }
-	| code_statements code_statement		{ Push(Add(Type::List, Pop(), Pop())); }
+	code_statement							{ Push(Add(Generic::Type::List, Pop())); }
+	| code_statements code_statement		{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 
 module:
-	MODULE scoped_identifier ';'			{ Push(Add(Type::Module, Pop())); Print(Top()); }
+	MODULE IDENTIFIER ';'					{ Push(Add(Generic::Type::Module, Identifier($2))); Print(Top()); }
 	;
+/*
+	MODULE scoped_identifier ';'			{ Push(Add(Generic::Type::Module, Pop())); Print(Top()); }
+	;
+*/
 
 module_statement:
 	module
 	| def_statement
-	| var_statement
+	| var_statement				{ Push($1); }
+	| static_control_statement
 	| empty_statement
 	;
 
 struct_statement:
 	def_statement
-	| var_statement
+	| var_statement				{ Push($1); }
+	| static_control_statement
 	| empty_statement
 	;
 
 code_statement:
 	def_statement
-	| var_statement
+	| var_statement				{ Push($1); }
+	| static_control_statement
 	| control_statement
 	| expression_statement
 	| empty_statement
@@ -201,21 +114,21 @@ empty_statement:
 
 def_identifier:
 	IDENTIFIER							{ Push(Identifier($1)); }
-	| IDENTIFIER template_arguments		{ Push(Add(Type::TempalteId, Identifier($1), Pop())); }
+	| IDENTIFIER template_arguments		{ Push(Add(Generic::Type::TempalteId, Identifier($1), Pop())); }
 	;
 def_statement:
-	DEF def_identifier ':' type_expression ';'											{ Push(Add(Type::DefType, Pop(), Pop())); Print(Top()); }
-	| DEF def_identifier ':' type_expression '=' value_expression ';'					{ Push(Add(Type::DefConst, Add(Type::TypedId, Pop(), Pop()), Pop())); Print(Top()); }
-	| DEF def_identifier '=' value_expression ';'										{ Push(Add(Type::DefConst, Pop(), Pop())); Print(Top()); }
+	DEF def_identifier ':' type_expression ';'											{ Push(Add(Generic::Type::DefType, Pop(), Pop())); Print(Top()); }
+	| DEF def_identifier ':' type_expression '=' value_expression ';'					{ Push(Add(Generic::Type::DefConst, Add(Generic::Type::TypedId, Pop(), Pop()), Pop())); Print(Top()); }
+	| DEF def_identifier '=' value_expression ';'										{ Push(Add(Generic::Type::DefConst, Pop(), Pop())); Print(Top()); }
 	| DEF def_identifier ':' type_expression function_arguments '{' '}'					{ /* TODO */ Print(Top()); }
 	| DEF def_identifier ':' type_expression function_arguments '{' code_statements '}'	{ /* TODO */ Print(Top()); }
 	;
 
 var_statement:
-	VAR IDENTIFIER ';'												{ Push(Add(Type::Var, Identifier($2))); Print(Top()); }
-	| VAR IDENTIFIER ':' type_expression ';'						{ Push(Add(Type::Var, Add(Type::TypedId, Identifier($2), Pop()))); Print(Top()); }
-	| VAR IDENTIFIER ':' type_expression '=' value_expression ';'	{ Push(Add(Type::Var, Add(Type::TypedId, Identifier($2), Pop()), Pop())); Print(Top()); }
-	| VAR IDENTIFIER '=' value_expression ';'						{ Push(Add(Type::Var, Identifier($2), Pop())); Print(Top()); }
+	VAR IDENTIFIER ';'												{ $$ = new VarDecl($2, nullptr, nullptr); }
+	| VAR IDENTIFIER ':' type_expression ';'						{ $$ = new VarDecl($2, $4, nullptr); }
+	| VAR IDENTIFIER ':' type_expression '=' value_expression ';'	{ $$ = new VarDecl($2, $4, $6); }
+	| VAR IDENTIFIER '=' value_expression ';'						{ $$ = new VarDecl($2, nullptr, $4); }
 	;
 
 expression_statement:
@@ -223,33 +136,33 @@ expression_statement:
 	;
 
 template_arguments:
-	'(' ')'							{ Push(Add(Type::List)); }
-	| '(' template_arg_list ')' 
+	'(' ')'							{ Push(Add(Generic::Type::List)); }
+	| '(' template_arg_list ')'
 	;
 
 function_arguments:
-	'(' ')'							{ Push(Add(Type::List)); }
+	'(' ')'							{ Push(Add(Generic::Type::List)); }
 	| '(' function_arg_list ')'
 	;
 
 function_arg_types:
-	'(' ')'							{ Push(Add(Type::List)); }
+	'(' ')'							{ Push(Add(Generic::Type::List)); }
 	| '(' type_expression_list ')'
 	;
 
 function_call:
-	'(' ')'							{ Push(Add(Type::List)); }
-	| '(' value_expression_list ')' 
+	'(' ')'							{ Push(Add(Generic::Type::List)); }
+	| '(' value_expression_list ')'
 	;
 
 array_index:
-	'[' ']'							{ Push(Add(Type::List)); }
+	'[' ']'							{ Push(Add(Generic::Type::List)); }
 	| '[' value_expression_list ']'
 	;
 
 control_statement:
-	RETURN value_expression ';'		{ Push(Add(Type::Return, Pop())); }
-	| BREAK ';'						{ Push(Add(Type::Break)); }
+	RETURN value_expression ';'		{ Push(Add(Generic::Type::Return, Pop())); }
+	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
 	| IF '(' value_expression ')' body ELSE body
 	| IF '(' value_expression ')' body
 	| WHILE '(' value_expression ')' body
@@ -261,65 +174,69 @@ control_statement:
 	;
 */
 
+static_control_statement:
+	STATIC control_statement
+	;
+
 body:
-	'{' '}'						{ Push(Add(Type::List)); }
+	'{' '}'						{ Push(Add(Generic::Type::List)); }
 	| '{' code_statements '}'
-	| code_statement			{ Push(Add(Type::List, Pop())); }
+	| code_statement			{ Push(Add(Generic::Type::List, Pop())); }
 	;
 
 scoped_identifier:
 	IDENTIFIER							{ Push(Identifier($1)); }
-	| scoped_identifier '.' IDENTIFIER	{ Push(Add(Type::MemberLookup, Pop(), Identifier($3))); }
+	| scoped_identifier '.' IDENTIFIER	{ Push(Add(Generic::Type::MemberLookup, Pop(), Identifier($3))); }
 	;
 
 template_arg:
 	IDENTIFIER												{ Push(Identifier($1)); }
-	| IDENTIFIER ELIPSIS									{ Push(Add(Type::Elipsis, Identifier($1))); }
-	| IDENTIFIER ':' type_expression						{ Push(Add(Type::TypedId, Identifier($1), Pop())); }
-	| IDENTIFIER '=' type_expression						{ Push(Add(Type::OpAssign, Identifier($1), Pop())); }
-	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Type::OpAssign, Add(Type::TypedId, Identifier($1), Pop()), Pop())); }
+	| IDENTIFIER ELIPSIS									{ Push(Add(Generic::Type::Elipsis, Identifier($1))); }
+	| IDENTIFIER ':' type_expression						{ Push(Add(Generic::Type::TypedId, Identifier($1), Pop())); }
+	| IDENTIFIER '=' type_expression						{ Push(Add(Generic::Type::OpAssign, Identifier($1), Pop())); }
+	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), Pop()), Pop())); }
 	;
 
 function_arg:
 	IDENTIFIER												{ Push(Identifier($1)); }
-	| IDENTIFIER ':' type_expression						{ Push(Add(Type::TypedId, Identifier($1), Pop())); }
-	| IDENTIFIER '=' type_expression						{ Push(Add(Type::OpAssign, Identifier($1), Pop())); }
-	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Type::OpAssign, Add(Type::TypedId, Identifier($1), Pop()), Pop())); }
+	| IDENTIFIER ':' type_expression						{ Push(Add(Generic::Type::TypedId, Identifier($1), Pop())); }
+	| IDENTIFIER '=' type_expression						{ Push(Add(Generic::Type::OpAssign, Identifier($1), Pop())); }
+	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), Pop()), Pop())); }
 	;
 
 struct_defintion:
-	'{' '}'											{ Push(Add(Type::Struct, Add(Type::List))); }
-	| '{' struct_statements '}'						{ Push(Add(Type::Struct, Pop())); }
+	'{' '}'											{ Push(Add(Generic::Type::Struct, Add(Generic::Type::List))); }
+	| '{' struct_statements '}'						{ Push(Add(Generic::Type::Struct, Pop())); }
 	;
 
 tuple_definition:
-	'[' ']'											{ Push(Add(Type::Tuple, Add(Type::List))); }
-	| '[' type_expression_list ']'					{ Push(Add(Type::Tuple, Pop())); }
+	'[' ']'											{ Push(Add(Generic::Type::Tuple, Add(Generic::Type::List))); }
+	| '[' type_expression_list ']'					{ Push(Add(Generic::Type::Tuple, Pop())); }
 	;
 
 function_literal:
-	function_arguments '{' '}'						{ Push(Add(Type::FunctionLiteral, Pop(), Add(Type::List))); }
-	| function_arguments '{' code_statements '}'	{ Push(Add(Type::FunctionLiteral, Pop(), Pop())); }
+	function_arguments '{' '}'						{ Push(Add(Generic::Type::FunctionLiteral, Pop(), Add(Generic::Type::List))); }
+	| function_arguments '{' code_statements '}'	{ Push(Add(Generic::Type::FunctionLiteral, Pop(), Pop())); }
 	;
 
 value_expression_list:
-	value_expression								{ Push(Add(Type::List, Pop())); }
-	| value_expression_list ',' value_expression	{ Push(Add(Type::List, Pop(), Pop())); }
+	value_expression								{ $$ = ExprList::empty().append($1); }
+	| value_expression_list ',' value_expression	{ $$ = $1.append($3); }
 	;
 
 type_expression_list:
-	type_expression									{ Push(Add(Type::List, Pop())); }
-	| type_expression_list ',' type_expression		{ Push(Add(Type::List, Pop(), Pop())); }
+	type_expression									{ Push(Add(Generic::Type::List, Pop())); }
+	| type_expression_list ',' type_expression		{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 
 template_arg_list:
-	template_arg									{ Push(Add(Type::List, Pop())); }
-	| template_arg_list ',' template_arg			{ Push(Add(Type::List, Pop(), Pop())); }
+	template_arg									{ Push(Add(Generic::Type::List, Pop())); }
+	| template_arg_list ',' template_arg			{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 
 function_arg_list:
-	function_arg									{ Push(Add(Type::List, Pop())); }
-	| function_arg_list ',' function_arg			{ Push(Add(Type::List, Pop(), Pop())); }
+	function_arg									{ Push(Add(Generic::Type::List, Pop())); }
+	| function_arg_list ',' function_arg			{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 
 
@@ -327,220 +244,213 @@ function_arg_list:
 /**** VALUE EXPRESSION ****/
 
 literal:
-	INT			{ Push(Int($1)); }
-	| FLOAT		{ Push(Float($1)); }
-	| STRING	{ Push(String($1)); }
-	| CHAR		{ Push(Int($1)); }
+	INT			{ $$ = new PrimitiveLiteralExpr((long long)$1); }
+	| FLOAT		{ $$ = new PrimitiveLiteralExpr($1); }
+//	| STRING	{ $$ = new PrimitiveLiteralExpr($1); }
+	| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1); }
 	;
 
 array_literal:
-	'[' ']'							{ Push(Add(Type::ArrayLiteral, Add(Type::List))); }
-	| '[' value_expression_list ']'	{ Push(Add(Type::ArrayLiteral, Pop())); }
+	'[' ']'							{ $$ = new ArrayLiteralExprAST(ExprList::empty()); }
+	| '[' value_expression_list ']'	{ $$ = new ArrayLiteralExprAST($2); }
 	;
 
 primary_value_expression:
-	literal
+	literal							{ Push($1); }
 	| array_literal
 	| function_literal
 	| IDENTIFIER					{ Push(Identifier($1)); }
 	| '(' value_expression ')'
 	;
 
-postfix_value_expression:
+  postfix_value_expression:
 	primary_value_expression
-	| postfix_value_expression '[' ']'							{ Push(Add(Type::OpIndex, Pop(), Add(Type::List))); }
-	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Type::OpIndex, Pop(), Pop())); }
-	| postfix_value_expression function_call					{ Push(Add(Type::Call, Pop(), Pop())); }
-	| type_expression function_call								{ Push(Add(Type::Call, Pop(), Pop())); }
-	| postfix_value_expression INCOP							{ Push(Add(Type::OpPostInc, Pop())); }
-	| postfix_value_expression DECOP							{ Push(Add(Type::OpPostDec, Pop())); }
-	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Type::MemberLookup, Pop(), Pop())); }
+	| postfix_value_expression '[' ']'							{ Push(Add(Generic::Type::OpIndex, Pop(), Add(Generic::Type::List))); }
+	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Generic::Type::OpIndex, Pop(), Pop())); }
+	| postfix_value_expression function_call					{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
+	| type_expression function_call								{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
+	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
+	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
+	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
 	;
 
-unary_operator:	 
- 	'+'		{ Push(Add(Type::OpUnaryPlus)); }
- 	| '-'	{ Push(Add(Type::OpUnaryMinus)); }
- 	| '!'	{ Push(Add(Type::OpUnaryNot)); }
- 	| '~'	{ Push(Add(Type::OpUnaryComp)); }
+unary_operator:
+ 	'+'		{ Push(Add(Generic::Type::OpUnaryPlus)); }
+ 	| '-'	{ Push(Add(Generic::Type::OpUnaryMinus)); }
+ 	| '!'	{ Push(Add(Generic::Type::OpUnaryNot)); }
+ 	| '~'	{ Push(Add(Generic::Type::OpUnaryComp)); }
 	;
 
 unary_value_expression:
 	postfix_value_expression
-	| INCOP postfix_value_expression		{ Push(Add(Type::OpPreInc, Pop())); }
-	| DECOP postfix_value_expression		{ Push(Add(Type::OpPreDec, Pop())); }
-	| unary_operator unary_value_expression	{ Push(SetChildren(Pop(), Pop())); }
+	| INCOP postfix_value_expression		{ Push(Add(Generic::Type::OpPreInc, Pop())); }
+	| DECOP postfix_value_expression		{ Push(Add(Generic::Type::OpPreDec, Pop())); }
+	| unary_operator unary_value_expression	{ Push(SetChildren((Generic*)Pop(), Pop())); }
 	;
 
-mul_operator:	 
- 	'*'		{ Push(Add(Type::OpMul)); }
- 	| '/'	{ Push(Add(Type::OpDiv)); }
- 	| '%'	{ Push(Add(Type::OpMod)); }
+mul_operator:
+ 	'*'		{ Push(Add(Generic::Type::OpMul)); }
+ 	| '/'	{ Push(Add(Generic::Type::OpDiv)); }
+ 	| '%'	{ Push(Add(Generic::Type::OpMod)); }
 	;
 
 mul_value_expression:
 	unary_value_expression
-	| mul_value_expression mul_operator unary_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+	| mul_value_expression mul_operator unary_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 add_operator:
- 	'+'		{ Push(Add(Type::OpAdd)); }
- 	| '-'	{ Push(Add(Type::OpSub)); }
-	| '~'	{ Push(Add(Type::OpConcat)); }
+ 	'+'		{ Push(Add(Generic::Type::OpAdd)); }
+ 	| '-'	{ Push(Add(Generic::Type::OpSub)); }
+	| '~'	{ Push(Add(Generic::Type::OpConcat)); }
 	;
 
 add_value_expression:
 	mul_value_expression
-	| add_value_expression add_operator mul_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+	| add_value_expression add_operator mul_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 shift_operator:
- 	SHL		{ Push(Add(Type::OpASL)); }
- 	| ASR	{ Push(Add(Type::OpASR)); }
- 	| LSR	{ Push(Add(Type::OpLSR)); }
+ 	SHL		{ Push(Add(Generic::Type::OpASL)); }
+ 	| ASR	{ Push(Add(Generic::Type::OpASR)); }
+ 	| LSR	{ Push(Add(Generic::Type::OpLSR)); }
 	;
 
 shift_value_expression:
  	add_value_expression
- 	| shift_value_expression shift_operator add_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+ 	| shift_value_expression shift_operator add_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 cmp_operator:
- 	'<'		{ Push(Add(Type::OpLt)); }
-	| '>'	{ Push(Add(Type::OpGt)); }
-	| LEQ	{ Push(Add(Type::OpLe)); }
-	| GEQ	{ Push(Add(Type::OpGe)); }
+ 	'<'		{ Push(Add(Generic::Type::OpLt)); }
+	| '>'	{ Push(Add(Generic::Type::OpGt)); }
+	| LEQ	{ Push(Add(Generic::Type::OpLe)); }
+	| GEQ	{ Push(Add(Generic::Type::OpGe)); }
 	;
 
 cmp_value_expression:
  	shift_value_expression
- 	| cmp_value_expression cmp_operator shift_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+ 	| cmp_value_expression cmp_operator shift_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 eq_operator:
- 	EQ		{ Push(Add(Type::OpEq)); }
-	| NEQ	{ Push(Add(Type::OpNe)); }
+ 	EQ		{ Push(Add(Generic::Type::OpEq)); }
+	| NEQ	{ Push(Add(Generic::Type::OpNe)); }
 	;
 
 eq_value_expression:
  	cmp_value_expression
- 	| eq_value_expression eq_operator cmp_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+ 	| eq_value_expression eq_operator cmp_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 bitand_value_expression:
  	eq_value_expression
- 	| bitand_value_expression '&' eq_value_expression		{ Push(Add(Type::OpBitAnd, Pop(), Pop())); }
+ 	| bitand_value_expression '&' eq_value_expression		{ Push(Add(Generic::Type::OpBitAnd, Pop(), Pop())); }
 	;
 
 bitxor_value_expression:
  	bitand_value_expression
- 	| bitxor_value_expression '^' bitand_value_expression	{ Push(Add(Type::OpBitXor, Pop(), Pop())); }
+ 	| bitxor_value_expression '^' bitand_value_expression	{ Push(Add(Generic::Type::OpBitXor, Pop(), Pop())); }
 	;
 
 bitor_value_expression:
  	bitxor_value_expression
- 	| bitor_value_expression '|' bitxor_value_expression	{ Push(Add(Type::OpBitOr, Pop(), Pop())); }
+ 	| bitor_value_expression '|' bitxor_value_expression	{ Push(Add(Generic::Type::OpBitOr, Pop(), Pop())); }
 	;
 
 and_value_expression:
  	bitor_value_expression
- 	| and_value_expression AND bitor_value_expression		{ Push(Add(Type::OpAnd, Pop(), Pop())); }
+ 	| and_value_expression AND bitor_value_expression		{ Push(Add(Generic::Type::OpAnd, Pop(), Pop())); }
 	;
 
 xor_value_expression:
  	and_value_expression
- 	| xor_value_expression XOR and_value_expression			{ Push(Add(Type::OpXor, Pop(), Pop())); }
+ 	| xor_value_expression XOR and_value_expression			{ Push(Add(Generic::Type::OpXor, Pop(), Pop())); }
 	;
 
 or_value_expression:
  	xor_value_expression
- 	| or_value_expression OR xor_value_expression			{ Push(Add(Type::OpOr, Pop(), Pop())); }
+ 	| or_value_expression OR xor_value_expression			{ Push(Add(Generic::Type::OpOr, Pop(), Pop())); }
 	;
 
 assign_operator:
-	'='			{ Push(Add(Type::OpAssign)); }
-	| BINDEQ	{ Push(Add(Type::OpBind)); }
-	| MULEQ		{ Push(Add(Type::OpMulEq)); }
-	| DIVEQ		{ Push(Add(Type::OpDivEq)); }
-	| MODEQ		{ Push(Add(Type::OpModEq)); }
-	| ADDEQ		{ Push(Add(Type::OpAddEq)); }
-	| SUBEQ		{ Push(Add(Type::OpSubEq)); }
-	| CONCATEQ	{ Push(Add(Type::OpConcatEq)); }
-	| BITOREQ	{ Push(Add(Type::OpBitAndEq)); }
-	| BITANDEQ	{ Push(Add(Type::OpBitXorEq)); }
-	| BITXOREQ	{ Push(Add(Type::OpBitOrEq)); }
-	| OREQ		{ Push(Add(Type::OpAndEq)); }
-	| ANDEQ		{ Push(Add(Type::OpXorEq)); }
-	| XOREQ		{ Push(Add(Type::OpOrEq)); }
-	| SHLEQ		{ Push(Add(Type::OpASLEq)); }
-	| ASREQ		{ Push(Add(Type::OpASREq)); }
-	| LSREQ		{ Push(Add(Type::OpLSREq)); }
+	'='			{ Push(Add(Generic::Type::OpAssign)); }
+	| BINDEQ	{ Push(Add(Generic::Type::OpBind)); }
+	| MULEQ		{ Push(Add(Generic::Type::OpMulEq)); }
+	| DIVEQ		{ Push(Add(Generic::Type::OpDivEq)); }
+	| MODEQ		{ Push(Add(Generic::Type::OpModEq)); }
+	| ADDEQ		{ Push(Add(Generic::Type::OpAddEq)); }
+	| SUBEQ		{ Push(Add(Generic::Type::OpSubEq)); }
+	| CONCATEQ	{ Push(Add(Generic::Type::OpConcatEq)); }
+	| BITOREQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
+	| BITANDEQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
+	| BITXOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
+	| OREQ		{ Push(Add(Generic::Type::OpAndEq)); }
+	| ANDEQ		{ Push(Add(Generic::Type::OpXorEq)); }
+	| XOREQ		{ Push(Add(Generic::Type::OpOrEq)); }
+	| SHLEQ		{ Push(Add(Generic::Type::OpASLEq)); }
+	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
+	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
 	;
 
 assign_value_expression:
 	or_value_expression
-	| or_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren(m, Pop(), n)); }
+	| or_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 value_expression:
-	assign_value_expression
+	assign_value_expression		{ $$ = (Expr*)Pop(); }
 	;
 
 
 /**** TYPE EXPRESSION ****/
 
+primitive_type:
+	VOID	{ $$ = new PrimitiveType(PrimType::v); }
+	| U1	{ $$ = new PrimitiveType(PrimType::u1); }
+	| I8 	{ $$ = new PrimitiveType(PrimType::i8); }
+	| U8	{ $$ = new PrimitiveType(PrimType::u8); }
+	| I16	{ $$ = new PrimitiveType(PrimType::i16); }
+	| U16	{ $$ = new PrimitiveType(PrimType::u16); }
+	| I32	{ $$ = new PrimitiveType(PrimType::i32); }
+	| U32	{ $$ = new PrimitiveType(PrimType::u32); }
+	| I64	{ $$ = new PrimitiveType(PrimType::i64); }
+	| U64	{ $$ = new PrimitiveType(PrimType::u64); }
+	| F32	{ $$ = new PrimitiveType(PrimType::f32); }
+	| F64	{ $$ = new PrimitiveType(PrimType::f64); }
+	;
+
 primary_type_expression:
-	IDENTIFIER					{ Push(Identifier($1)); }
+	primitive_type				{ Push($1); }
+	| IDENTIFIER				{ Push(Identifier($1)); }
 	| struct_defintion
 	| tuple_definition
 	| '(' type_expression ')'
 	;
 
 postfix_type_expression:
-	primary_type_expression
-	| postfix_type_expression '*'							{ Push(Add(Type::Pointer, Pop())); }
-	| postfix_type_expression '&'							{ Push(Add(Type::Ref, Pop())); }
-	| postfix_type_expression array_index					{ Push(Add(Type::Array, Pop(), Pop())); }
-	| postfix_type_expression function_arg_types			{ Push(Add(Type::FunctionType, Pop(), Pop())); }
-	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Type::MemberLookup, Pop(), Pop())); }
-	| IDENTIFIER '!' type_expression						{ Push(Add(Type::Instantiate, Identifier($1), Add(Type::List, Pop()))); }
-	| IDENTIFIER '!' '(' ')'								{ Push(Add(Type::Instantiate, Identifier($1), Add(Type::List))); }
-	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Type::Instantiate, Identifier($1), Pop())); }
+	primary_type_expression									//{ $$ = $1; }
+	| postfix_type_expression '*'							{ Push(Add(Generic::Type::Pointer, Pop())); }
+	| postfix_type_expression '&'							{ Push(Add(Generic::Type::Ref, Pop())); }
+	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
+	| postfix_type_expression function_arg_types			{ Push(Add(Generic::Type::FunctionType, Pop(), Pop())); }
+	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, Pop()))); }
+	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }
+	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Generic::Type::Instantiate, Identifier($1), Pop())); }
 	;
 
 modified_type:
-	postfix_type_expression
-	| CONST postfix_type_expression	{ Push(Add(Type::Const, Pop())); }
+	postfix_type_expression			//{ $$ = $1; }
+	| CONST postfix_type_expression	{ Push(Add(Generic::Type::Const, Pop())); }
 	;
 
 type_expression:
-	modified_type
+	modified_type					{ $$ = (TypeExpr*)Pop(); }
 	;
 
 %%
 
-
-extern "C" {
-int run(const char *)
-{
-	// open a file handle to a particular file:
-	FILE *myfile;
-	fopen_s(&myfile, "test.me", "r");
-	// make sure it's valid:
-	if (!myfile) {
-		cout << "I can't open a.snazzle.file!" << endl;
-		return -1;
-	}
-	// set lex to read from it instead of defaulting to STDIN:
-	yyin = myfile;
-
-	// parse through the input until there is no more:
-	
-	do {
-		yyparse();
-	} while (!feof(yyin));
-	while(1){} // block
-}
-}
 
 void yyerror(const char *s)
 {
@@ -548,4 +458,19 @@ void yyerror(const char *s)
 	// might as well halt now:
 	while(1){} // block
 	exit(-1);
+}
+
+
+Node* parse(FILE *file)
+{
+	// set lex to read from it instead of defaulting to STDIN:
+	yyin = file;
+
+	// parse through the input until there is no more:
+
+	do {
+		yyparse();
+	} while (!feof(yyin));
+
+	return Pop();
 }

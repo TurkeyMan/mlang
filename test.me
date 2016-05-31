@@ -7,13 +7,19 @@
 // auto-pointer for templates...?
 
 // pointer *
-// rc      ^
+// owner   ^
 // borrow  &
 
+module test;
+//module x.y.z;
 
-module x.y.z;
+var x : int = 10.0;
 
+//def f : int(int) = (x) {
+//	return x;
+//};
 
+/+
 // definitions
 
 def I32 : int;						// typedef/alias
@@ -58,11 +64,13 @@ var x : Template!int;		// instantiation of Template with 'int'
 var x : Template!(int, float); // instantiation of Template with 'int' and 'float'
 var x : Template!int*;		// pointer to an instantiation of Template with 'int'
 var x : Template!(int*);	// instantiation of Template with 'int*'
-var x : Template!const(int)*;// pointer to an instantiation of Template with 'const(int)'
-var x : const Template!int*;// pointer to const instantiation of Template with 'int'
+var x : Template!(const int)*;// pointer to an instantiation of Template with 'const(int)'
+var x : const Template!int*;// const pointer to const instantiation of Template with 'int'
 var x : int[]*;				// pointer to an dynamic array of ints
 var x : int*[];				// dynamic array of pointers to ints
 var x : int[3][];			// dynamic array of arrays of 3 ints
+var x : int[3, 4];			// matrix of 3 by 4 ints
+var x : int**;			    // pointer to pointer to int
 
 
 // statements
@@ -163,3 +171,4 @@ alias Array(T) = T[];
 def x(T, U) : int(float, T, U)
 
 */
++/
