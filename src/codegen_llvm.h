@@ -44,8 +44,8 @@ private:
 
 	std::unique_ptr<orc::KaleidoscopeJIT> TheJIT;
 	std::unique_ptr<llvm::Module> TheModule;
-	std::map<std::string, AllocaInst *> NamedValues;
-	std::map<std::string, std::unique_ptr<PrototypeDecl>> FunctionProtos;
+//	std::map<std::string, AllocaInst *> NamedValues;
+//	std::map<std::string, std::unique_ptr<PrototypeDecl>> FunctionProtos;
 
 	DebugInfo KSDbgInfo;
 	IRBuilder<> Builder;
@@ -53,7 +53,7 @@ private:
 
 	Scope *scope = nullptr;
 
-	Function *getFunction(std::string Name);
+//	Function *getFunction(std::string Name);
 
 	DISubroutineType *createFunctionType(unsigned NumArgs, DIFile *Unit);
 
@@ -76,7 +76,7 @@ private:
 public:
 	LLVMGenerator(const std::string& fileName, const std::string& moduleName);
 
-	void codegen();
+	std::string codegen();
 
 	void visit(Node &n) override;
 	void visit(Statement &n) override;
@@ -85,11 +85,15 @@ public:
 	void visit(::Module &n) override;
 	void visit(TypeExpr &n) override;
 	void visit(PrimitiveType &n) override;
+	void visit(TypeIdentifier &v) override;
+	void visit(TupleType &v) override;
 	void visit(Struct &n) override;
+	void visit(::FunctionType &v) override;
 	void visit(Expr &n) override;
 	void visit(Generic &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
-	void visit(ArrayLiteralExprAST &n) override;
+	void visit(ArrayLiteralExpr &n) override;
+	void visit(FunctionLiteralExpr &n) override;
 	void visit(VariableExprAST &n) override;
 	void visit(UnaryExprAST &n) override;
 	void visit(BinaryExprAST &n) override;
@@ -98,6 +102,7 @@ public:
 	void visit(IfExprAST &n) override;
 	void visit(ForExprAST &n) override;
 	void visit(TypeDecl &n) override;
+	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
 	void visit(PrototypeDecl &n) override;
 	void visit(FunctionDecl &n) override;

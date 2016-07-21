@@ -5,13 +5,19 @@ Semantic::Semantic()
 {
 }
 
-void Semantic::run(const char *pFilename, Node *pParseTree)
+void Semantic::run(const char *pFilename, StatementList moduleStatements)
 {
 	// TODO: make default module name from filename without extension
-	module = new Module(pFilename, pFilename);
+	const char *pDot = strchr(pFilename, '.');
+	std::string s(pFilename);
+	if (pDot)
+		s.resize(pDot - pFilename);
+
+	module = new Module(pFilename, s);
 	scope = module;
 
-	pParseTree->accept(*this);
+	for (auto s : moduleStatements)
+		s->accept(*this);
 }
 
 void Semantic::visit(Node &n)
@@ -42,7 +48,19 @@ void Semantic::visit(PrimitiveType &n)
 {
 }
 
+void Semantic::visit(TypeIdentifier &n)
+{
+}
+
+void Semantic::visit(TupleType &n)
+{
+}
+
 void Semantic::visit(Struct &n)
+{
+}
+
+void Semantic::visit(FunctionType &n)
 {
 }
 
@@ -71,7 +89,11 @@ void Semantic::visit(PrimitiveLiteralExpr &n)
 {
 }
 
-void Semantic::visit(ArrayLiteralExprAST &n)
+void Semantic::visit(ArrayLiteralExpr &n)
+{
+}
+
+void Semantic::visit(FunctionLiteralExpr &n)
 {
 }
 
@@ -114,34 +136,52 @@ void Semantic::visit(TypeDecl &n)
 	scope->addDecl(n.name(), &n);
 }
 
-void Semantic::visit(VarDecl &n)
+void Semantic::visit(ValDecl &n)
 {
-	Declaration *decl = scope->getDecl(n.name(), true);
+	if (!n._type && !n._init)
+		assert(false);// , "def statement needs either type or value!");
+
+	Declaration *decl = scope->getDecl(n._name, true);
 	if (decl)
 	{
 		// already declared!
 		return;
 	}
-	TypeExpr *t = n.type();
-	Expr *i = n.init();
-	if (!t && !i)
+
+	if (!n._type)
+		n._type = n._init->type();
+	else if (!n.init())
+		n._init = n._type->init();
+	else
 	{
-		// error, can not deduce type with no initialisation!
+		// TODO: assert init.type -> type
+	}
+
+	scope->addDecl(n._name, &n);
+}
+
+void Semantic::visit(VarDecl &n)
+{
+	if (!n._type && !n._init)
+		assert(false);// , "var statement needs either type or init value!");
+
+	Declaration *decl = scope->getDecl(n._name, true);
+	if (decl)
+	{
+		// already declared!
 		return;
 	}
 
-	// TODO: ASSIGN missing info...
-	if(!t)
+	if (!n._type)
+		n._type = n._init->type();
+	else if (!n.init())
+		n._init = n._type->init();
+	else
 	{
-		// type if unknown, deduce type...
-		i->type();
+		// TODO: assert init.type -> type
 	}
-	if (!i)
-	{
-		// init value not given, use types default
-		t->init();
-	}
-	scope->addDecl(n.name(), &n);
+
+	scope->addDecl(n._name, &n);
 }
 
 void Semantic::visit(PrototypeDecl &n)
@@ -158,4 +198,3 @@ void Semantic::visit(PrototypeDecl &n)
 void Semantic::visit(FunctionDecl &n)
 {
 }
-

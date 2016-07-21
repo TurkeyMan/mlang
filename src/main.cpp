@@ -6,7 +6,7 @@
 #include <Windows.h>
 
 
-void Codegen(Module *pAST);
+std::string Codegen(Module *pAST);
 
 
 SourceLocation CurLoc;
@@ -27,47 +27,75 @@ std::unique_ptr<PrototypeDecl> ErrorP(const char *Str)
 }
 
 
-Node* parse(FILE *file);
+StatementList parse(FILE *file);
 
-int main(int argc, char *argv[])
-{
-	// open source file
-	const char *pFilename = argv[1];
-	FILE *file;
-	fopen_s(&file, pFilename, "r");
-	if (!file)
+extern "C" {
+	int main(int argc, const char *argv[])
 	{
-		printf("Can't open file: %s\n", pFilename);
-		return -1;
-	}
-
-	// parse the source
-	Node *pParseTree = parse(file);
-
-	// dump parse tree
-	class OS : public llvm::raw_ostream
-	{
-	public:
-		uint64_t offset = 0;
-		void write_impl(const char *Ptr, size_t Size) override
+		// open source file
+		const char *pFilename = argv[1];
+		FILE *file;
+		fopen_s(&file, pFilename, "r");
+		if (!file)
 		{
-			OutputDebugStringA(Ptr);
-			printf("%s", Ptr);
-			offset += Size;
+			printf("Can't open file: %s\n", pFilename);
+			return -1;
 		}
-		uint64_t current_pos() const override { return offset; }
-	};
-	OS os;
-	pParseTree->dump(os, 0);
-	os << "\n" << '\0';
-	os.flush();
 
-	// semantic
-	Semantic semantic;
-	semantic.run(pFilename, pParseTree);
+		// parse the source
+		StatementList module = parse(file);
 
-	// codegen
-	Codegen(semantic.getModule());
+		// done with the file
+		fclose(file);
 
-	return 0;
+		// dump parse tree
+		FILE *ast = nullptr;
+		if (argc >= 4)
+		{
+			fopen_s(&ast, argv[3], "w");
+			if (!file)
+			{
+				printf("Can't open ast file: %s\n", argv[3]);
+				return -1;
+			}
+		}
+		class OS : public llvm::raw_ostream
+		{
+			FILE *ast;
+			uint64_t offset = 0;
+		public:
+			OS(FILE *ast) : ast(ast) {}
+			void write_impl(const char *Ptr, size_t Size) override
+			{
+				if (ast)
+					fwrite(Ptr, 1, Size, ast);
+				offset += Size;
+			}
+			uint64_t current_pos() const override { return offset; }
+		};
+		OS os(ast);
+		for (auto s : module)
+			s->dump(os, 0);
+		os.flush();
+		fclose(ast);
+
+		// semantic
+		Semantic semantic;
+		semantic.run(pFilename, module);
+
+		// codegen
+		std::string code = Codegen(semantic.getModule());
+
+		pFilename = argv[2];
+		fopen_s(&file, pFilename, "w");
+		if (!file)
+		{
+			printf("Can't open file for output: %s\n", pFilename);
+			return -1;
+		}
+		fwrite(code.c_str(), 1, code.size(), file);
+		fclose(file);
+
+		return 0;
+	}
 }

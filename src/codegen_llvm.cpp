@@ -28,26 +28,40 @@ LLVMGenerator::LLVMGenerator(const std::string& fileName, const std::string& mod
 }
 
 
-void Codegen(::Module *pAST)
+std::string Codegen(::Module *pAST)
 {
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
 	InitializeNativeTargetAsmParser();
 
-	LLVMGenerator generator(pAST->filename(), pAST->name());
+	LLVMGenerator *generator = new LLVMGenerator(pAST->filename(), pAST->name());
 
-	pAST->accept(generator);
+	pAST->accept(*generator);
 
-	generator.codegen();
+	return generator->codegen();
 }
 
-void LLVMGenerator::codegen()
+std::string LLVMGenerator::codegen()
 {
 	// Finalize the debug info.
 	DBuilder->finalize();
 
 	// Print out all of the generated code.
-	TheModule->dump();
+	class MemStream : public llvm::raw_ostream
+	{
+	public:
+		std::string text;
+		void write_impl(const char *Ptr, size_t Size) override
+		{
+			text.append(Ptr, Size);
+		}
+		uint64_t current_pos() const override { return text.size(); }
+		std::string take() { return std::move(text); }
+	};
+
+	MemStream output;
+	TheModule->print(output, nullptr);
+	return output.take();
 }
 
 
@@ -111,8 +125,32 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	}
 }
 
+void LLVMGenerator::visit(TypeIdentifier &n)
+{
+}
+
+void LLVMGenerator::visit(TupleType &n)
+{
+}
+
 void LLVMGenerator::visit(Struct &n)
 {
+}
+
+void LLVMGenerator::visit(::FunctionType &n)
+{
+	n.returnType()->accept(*this);
+	llvm::Type *r = t_type;
+
+	TypeExprList argList = n.argTypes();
+	std::vector<llvm::Type *> args;
+	for (auto a : argList)
+	{
+		a->accept(*this);
+		args.push_back(t_type);
+	}
+
+	t_type = llvm::FunctionType::get(r, args, false);
 }
 
 void LLVMGenerator::visit(Expr &n)
@@ -174,7 +212,11 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	}
 }
 
-void LLVMGenerator::visit(ArrayLiteralExprAST &n)
+void LLVMGenerator::visit(ArrayLiteralExpr &n)
+{
+}
+
+void LLVMGenerator::visit(FunctionLiteralExpr &n)
 {
 }
 
@@ -461,29 +503,115 @@ void LLVMGenerator::visit(TypeDecl &n)
 {
 }
 
+void LLVMGenerator::visit(ValDecl &n)
+{
+	::FunctionType *funcType = dynamic_cast<::FunctionType*>(n.type());
+	if (funcType)
+	{
+		// function declaration
+		funcType->accept(*this);
+		llvm::FunctionType *sig = (llvm::FunctionType*)t_type;
+
+		Function *proto = Function::Create(sig, Function::ExternalLinkage, n.name(), TheModule.get());
+
+		FunctionLiteralExpr *func = (FunctionLiteralExpr*)n.init();
+		if (func)
+		{
+			// Set names for all arguments.
+			StatementList args = func->args();
+			size_t i = 0;
+			for (auto &a : proto->args())
+			{
+				VarDecl *arg = (VarDecl*)args[i++];
+				a.setName(arg->name());
+			}
+
+			// Create a new basic block to start insertion into.
+			BasicBlock *block = BasicBlock::Create(ctx, "entry", proto);
+			Builder.SetInsertPoint(block);
+
+//			// Record the function arguments in the NamedValues map.
+//			NamedValues.clear();
+//			unsigned ArgIdx = 0;
+			for (auto &a : proto->args())
+			{
+				// Create an alloca for this variable.
+				IRBuilder<> builder(&proto->getEntryBlock(), proto->getEntryBlock().begin());
+				AllocaInst *Alloca = builder.CreateAlloca(a.getType(), nullptr, a.getName());
+
+//
+//				// Create a debug descriptor for the variable.
+//				DILocalVariable *D = DBuilder->createParameterVariable(
+//					SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(),
+//					true);
+//
+//				DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
+//					DebugLoc::get(LineNo, 0, SP),
+//					Builder.GetInsertBlock());
+//
+				// Store the initial value into the alloca.
+				Builder.CreateStore(&a, Alloca);
+//
+//				// Add arguments to variable symbol table.
+//				NamedValues[Arg.getName()] = Alloca;
+			}
+//
+//			KSDbgInfo.emitLocation(Body.get());
+//
+//			if (Value *RetVal = Body->codegen())
+//			{
+//				// Finish off the function.
+//				Builder.CreateRet(RetVal);
+//
+//				// Pop off the lexical block for the function.
+//				KSDbgInfo.LexicalBlocks.pop_back();
+//
+//				// Validate the generated code, checking for consistency.
+				verifyFunction(*proto);
+//
+//				return TheFunction;
+//			}
+//
+//			// Error reading body, remove function.
+//			TheFunction->eraseFromParent();
+//
+//			if (P.isBinaryOp())
+//				BinopPrecedence.erase(Proto->getOperatorName());
+//
+//			// Pop off the lexical block for the function since we added it
+//			// unconditionally.
+//			KSDbgInfo.LexicalBlocks.pop_back();
+		}
+	}
+	else
+	{
+		// constant value
+		assert(false, "TODO");
+	}
+}
+
 void LLVMGenerator::visit(VarDecl &n)
 {
-	llvm::Type *pType = nullptr;
-	if (n.type())
+	::FunctionType *pFunc = dynamic_cast<::FunctionType*>(n.type());
+	if (pFunc)
 	{
+		// function pointer
+		assert(false, "TODO");
+	}
+	else
+	{
+		llvm::Type *pType = nullptr;
 		n.type()->accept(*this);
 		pType = t_type;
-	}
-	else if (n.init())
-	{
-		n.init()->type()->accept(*this);
-		pType = t_type;
-	}
-	else
-		assert(0);
 
-	if (dynamic_cast<::Module*>(scope))
-	{
-		Constant *pGlobal = TheModule->getOrInsertGlobal(n.name(), pType);
-	}
-	else
-	{
-		// other scopes?
+		if (dynamic_cast<::Module*>(scope))
+		{
+			Constant *pGlobal = TheModule->getOrInsertGlobal(n.name(), pType);
+		}
+		else
+		{
+			// other scopes?
+		}
 	}
 }
 
@@ -611,26 +739,25 @@ Value *ErrorV(const char *Str)
 	return nullptr;
 }
 
-Function *LLVMGenerator::getFunction(std::string Name)
-{
-	// First, see if the function has already been added to the current module.
-	if (auto *F = TheModule->getFunction(Name))
-		return F;
-
-	// If not, check whether we can codegen the declaration from some existing
-	// prototype.
-	auto FI = FunctionProtos.find(Name);
-	if (FI != FunctionProtos.end())
-		return (Function*)visitValue(FI->second.get());
-
-	// If no existing prototype exists, return null.
-	return nullptr;
-}
+//Function *LLVMGenerator::getFunction(std::string Name)
+//{
+//	// First, see if the function has already been added to the current module.
+//	if (auto *F = TheModule->getFunction(Name))
+//		return F;
+//
+//	// If not, check whether we can codegen the declaration from some existing
+//	// prototype.
+//	auto FI = FunctionProtos.find(Name);
+//	if (FI != FunctionProtos.end())
+//		return (Function*)visitValue(FI->second.get());
+//
+//	// If no existing prototype exists, return null.
+//	return nullptr;
+//}
 
 /// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
 /// the function.  This is used for mutable variables etc.
-static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
-	const std::string &VarName)
+static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName)
 {
 	IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
 		TheFunction->getEntryBlock().begin());

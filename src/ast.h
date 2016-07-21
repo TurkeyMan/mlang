@@ -47,6 +47,9 @@ struct List
 	T* begin() const { return ptr; }
 	T* end() const { return ptr + length; }
 
+	T& operator[](size_t i) { return ptr[i]; }
+	const T& operator[](size_t i) const { return ptr[i]; }
+
 private:
 	void expand()
 	{
@@ -68,7 +71,7 @@ private:
 
 
 inline raw_ostream &indent(raw_ostream &O, int size) {
-	return O << std::string(size, ' ');
+	return O << std::string(size*2, ' ');
 }
 
 
@@ -120,6 +123,23 @@ public:
 	void accept(ASTVisitor &v) override;
 };
 
+class ModuleStatement : public Statement
+{
+	std::string _name;
+
+public:
+	ModuleStatement(std::string name)
+		: Statement(), _name(move(name))
+	{
+	}
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override {
+		return Statement::dump(out << "module: #" << _name << '\n', ind);
+	}
+};
+
 class Scope : public Node
 {
 	std::map<std::string, Declaration*> _symbols;
@@ -157,71 +177,6 @@ public:
 
 	void accept(ASTVisitor &v) override;
 };
-
-
-class TypeExpr : public Node
-{
-public:
-	TypeExpr(SourceLocation Loc = CurLoc) : Node(Loc) {}
-	virtual ~TypeExpr() {}
-
-	virtual Expr* init() = 0;
-
-	void accept(ASTVisitor &v) override;
-
-	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out << ':' << getLine() << ':' << getCol() << '\n'; }
-};
-using TypeExprList = List<TypeExpr*>;
-
-class PrimitiveLiteralExpr;
-class PrimitiveType : public TypeExpr
-{
-	PrimType _type;
-	Expr *_init = nullptr;
-
-public:
-	PrimitiveType(PrimType type) : TypeExpr(), _type(type) {}
-	~PrimitiveType() {}
-
-	PrimType type() const { return _type; }
-	Expr* init() override;
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override;
-};
-
-class Struct : public TypeExpr
-{
-	std::string name;
-	Scope *body;
-	Scope *parent;
-
-public:
-	Struct(std::string name, StatementList members)
-		: TypeExpr()
-	{}
-
-	Expr* init() override;
-
-	void accept(ASTVisitor &v) override;
-};
-
-class Expr : public Node
-{
-public:
-	Expr(SourceLocation Loc = CurLoc) : Node(Loc) {}
-	virtual ~Expr() {}
-
-	virtual TypeExpr* type() = 0;
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override { return out << ':' << getLine() << ':' << getCol() << '\n'; }
-};
-
-using ExprList = List<Expr*>;
-
 
 
 class Generic : public Node
@@ -320,11 +275,22 @@ public:
 	Generic(Type type, Node *l = nullptr, Node *r = nullptr)
 		: Node(), type(type), l(l), r(r) {}
 
+	template <typename T>
+	List<T> asList() const
+	{
+		assert(type == Type::List);
+
+		List<T> l = List<T>::empty();
+		asListImpl(l, this);
+		return l;
+	}
+
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
+	raw_ostream &dumpList(raw_ostream &out, int ind);
 
-//private:
+	//private:
 	Type type;
 	union
 	{
@@ -335,9 +301,206 @@ public:
 	};
 	Node *l;
 	Node *r;
+
+private:
+	template <typename T>
+	static void asListImpl(List<T> &l, const Generic *pList)
+	{
+		if (pList->l)
+		{
+			Generic *gl = dynamic_cast<Generic*>(pList->l);
+			if (gl && gl->type == Generic::Type::List)
+				asListImpl(l, gl);
+			else
+				l.append(dynamic_cast<T>(pList->l));
+		}
+		if (pList->r)
+		{
+			Generic *gr = dynamic_cast<Generic*>(pList->r);
+			if (gr && gr->type == Generic::Type::List)
+				asListImpl(l, gr);
+			else
+				l.append(dynamic_cast<T>(pList->r));
+		}
+	}
 };
 
-/// NumberExprAST - Expression class for numeric literals like "1.0".
+
+//****************
+//** Type nodes **
+//****************
+
+class TypeExpr : public Node
+{
+public:
+	TypeExpr(SourceLocation Loc = CurLoc) : Node(Loc) {}
+	virtual ~TypeExpr() {}
+
+	virtual std::string stringof() const = 0;
+
+	virtual Expr* init() = 0;
+
+	void accept(ASTVisitor &v) override;
+
+//	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out << ':' << getLine() << ':' << getCol() << '\n'; }
+};
+using TypeExprList = List<TypeExpr*>;
+
+class PrimitiveType : public TypeExpr
+{
+	PrimType _type;
+	Expr *_init = nullptr;
+
+public:
+	PrimitiveType(PrimType type) : TypeExpr(), _type(type) {}
+	~PrimitiveType() {}
+
+	PrimType type() const { return _type; }
+	Expr* init() override;
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override;
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
+class TypeIdentifier : public TypeExpr
+{
+	std::string name;
+
+public:
+	TypeIdentifier(std::string name)
+		: TypeExpr(), name(name)
+	{}
+
+	TypeExpr* type() { assert(false); return nullptr; }
+	Expr* init() override { return type()->init(); }
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override { return std::string("@") + name; }
+	raw_ostream &dump(raw_ostream &out, int ind) override { return out << stringof() << '\n'; }
+};
+
+class TupleType : public TypeExpr
+{
+	TypeExprList _types = TypeExprList::empty();
+
+public:
+	TupleType(TypeExprList types = TypeExprList::empty())
+		: TypeExpr(), _types(types)
+	{}
+
+	TypeExprList types() { return _types; }
+	Expr* init() override { assert(false); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override
+	{
+		std::string r = "[ ";
+		for (size_t i = 0; i < _types.length; ++i)
+			r += (i > 0 ? std::string(",") : std::string()) + _types[i]->stringof();
+		r += " ]";
+		return r;
+	}
+	raw_ostream &dump(raw_ostream &out, int ind) override
+	{
+		out << "tuple: [\n";
+		for (auto t : _types)
+			t->dump(out, ind + 1);
+		return indent(out, ind) << "]\n";
+	}
+};
+
+class Struct : public TypeExpr
+{
+	StatementList members;
+	Scope *body;
+	Scope *parent;
+
+public:
+	Struct(StatementList members = StatementList::empty())
+		: TypeExpr(), members(members)
+	{}
+
+	Expr* init() override { assert(false); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override { return "struct{ ... }"; }
+	raw_ostream &dump(raw_ostream &out, int ind) override
+	{
+		out << "struct: {\n";
+		for (auto m : members)
+			m->dump(out, ind + 1);
+		return indent(out, ind) << "}\n";
+	}
+};
+
+class FunctionType : public TypeExpr
+{
+	TypeExpr *_returnType = nullptr;
+	TypeExprList _args = TypeExprList::empty();
+
+public:
+	FunctionType(TypeExpr *returnType, TypeExprList args)
+		: TypeExpr(), _returnType(returnType), _args(args) {}
+	~FunctionType() {}
+
+	Expr* init() override { assert(false); return nullptr; }
+
+	TypeExpr* returnType() const { return _returnType; }
+	TypeExprList argTypes() const { return _args; }
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override
+	{
+		std::string r = _returnType ? _returnType->stringof() : std::string("???");
+		r += "(";
+		for (size_t i = 0; i < _args.length; ++i)
+			r += (i > 0 ? std::string(",") : std::string()) + _args[i]->stringof();
+		r += ")";
+		return r;
+	}
+	raw_ostream &dump(raw_ostream &out, int ind) override
+	{
+		out << "function\n";
+
+		ind++;
+		indent(out, ind) << "return: ";
+		if (_returnType)
+			_returnType->dump(out, ind + 1);
+		else
+			out << "???\n";
+		indent(out, ind) << "args: (\n";
+		for (auto a : _args)
+			a->dump(out, ind + 1);
+		return indent(out, ind) << ")\n";
+	}
+};
+
+
+
+//**********************
+//** Expression nodes **
+//**********************
+
+class Expr : public Node
+{
+public:
+	Expr(SourceLocation Loc = CurLoc) : Node(Loc) {}
+	virtual ~Expr() {}
+
+	virtual TypeExpr* type() = 0;
+
+	void accept(ASTVisitor &v) override;
+
+//	raw_ostream &dump(raw_ostream &out, int ind) override { return out << ':' << getLine() << ':' << getCol() << '\n'; }
+};
+using ExprList = List<Expr*>;
+
 class PrimitiveLiteralExpr : public Expr
 {
 	PrimType _type;
@@ -377,32 +540,32 @@ public:
 		{
 			case PrimType::f32:
 			case PrimType::f64:
-				return Expr::dump(out << f, ind);
+				return Expr::dump(out << f, ind) << '\n';
 			case PrimType::u8:
 			case PrimType::u16:
 			case PrimType::u32:
 			case PrimType::u64:
-				return Expr::dump(out << u, ind);
+				return Expr::dump(out << u, ind) << '\n';
 			case PrimType::i8:
 			case PrimType::i16:
 			case PrimType::i32:
 			case PrimType::i64:
-				return Expr::dump(out << i, ind);
+				return Expr::dump(out << i, ind) << '\n';
 			case PrimType::c8:
 			case PrimType::c16:
 			case PrimType::c32:
-				return Expr::dump(out << c, ind);
+				return Expr::dump(out << c, ind) << '\n';
 			default:
 				assert(0); return out;
 		}
 	}
 };
 
-class ArrayLiteralExprAST: public Expr {
+class ArrayLiteralExpr: public Expr {
 	ExprList items;
 
 public:
-	ArrayLiteralExprAST(ExprList items)
+	ArrayLiteralExpr(ExprList items)
 		: Expr(), items(move(items)) {}
 
 	TypeExpr* type() override { return nullptr; }
@@ -414,6 +577,48 @@ public:
 		return out;
 	}
 };
+
+class FunctionLiteralExpr : public Expr
+{
+	StatementList bodyStatements;
+	StatementList _args;
+	TypeExpr *returnType;
+
+	Scope *body;
+	Scope *parent;
+
+public:
+	FunctionLiteralExpr(StatementList bodyStatements, StatementList args, TypeExpr *returnType)
+		: Expr(), bodyStatements(bodyStatements), _args(args), returnType(returnType)
+	{}
+
+	TypeExpr* type() override { assert(false); return nullptr; }
+
+	StatementList args() const { return _args; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind)
+	{
+		out << "fn\n";
+
+		ind++;
+		indent(out, ind) << "return: ";
+		if (returnType)
+			returnType->dump(out, ind + 1);
+		else
+			out << "???\n";
+		indent(out, ind) << "args: (\n";
+		for (auto a : _args)
+			a->dump(indent(out, ind + 1), ind + 1);
+		indent(out, ind) << ")\n";
+		indent(out, ind) << "body: {\n";
+		for (auto s : bodyStatements)
+			s->dump(indent(out, ind + 1), ind + 1);
+		return indent(out, ind) << "}\n";
+	}
+};
+
 
 /// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public Expr {
@@ -579,21 +784,24 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override
 	{
-		Declaration::dump(out << "type: " << _name, ind);
+		Declaration::dump(out << "type: " << _name, ind) << "\n";
+		++ind;
 		if (_type)
-			_type->dump(indent(out, ind + 1) << "As: ", ind + 1);
+			_type->dump(indent(out, ind) << "as: ", ind);
 		return out;
 	}
 };
 
-class VarDecl : public Declaration
+class ValDecl : public Declaration
 {
+	friend class Semantic;
+protected:
 	std::string _name;
 	TypeExpr *_type;
 	Expr *_init;
 
 public:
-	VarDecl(std::string name, TypeExpr *type, Expr *init)
+	ValDecl(std::string name, TypeExpr *type, Expr *init)
 		: Declaration(), _name(move(name)), _type(type), _init(init)
 	{}
 
@@ -605,11 +813,32 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override
 	{
-		Declaration::dump(out << "var: #" << _name << "\n", ind);
+		Declaration::dump(out << "def: #" << _name, ind) << "\n";
+		++ind;
 		if (_type)
-			_type->dump(indent(out, ind + 1) << "Type: ", ind + 1);
+			_type->dump(indent(out, ind) << "type: ", ind);
 		if (_init)
-			_init->dump(indent(out, ind + 1) << "Init: ", ind + 1);
+			_init->dump(indent(out, ind) << "val: ", ind);
+		return out;
+	}
+};
+class VarDecl : public ValDecl
+{
+public:
+	VarDecl(std::string name, TypeExpr *type, Expr *init)
+		: ValDecl(name, type, init)
+	{}
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override
+	{
+		Declaration::dump(out << "var: #" << _name, ind) << "\n";
+		++ind;
+		if (_type)
+			_type->dump(indent(out, ind) << "type: ", ind);
+		if (_init)
+			_init->dump(indent(out, ind) << "init: ", ind);
 		return out;
 	}
 };

@@ -68,4 +68,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="test.ast" />
+  </ItemGroup>
 </Project>

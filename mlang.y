@@ -14,6 +14,8 @@ void yyerror(const char *s);
 
 #include "src/ast.h"
 
+static StatementList parseTree = StatementList::empty();
+
 %}
 
 // Bison fundamentally works by asking flex to get the next token, which it
@@ -22,7 +24,7 @@ void yyerror(const char *s);
 // holding each of the types of tokens that Flex could return, and have Bison
 // use that union instead of "int" for the definition of "yystype":
 %union {
-	long long ival;
+	int64_t ival;
 	double fval;
 	const char *sval;
 	Expr *expr;
@@ -49,35 +51,38 @@ void yyerror(const char *s);
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
-%type <expr> literal array_literal value_expression
+%type <expr> literal array_literal function_literal value_expression
 %type <exprList> value_expression_list
 
-%type <type> primitive_type type_expression
-%type <typeExprList> type_expression_list
+%type <type> primitive_type primary_type_expression type_expression struct_definition tuple_definition
+%type <typeExprList> type_expression_list function_arg_types
 
-%type <statement> var_statement
-//%type <statementList> module_statements struct_statements code_statements
+%type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement
+%type <statementList> module_statements struct_statements code_statements body
+
+%type <statement> function_arg
+%type <statementList> function_arguments function_arg_list
 
 %%
 mlang:
-	module_statements						{ cout << "Parsed successfully!" << endl; }
+	module_statements						{ parseTree = $1; cout << "Parsed successfully!" << endl; }
 	;
 
 module_statements:
-	module_statement						{ Push(Add(Generic::Type::List, Pop())); }
-	| module_statements module_statement	{ Push(Add(Generic::Type::List, Pop(), Pop())); }
+	module_statement						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
+	| module_statements module_statement	{ $$ = $2 ? $1.append($2) : $1; }
 	;
 struct_statements:
-	struct_statement						{ Push(Add(Generic::Type::List, Pop())); }
-	| struct_statements struct_statement	{ Push(Add(Generic::Type::List, Pop(), Pop())); }
+	struct_statement						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
+	| struct_statements struct_statement	{ $$ = $2 ? $1.append($2) : $1; }
 	;
 code_statements:
-	code_statement							{ Push(Add(Generic::Type::List, Pop())); }
-	| code_statements code_statement		{ Push(Add(Generic::Type::List, Pop(), Pop())); }
+	code_statement							{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
+	| code_statements code_statement		{ $$ = $2 ? $1.append($2) : $1; }
 	;
 
 module:
-	MODULE IDENTIFIER ';'					{ Push(Add(Generic::Type::Module, Identifier($2))); Print(Top()); }
+	MODULE IDENTIFIER ';'					{ $$ = new ModuleStatement($2); }
 	;
 /*
 	MODULE scoped_identifier ';'			{ Push(Add(Generic::Type::Module, Pop())); Print(Top()); }
@@ -85,44 +90,49 @@ module:
 */
 
 module_statement:
-	module
-	| def_statement
-	| var_statement				{ Push($1); }
-	| static_control_statement
-	| empty_statement
+	module						{ $$ = $1; }
+	| def_statement				{ $$ = $1; }
+	| var_statement				{ $$ = $1; }
+//	| static_control_statement
+	| empty_statement			{ $$ = $1; }
 	;
 
 struct_statement:
-	def_statement
-	| var_statement				{ Push($1); }
-	| static_control_statement
-	| empty_statement
+	def_statement				{ $$ = $1; }
+	| var_statement				{ $$ = $1; }
+//	| static_control_statement
+	| empty_statement			{ $$ = $1; }
 	;
 
 code_statement:
-	def_statement
-	| var_statement				{ Push($1); }
-	| static_control_statement
-	| control_statement
-	| expression_statement
-	| empty_statement
+	def_statement				{ $$ = $1; }
+	| var_statement				{ $$ = $1; }
+//	| static_control_statement
+	| control_statement			{ $$ = (Statement*)Pop(); }
+//	| expression_statement
+	| empty_statement			{ $$ = $1; }
 	;
 
 empty_statement:
-	';'									{ cout << "empty statement" << endl; }
+	';'							{ $$ = nullptr; }
 	;
 
+/*
 def_identifier:
 	IDENTIFIER							{ Push(Identifier($1)); }
 	| IDENTIFIER template_arguments		{ Push(Add(Generic::Type::TempalteId, Identifier($1), Pop())); }
 	;
+*/
 def_statement:
-	DEF def_identifier ':' type_expression ';'											{ Push(Add(Generic::Type::DefType, Pop(), Pop())); Print(Top()); }
-	| DEF def_identifier ':' type_expression '=' value_expression ';'					{ Push(Add(Generic::Type::DefConst, Add(Generic::Type::TypedId, Pop(), Pop()), Pop())); Print(Top()); }
-	| DEF def_identifier '=' value_expression ';'										{ Push(Add(Generic::Type::DefConst, Pop(), Pop())); Print(Top()); }
-	| DEF def_identifier ':' type_expression function_arguments '{' '}'					{ /* TODO */ Print(Top()); }
-	| DEF def_identifier ':' type_expression function_arguments '{' code_statements '}'	{ /* TODO */ Print(Top()); }
+	DEF IDENTIFIER ':' type_expression ';'											{ $$ = new TypeDecl($2, $4); }
+	| DEF IDENTIFIER ':' type_expression '=' value_expression ';'					{ $$ = new ValDecl($2, $4, $6); }
+	| DEF IDENTIFIER '=' value_expression ';'										{ $$ = new ValDecl($2, nullptr, $4); }
 	;
+/*
+	| DEF def_identifier ':' type_expression function_arguments '{' '}'					{ ... Print(Top()); }
+	| DEF def_identifier ':' type_expression function_arguments '{' code_statements '}'	{ ... Print(Top()); }
+	;
+*/
 
 var_statement:
 	VAR IDENTIFIER ';'												{ $$ = new VarDecl($2, nullptr, nullptr); }
@@ -132,7 +142,7 @@ var_statement:
 	;
 
 expression_statement:
-	value_expression ';'			{ Print(Top()); }
+	value_expression ';'			{ Print($1); }
 	;
 
 template_arguments:
@@ -141,13 +151,13 @@ template_arguments:
 	;
 
 function_arguments:
-	'(' ')'							{ Push(Add(Generic::Type::List)); }
-	| '(' function_arg_list ')'
+	'(' ')'							{ $$ = StatementList::empty(); }
+	| '(' function_arg_list ')'		{ $$ = $2; }
 	;
 
 function_arg_types:
-	'(' ')'							{ Push(Add(Generic::Type::List)); }
-	| '(' type_expression_list ')'
+	'(' ')'							{ $$ = TypeExprList::empty(); }
+	| '(' type_expression_list ')'	{ $$ = $2; }
 	;
 
 function_call:
@@ -161,27 +171,24 @@ array_index:
 	;
 
 control_statement:
-	RETURN value_expression ';'		{ Push(Add(Generic::Type::Return, Pop())); }
+	RETURN value_expression ';'		{ Push(Add(Generic::Type::Return, $2)); }
 	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
-	| IF '(' value_expression ')' body ELSE body
-	| IF '(' value_expression ')' body
-	| WHILE '(' value_expression ')' body
+//	| IF '(' value_expression ')' body ELSE body
+//	| IF '(' value_expression ')' body
+//	| WHILE '(' value_expression ')' body
+//	| FOR body
+//	| FOREACH body
+//	| MATCH body
 	;
-/*
-	| FOR body
-	| FOREACH body
-	| MATCH body
-	;
-*/
 
 static_control_statement:
 	STATIC control_statement
 	;
 
 body:
-	'{' '}'						{ Push(Add(Generic::Type::List)); }
-	| '{' code_statements '}'
-	| code_statement			{ Push(Add(Generic::Type::List, Pop())); }
+	'{' '}'						{ $$ = StatementList::empty(); }
+	| '{' code_statements '}'	{ $$ = $2; }
+	| code_statement			{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 	;
 
 scoped_identifier:
@@ -192,31 +199,31 @@ scoped_identifier:
 template_arg:
 	IDENTIFIER												{ Push(Identifier($1)); }
 	| IDENTIFIER ELIPSIS									{ Push(Add(Generic::Type::Elipsis, Identifier($1))); }
-	| IDENTIFIER ':' type_expression						{ Push(Add(Generic::Type::TypedId, Identifier($1), Pop())); }
-	| IDENTIFIER '=' type_expression						{ Push(Add(Generic::Type::OpAssign, Identifier($1), Pop())); }
-	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), Pop()), Pop())); }
+	| IDENTIFIER ':' type_expression						{ Push(Add(Generic::Type::TypedId, Identifier($1), $3)); }
+	| IDENTIFIER '=' value_expression						{ Push(Add(Generic::Type::OpAssign, Identifier($1), $3)); }
+	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), $3), $5)); }
 	;
 
 function_arg:
-	IDENTIFIER												{ Push(Identifier($1)); }
-	| IDENTIFIER ':' type_expression						{ Push(Add(Generic::Type::TypedId, Identifier($1), Pop())); }
-	| IDENTIFIER '=' type_expression						{ Push(Add(Generic::Type::OpAssign, Identifier($1), Pop())); }
-	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), Pop()), Pop())); }
+	IDENTIFIER												{ $$ = new VarDecl($1, nullptr, nullptr); }
+	| IDENTIFIER ':' type_expression						{ $$ = new VarDecl($1, $3, nullptr); }
+	| IDENTIFIER '=' value_expression						{ $$ = new VarDecl($1, nullptr, $3); }
+	| IDENTIFIER ':' type_expression '=' value_expression	{ $$ = new VarDecl($1, $3, $5); }
 	;
 
-struct_defintion:
-	'{' '}'											{ Push(Add(Generic::Type::Struct, Add(Generic::Type::List))); }
-	| '{' struct_statements '}'						{ Push(Add(Generic::Type::Struct, Pop())); }
+struct_definition:
+	'{' '}'											{ $$ = new Struct(); }
+	| '{' struct_statements '}'						{ $$ = new Struct($2); }
 	;
 
 tuple_definition:
-	'[' ']'											{ Push(Add(Generic::Type::Tuple, Add(Generic::Type::List))); }
-	| '[' type_expression_list ']'					{ Push(Add(Generic::Type::Tuple, Pop())); }
+	'[' ']'											{ $$ = new TupleType(); }
+	| '[' type_expression_list ']'					{ $$ = new TupleType($2); }
 	;
 
 function_literal:
-	function_arguments '{' '}'						{ Push(Add(Generic::Type::FunctionLiteral, Pop(), Add(Generic::Type::List))); }
-	| function_arguments '{' code_statements '}'	{ Push(Add(Generic::Type::FunctionLiteral, Pop(), Pop())); }
+	function_arguments '{' '}'						{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr); }
+	| function_arguments '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($3, $1, nullptr); }
 	;
 
 value_expression_list:
@@ -225,8 +232,8 @@ value_expression_list:
 	;
 
 type_expression_list:
-	type_expression									{ Push(Add(Generic::Type::List, Pop())); }
-	| type_expression_list ',' type_expression		{ Push(Add(Generic::Type::List, Pop(), Pop())); }
+	type_expression									{ $$ = TypeExprList::empty().append($1); }
+	| type_expression_list ',' type_expression		{ $$ = $1.append($3); }
 	;
 
 template_arg_list:
@@ -235,8 +242,8 @@ template_arg_list:
 	;
 
 function_arg_list:
-	function_arg									{ Push(Add(Generic::Type::List, Pop())); }
-	| function_arg_list ',' function_arg			{ Push(Add(Generic::Type::List, Pop(), Pop())); }
+	function_arg									{ $$ = StatementList::empty().append($1); }
+	| function_arg_list ',' function_arg			{ $$ = $1.append($3); }
 	;
 
 
@@ -244,31 +251,31 @@ function_arg_list:
 /**** VALUE EXPRESSION ****/
 
 literal:
-	INT			{ $$ = new PrimitiveLiteralExpr((long long)$1); }
+	INT			{ $$ = new PrimitiveLiteralExpr($1); }
 	| FLOAT		{ $$ = new PrimitiveLiteralExpr($1); }
 //	| STRING	{ $$ = new PrimitiveLiteralExpr($1); }
 	| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1); }
 	;
 
 array_literal:
-	'[' ']'							{ $$ = new ArrayLiteralExprAST(ExprList::empty()); }
-	| '[' value_expression_list ']'	{ $$ = new ArrayLiteralExprAST($2); }
+	'[' ']'							{ $$ = new ArrayLiteralExpr(ExprList::empty()); }
+	| '[' value_expression_list ']'	{ $$ = new ArrayLiteralExpr($2); }
 	;
 
 primary_value_expression:
 	literal							{ Push($1); }
 	| array_literal
-	| function_literal
+	| function_literal				{ Push($1); }
 	| IDENTIFIER					{ Push(Identifier($1)); }
-	| '(' value_expression ')'
+	| '(' value_expression ')'		{ Push($2); }
 	;
 
-  postfix_value_expression:
+postfix_value_expression:
 	primary_value_expression
 	| postfix_value_expression '[' ']'							{ Push(Add(Generic::Type::OpIndex, Pop(), Add(Generic::Type::List))); }
 	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Generic::Type::OpIndex, Pop(), Pop())); }
 	| postfix_value_expression function_call					{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
-	| type_expression function_call								{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
+	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
 	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
 	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
 	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
@@ -421,23 +428,23 @@ primitive_type:
 	;
 
 primary_type_expression:
-	primitive_type				{ Push($1); }
-	| IDENTIFIER				{ Push(Identifier($1)); }
-	| struct_defintion
-	| tuple_definition
-	| '(' type_expression ')'
+	primitive_type				{ $$ = $1; }
+	| IDENTIFIER				{ $$ = new TypeIdentifier($1); }
+	| struct_definition			{ $$ = $1; }
+	| tuple_definition			{ $$ = $1; }
+	| '(' type_expression ')'	{ $$ = $2; }
 	;
 
 postfix_type_expression:
-	primary_type_expression									//{ $$ = $1; }
+	primary_type_expression									{ Push($1); }
 	| postfix_type_expression '*'							{ Push(Add(Generic::Type::Pointer, Pop())); }
 	| postfix_type_expression '&'							{ Push(Add(Generic::Type::Ref, Pop())); }
 	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
-	| postfix_type_expression function_arg_types			{ Push(Add(Generic::Type::FunctionType, Pop(), Pop())); }
+	| postfix_type_expression function_arg_types			{ Push(new FunctionType((TypeExpr*)Pop(), $2)); }
 	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
-	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, Pop()))); }
-	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }
-	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Generic::Type::Instantiate, Identifier($1), Pop())); }
+//	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, $3))); }
+//	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }
+//	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Generic::Type::Instantiate, Identifier($1), Pop())); }
 	;
 
 modified_type:
@@ -461,7 +468,7 @@ void yyerror(const char *s)
 }
 
 
-Node* parse(FILE *file)
+StatementList parse(FILE *file)
 {
 	// set lex to read from it instead of defaulting to STDIN:
 	yyin = file;
@@ -472,5 +479,5 @@ Node* parse(FILE *file)
 		yyparse();
 	} while (!feof(yyin));
 
-	return Pop();
+	return parseTree;
 }

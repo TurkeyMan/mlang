@@ -1,19 +1,23 @@
 #include "ast.h"
 #include "astvisitor.h"
 
-
 void Node::accept(ASTVisitor &v) { v.visit(*this); }
 void Statement::accept(ASTVisitor &v) { v.visit(*this); }
 void Declaration::accept(ASTVisitor &v) { v.visit(*this); }
+void ModuleStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Scope::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
+void TypeIdentifier::accept(ASTVisitor &v) { v.visit(*this); }
+void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
+void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
 void Expr::accept(ASTVisitor &v) { v.visit(*this); }
 void Generic::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void ArrayLiteralExprAST::accept(ASTVisitor &v) { v.visit(*this); }
+void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void VariableExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExprAST::accept(ASTVisitor &v) { v.visit(*this); }
@@ -22,6 +26,7 @@ void CallExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void IfExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void ForExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
+void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
@@ -106,37 +111,56 @@ const char * types[] =
 	"Break"
 };
 
+raw_ostream &Generic::dumpList(raw_ostream &out, int ind)
+{
+	if (l)
+	{
+		Generic *gl = dynamic_cast<Generic*>(l);
+		if (gl && gl->type == Type::List)
+			gl->dumpList(out, ind);
+		else
+			l->dump(indent(out, ind), ind);
+	}
+	if (r)
+	{
+		Generic *gr = dynamic_cast<Generic*>(r);
+		if (gr && gr->type == Type::List)
+			gr->dumpList(out, ind);
+		else
+			r->dump(indent(out, ind), ind);
+	}
+	return out;
+}
+
 raw_ostream &Generic::dump(raw_ostream &out, int ind)
 {
 	switch (type)
 	{
-	case Type::List:
-	{
-		l->dump(indent(out, ind), ind);
-		if (r)
-			r->dump(indent(out, ind), ind);
-		return out;
-	}
-	case Type::Int:
-		return out << i;
-	case Type::UInt:
-		return out << u;
-	case Type::Double:
-		return out << f;
-	case Type::String:
-		return out << '"' << s << '"';
-	case Type::Module:
-		out << "module "; return l->dump(out, ind) << "\n";
-	case Type::Id:
-		return out << '#' << s;
-	case Type::TypedId:
-		return out << '@' << s;
-	default:
-		Node::dump(out << "Generic(" << types[(size_t)type] << ")\n", ind);
-		if (l)
-			l->dump(indent(out, ind) << "L: ", ind + 1);
-		if (r)
-			r->dump(indent(out, ind) << "R: ", ind + 1);
+		case Type::List:
+		{
+			out << "generic(List): [\n";
+			dumpList(out, ind + 1);
+			return indent(out, ind) << "]\n";
+		}
+		case Type::Int:
+			return out << i << "\n";
+		case Type::UInt:
+			return out << u << "\n";
+		case Type::Double:
+			return out << f << "\n";
+		case Type::String:
+			return out << "generic(String): \"" << s << "\"\n";
+		case Type::Module:
+			return l->dump(out << "generic(Module): ", ind);
+		case Type::Id:
+			return out << '#' << s << "\n";
+		default:
+			Node::dump(out << "generic(" << types[(size_t)type] << ")", ind) << ":\n";
+			++ind;
+			if (l)
+				l->dump(indent(out, ind) << "l: ", ind);
+			if (r)
+				r->dump(indent(out, ind) << "r: ", ind);
 	}
 	return out;
 }
@@ -147,9 +171,14 @@ static const char *primTypes[] =
 	"v", "u1", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "iz", "uz", "f32", "f64", "c8", "c16", "c32"
 };
 
+std::string PrimitiveType::stringof() const
+{
+	return std::string("@") + primTypes[(size_t)type()];
+}
+
 raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 {
-	return out << '@' << primTypes[(size_t)type()] << '\n';
+	return out << stringof() << '\n';
 }
 
 Expr* PrimitiveType::init()
@@ -220,6 +249,7 @@ Node* Push(Node *n)
 }
 Node* Pop()
 {
+	assert(depth > 0);
 	return stack[--depth];
 }
 Node* Top()
