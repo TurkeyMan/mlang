@@ -17,8 +17,9 @@ public:
 	void visit(Node &n) override;
 	void visit(Statement &n) override;
 	void visit(Declaration &n) override;
-	void visit(Scope &n) override;
 	void visit(Module &n) override;
+	void visit(ModuleStatement &n) override;
+	void visit(ReturnStatement &n) override;
 	void visit(TypeExpr &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(TypeIdentifier &n) override;
@@ -30,11 +31,12 @@ public:
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(ArrayLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
-	void visit(VariableExprAST &n) override;
-	void visit(UnaryExprAST &n) override;
-	void visit(BinaryExprAST &n) override;
-	void visit(IndexExprAST &n) override;
-	void visit(CallExprAST &n) override;
+	void visit(IdentifierExpr &n) override;
+	void visit(TypeConvertExpr &n) override;
+	void visit(UnaryExpr &n) override;
+	void visit(BinaryExpr &n) override;
+	void visit(IndexExpr &n) override;
+	void visit(CallExpr &n) override;
 	void visit(IfExprAST &n) override;
 	void visit(ForExprAST &n) override;
 	void visit(TypeDecl &n) override;

@@ -1,5 +1,8 @@
 #pragma once
 
+#include "gc_cpp.h"
+#include "gc_allocator.h"
+
 #include "sourceloc.h"
 
 #include <string>
@@ -20,6 +23,10 @@ using std::move;
 class Expr;
 owner<Expr> Error(const char *Str);
 
+//using string = std::basic_string<char, std::char_traits<char>, gc_allocator<char>>;
+//template <class K, class T, class P = std::less<K>>
+//using map = std::map<K, T, P, gc_allocator<std::pair<const K, T>>>;
+
 
 template <typename T>
 struct List
@@ -29,12 +36,12 @@ struct List
 
 	static List empty() { return List{ nullptr, 0 }; }
 
-	void destroy()
-	{
-		for (size_t i = 0; i < length; ++i)
-			ptr[i].~T();
-		free(ptr);
-	}
+//	void destroy()
+//	{
+//		for (size_t i = 0; i < length; ++i)
+//			ptr[i].~T();
+//		free(ptr);
+//	}
 
 	template <typename U>
 	List& append(U &&v)
@@ -56,13 +63,14 @@ private:
 		++length;
 		if (((length - 1) & length) == 0)
 		{
-			T *mem = (T*)malloc(sizeof(T)*(length<<1));
+			T *mem = (T*)GC_MALLOC(sizeof(T)*(length << 1));
+//			T *mem = (T*)malloc(sizeof(T)*(length<<1));
 			for (size_t i = 0; i < length - 1; ++i)
 			{
 				new(&mem[i]) T(std::move(ptr[i]));
 				ptr[i].~T();
 			}
-			free(ptr);
+//			free(ptr);
 			ptr = mem;
 		}
 	}
@@ -85,20 +93,39 @@ enum class PrimType
 };
 
 
-class Node
+class Node : public gc_cleanup
 {
 public:
 	Node(SourceLocation loc = CurLoc) : loc(loc) {}
-	virtual ~Node() {}
+	virtual ~Node()
+	{
+		if (destroyCodegen)
+			destroyCodegen(_codegenData);
+	}
 
 	int getLine() const { return loc.Line; }
 	int getCol() const { return loc.Col; }
+
+	template <typename T>
+	T* cgData()
+	{
+		static_assert(sizeof(T) <= sizeof(_codegenData), "Not big enough!");
+		if (!destroyCodegen)
+			destroyCodegen = [](void *mem) { ((T*)mem)->~T(); };
+		return (T*)_codegenData;
+	}
 
 	virtual void accept(ASTVisitor &v);
 
 	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out; }
 
+protected:
+	friend class LLVMGenerator;
+
 private:
+	uint64_t _codegenData[3];
+	void(*destroyCodegen)(void*) = nullptr;
+
 	SourceLocation loc;
 };
 
@@ -123,6 +150,55 @@ public:
 	void accept(ASTVisitor &v) override;
 };
 
+class Scope
+{
+	friend class Semantic;
+
+	std::map<std::string, Declaration*> _declarations;
+	std::map<std::string, Scope*> _imports;
+
+	Node *_owner; // the node that owns this scope
+	Scope *_parent; // parent scope
+
+public:
+	Scope(Scope *parent, Node *owner)
+		: _parent(parent), _owner(owner)
+	{
+	}
+
+	Node *owner() const { return _owner; }
+	Scope *parent() const { return _parent; }
+	Declaration *getDecl(const std::string& name, bool onlyLocal = false) const;
+	void addDecl(const std::string& name, Declaration *decl);
+	auto& symbols() const { return _declarations; }
+};
+
+class Module : public Node
+{
+	Scope _scope;
+
+	std::string _filename;
+	std::string _name;
+
+	StatementList moduleStatements;
+
+public:
+	Module(std::string filename, std::string name, StatementList moduleStatements)
+		: Node(), _scope(nullptr, this), _filename(move(filename)), _name(move(name)), moduleStatements(moduleStatements)
+	{
+	}
+
+	const std::string& filename() const { return _filename; }
+	const std::string& name() const { return _name; }
+	std::string& name() { return _name; }
+
+	Scope* scope() { return &_scope; }
+
+	StatementList statements() { return moduleStatements; }
+
+	void accept(ASTVisitor &v) override;
+};
+
 class ModuleStatement : public Statement
 {
 	std::string _name;
@@ -133,6 +209,8 @@ public:
 	{
 	}
 
+	const std::string& name() const { return _name; }
+
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
@@ -140,189 +218,21 @@ public:
 	}
 };
 
-class Scope : public Node
+class ReturnStatement : public Statement
 {
-	std::map<std::string, Declaration*> _symbols;
-
-	Scope *_parent;
+	Expr *_expression;
 
 public:
-	Scope(Scope *parent)
-		: Node(), _parent(parent)
+	ReturnStatement(Expr *expression)
+		: Statement(), _expression(expression)
 	{
 	}
 
-	Scope *parent() const { return _parent; }
-	Declaration *getDecl(const std::string& name, bool onlyLocal = false) const;
-	void addDecl(const std::string& name, Declaration *decl);
-	auto& symbols() const { return _symbols; }
-
-	void accept(ASTVisitor &v) override;
-};
-
-class Module : public Scope
-{
-	std::string _filename;
-	std::string _name;
-
-public:
-	Module(std::string filename, std::string name)
-		: Scope(nullptr), _filename(move(filename)), _name(move(name))
-	{
-	}
-
-	const std::string& filename() const { return _filename; }
-	const std::string& name() const { return _name; }
-	std::string& name() { return _name; }
-
-	void accept(ASTVisitor &v) override;
-};
-
-
-class Generic : public Node
-{
-public:
-	enum class Type
-	{
-		Int,
-		UInt,
-		Double,
-		String,
-
-		List,
-
-		Id,
-		TempalteId,
-		Type,
-		FunctionType,
-		Instantiate,
-
-		Const,
-		Pointer,
-		Ref,
-
-		TypedId,
-
-		Struct,
-		Tuple,
-
-		Array,
-
-		ArrayLiteral,
-		FunctionLiteral,
-
-		Module,
-		DefType,
-		DefConst,
-		Var,
-
-		Elipsis,
-
-		MemberLookup,
-		Call,
-		OpIndex,
-		OpPostInc,
-		OpPostDec,
-		OpPreInc,
-		OpPreDec,
-		OpUnaryPlus,
-		OpUnaryMinus,
-		OpUnaryNot,
-		OpUnaryComp,
-		OpMul,
-		OpDiv,
-		OpMod,
-		OpAdd,
-		OpSub,
-		OpConcat,
-		OpASL,
-		OpASR,
-		OpLSR,
-		OpLt,
-		OpGt,
-		OpLe,
-		OpGe,
-		OpEq,
-		OpNe,
-		OpBitAnd,
-		OpBitXor,
-		OpBitOr,
-		OpAnd,
-		OpXor,
-		OpOr,
-		OpAssign,
-		OpBind,
-		OpMulEq,
-		OpDivEq,
-		OpModEq,
-		OpAddEq,
-		OpSubEq,
-		OpConcatEq,
-		OpBitAndEq,
-		OpBitXorEq,
-		OpBitOrEq,
-		OpAndEq,
-		OpXorEq,
-		OpOrEq,
-		OpASLEq,
-		OpASREq,
-		OpLSREq,
-
-		Return,
-		Break,
-	};
-
-	Generic(Type type, Node *l = nullptr, Node *r = nullptr)
-		: Node(), type(type), l(l), r(r) {}
-
-	template <typename T>
-	List<T> asList() const
-	{
-		assert(type == Type::List);
-
-		List<T> l = List<T>::empty();
-		asListImpl(l, this);
-		return l;
-	}
+	Expr* expression() const { return _expression; }
 
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
-	raw_ostream &dumpList(raw_ostream &out, int ind);
-
-	//private:
-	Type type;
-	union
-	{
-		double f;
-		__int64 i;
-		unsigned __int64 u;
-		const char *s;
-	};
-	Node *l;
-	Node *r;
-
-private:
-	template <typename T>
-	static void asListImpl(List<T> &l, const Generic *pList)
-	{
-		if (pList->l)
-		{
-			Generic *gl = dynamic_cast<Generic*>(pList->l);
-			if (gl && gl->type == Generic::Type::List)
-				asListImpl(l, gl);
-			else
-				l.append(dynamic_cast<T>(pList->l));
-		}
-		if (pList->r)
-		{
-			Generic *gr = dynamic_cast<Generic*>(pList->r);
-			if (gr && gr->type == Generic::Type::List)
-				asListImpl(l, gr);
-			else
-				l.append(dynamic_cast<T>(pList->r));
-		}
-	}
 };
 
 
@@ -415,14 +325,17 @@ public:
 
 class Struct : public TypeExpr
 {
-	StatementList members;
-	Scope *body;
-	Scope *parent;
+	Scope body;
+
+	StatementList _members;
 
 public:
 	Struct(StatementList members = StatementList::empty())
-		: TypeExpr(), members(members)
+		: TypeExpr(), body(nullptr, this), _members(members)
 	{}
+
+	Scope* scope() { return &body; }
+	StatementList members() { return _members; }
 
 	Expr* init() override { assert(false); return nullptr; }
 
@@ -432,7 +345,7 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override
 	{
 		out << "struct: {\n";
-		for (auto m : members)
+		for (auto m : _members)
 			m->dump(out, ind + 1);
 		return indent(out, ind) << "}\n";
 	}
@@ -476,11 +389,69 @@ public:
 			out << "???\n";
 		indent(out, ind) << "args: (\n";
 		for (auto a : _args)
-			a->dump(out, ind + 1);
+			a->dump(indent(out, ind + 1), ind + 1);
 		return indent(out, ind) << ")\n";
 	}
 };
 
+
+//***********************
+//** Declaration nodes **
+//***********************
+
+class TypeDecl : public Declaration
+{
+	friend class Semantic;
+protected:
+	std::string _name;
+	TypeExpr *_type;
+
+public:
+	TypeDecl(std::string name, TypeExpr *type) // TODO: template args
+		: Declaration(), _name(move(name)), _type(type)
+	{}
+
+	const std::string& name() const { return _name; }
+	TypeExpr* type() const { return _type; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
+class ValDecl : public Declaration
+{
+	friend class Semantic;
+protected:
+	std::string _name;
+	TypeExpr *_type;
+	Expr *_init;
+
+public:
+	ValDecl(std::string name, TypeExpr *type, Expr *init)
+		: Declaration(), _name(move(name)), _type(type), _init(init)
+	{}
+
+	const std::string& name() { return _name; }
+	TypeExpr* type() { return _type; }
+	Expr* init() { return _init; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+class VarDecl : public ValDecl
+{
+	friend class Semantic;
+public:
+	VarDecl(std::string name, TypeExpr *type, Expr *init)
+		: ValDecl(name, type, init)
+	{}
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
 
 
 //**********************
@@ -580,21 +551,43 @@ public:
 
 class FunctionLiteralExpr : public Expr
 {
+	Scope body;
+
 	StatementList bodyStatements;
+
 	StatementList _args;
 	TypeExpr *returnType;
 
-	Scope *body;
-	Scope *parent;
+	TypeExprList argTypes = TypeExprList::empty();
+	FunctionType *_type = nullptr;
 
 public:
 	FunctionLiteralExpr(StatementList bodyStatements, StatementList args, TypeExpr *returnType)
-		: Expr(), bodyStatements(bodyStatements), _args(args), returnType(returnType)
+		: Expr(), body(nullptr, this), bodyStatements(bodyStatements), _args(args), returnType(returnType)
 	{}
 
-	TypeExpr* type() override { assert(false); return nullptr; }
+	TypeExpr* type() override
+	{
+		if (!_type)
+		{
+			if (_args.length && !argTypes.length)
+			{
+				for (auto a : _args)
+				{
+					VarDecl *decl = dynamic_cast<VarDecl*>(a);
+					assert(decl);
+					argTypes.append(decl->type());
+				}
+			}
+			_type = new FunctionType(returnType, argTypes);
+		}
+		return _type;
+	}
 
 	StatementList args() const { return _args; }
+	StatementList statements() { return bodyStatements; }
+
+	Scope* scope() { return &body; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -620,72 +613,110 @@ public:
 };
 
 
-/// VariableExprAST - Expression class for referencing a variable, like "a".
-class VariableExprAST : public Expr {
-	std::string Name;
+class IdentifierExpr : public Expr
+{
+	friend class Semantic;
+
+	std::string name;
+
+	Declaration *_target = nullptr;
 
 public:
-	VariableExprAST(SourceLocation Loc, const std::string &Name)
-		: Expr(Loc), Name(Name) {}
-	const std::string &getName() const { return Name; }
+	IdentifierExpr(const std::string &name)
+		: Expr(), name(std::move(name)) {}
+	const std::string &getName() const { return name; }
 
-	TypeExpr* type() override;
+	Declaration* target() { return _target; }
+	TypeExpr* type() override { assert(false); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
-		return Expr::dump(out << Name, ind);
+		return Expr::dump(out << '#' << name << "\n", ind);
 	}
 };
 
-/// UnaryExprAST - Expression class for a unary operator.
-class UnaryExprAST : public Expr {
-	char Opcode;
-	owner<Expr> Operand;
+class TypeConvertExpr : public Expr
+{
+	friend class Semantic;
+
+	Expr *_expr;
+	TypeExpr *_newType;
 
 public:
-	UnaryExprAST(char Opcode, owner<Expr> Operand)
-		: Expr(), Opcode(Opcode), Operand(std::move(Operand)) {}
+	TypeConvertExpr(Expr *expr, TypeExpr *newType)
+		: Expr(), _expr(expr), _newType(newType){}
 
-	TypeExpr* type() override;
+	Expr* expr() { return _expr; }
+	TypeExpr* type() override { return _newType; }
 
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
-		Expr::dump(out << "unary" << Opcode, ind);
-		Operand->dump(out, ind + 1);
+		Expr::dump(out << "cast\n", ind);
+		_newType->dump(indent(out, ind + 1) << "targettype: ", ind + 1);
+		_expr->dump(indent(out, ind + 1) << "expr: ", ind + 1);
 		return out;
 	}
 };
 
-/// BinaryExprAST - Expression class for a binary operator.
-class BinaryExprAST : public Expr {
-	char Op;
-	owner<Expr> LHS, RHS;
+enum class UnaryOp
+{
+	Pos, Neg, BitNot, LogicNot, PreInc, PreDec
+};
+class UnaryExpr : public Expr
+{
+	UnaryOp _op;
+	Expr *_operand;
 
 public:
-	BinaryExprAST(SourceLocation Loc, char Op, owner<Expr> LHS, owner<Expr> RHS)
-		: Expr(Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+	UnaryExpr(UnaryOp op, Expr *operand)
+		: Expr(), _op(op), _operand(operand) {}
 
-	TypeExpr* type() override;
+	UnaryOp op() { return _op; }
+	Expr* operand() { return _operand; }
+
+	TypeExpr* type() override { assert(false); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		Expr::dump(out << "binary" << Op, ind);
-		LHS->dump(indent(out, ind) << "LHS:", ind + 1);
-		RHS->dump(indent(out, ind) << "RHS:", ind + 1);
-		return out;
-	}
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
-/// CallExprAST - Expression class for function calls.
-class IndexExprAST : public Expr {
+enum class BinOp
+{
+	Add, Sub, Mul, Div, Mod, Exp, Cat,
+	ASL, ASR, LSR,
+	BitAnd, BitOr, BitXor, LogicAnd, LogicOr, LogicXor,
+	Eq, Ne, Gt, Ge, Lt, Le
+};
+class BinaryExpr : public Expr
+{
+	BinOp _op;
+	Expr *_lhs, *_rhs;
+
+public:
+	BinaryExpr(BinOp op, Expr *lhs, Expr *rhs)
+		: Expr(), _op(op), _lhs(lhs), _rhs(rhs) {}
+
+	BinOp op() { return _op; }
+	Expr* lhs() { return _lhs; }
+	Expr* rhs() { return _rhs; }
+
+	TypeExpr* type() override { assert(false); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
+/// CallExpr - Expression class for function calls.
+class IndexExpr : public Expr {
 	owner<Expr> Source;
 	std::vector<owner<Expr>> Args;
 
 public:
-	IndexExprAST(SourceLocation Loc, owner<Expr> Source,
+	IndexExpr(SourceLocation Loc, owner<Expr> Source,
 		std::vector<owner<Expr>> Args)
 		: Expr(Loc), Source(move(Source)), Args(std::move(Args)) {}
 
@@ -699,13 +730,13 @@ public:
 	}
 };
 
-/// CallExprAST - Expression class for function calls.
-class CallExprAST : public Expr {
+/// CallExpr - Expression class for function calls.
+class CallExpr : public Expr {
 	std::string Callee;
 	std::vector<owner<Expr>> Args;
 
 public:
-	CallExprAST(SourceLocation Loc, const std::string &Callee,
+	CallExpr(SourceLocation Loc, const std::string &Callee,
 		std::vector<owner<Expr>> Args)
 		: Expr(Loc), Callee(Callee), Args(std::move(Args)) {}
 
@@ -767,82 +798,6 @@ public:
 };
 
 
-class TypeDecl : public Declaration
-{
-	std::string _name;
-	TypeExpr *_type;
-
-public:
-	TypeDecl(std::string name, TypeExpr *type) // TODO: template args
-		: Declaration(), _name(move(name)), _type(type)
-	{}
-
-	const std::string& name() const { return _name; }
-	TypeExpr* type() const { return _type; }
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		Declaration::dump(out << "type: " << _name, ind) << "\n";
-		++ind;
-		if (_type)
-			_type->dump(indent(out, ind) << "as: ", ind);
-		return out;
-	}
-};
-
-class ValDecl : public Declaration
-{
-	friend class Semantic;
-protected:
-	std::string _name;
-	TypeExpr *_type;
-	Expr *_init;
-
-public:
-	ValDecl(std::string name, TypeExpr *type, Expr *init)
-		: Declaration(), _name(move(name)), _type(type), _init(init)
-	{}
-
-	const std::string& name() { return _name; }
-	TypeExpr* type() { return _type; }
-	Expr* init() { return _init; }
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		Declaration::dump(out << "def: #" << _name, ind) << "\n";
-		++ind;
-		if (_type)
-			_type->dump(indent(out, ind) << "type: ", ind);
-		if (_init)
-			_init->dump(indent(out, ind) << "val: ", ind);
-		return out;
-	}
-};
-class VarDecl : public ValDecl
-{
-public:
-	VarDecl(std::string name, TypeExpr *type, Expr *init)
-		: ValDecl(name, type, init)
-	{}
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		Declaration::dump(out << "var: #" << _name, ind) << "\n";
-		++ind;
-		if (_type)
-			_type->dump(indent(out, ind) << "type: ", ind);
-		if (_init)
-			_init->dump(indent(out, ind) << "init: ", ind);
-		return out;
-	}
-};
-
 /// Prototype - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
 /// of arguments the function takes), as well as if it is an operator.
@@ -879,16 +834,17 @@ public:
 /// Function - This class represents a function definition itself.
 class FunctionDecl : public Declaration
 {
+	Scope body;
+
 	owner<PrototypeDecl> Proto;
 	owner<Expr> Body;
 
-	Scope *body;
-	Scope *parent;
-
 public:
 	FunctionDecl(owner<PrototypeDecl> Proto, owner<Expr> Body)
-		: Declaration(), Proto(std::move(Proto)), Body(std::move(Body))
+		: Declaration(), body(nullptr, this), Proto(std::move(Proto)), Body(std::move(Body))
 	{}
+
+	Scope* scope() { return &body; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -902,18 +858,130 @@ public:
 };
 
 
+
+
+
+
+
+class Generic : public Node
+{
+public:
+	enum class Type
+	{
+		String,
+
+		List,
+
+		TempalteId,
+		Type,
+		Instantiate,
+
+		Const,
+		Pointer,
+		Ref,
+
+		TypedId,
+
+		Struct,
+		Tuple,
+
+		Array,
+
+		ArrayLiteral,
+
+		Module,
+		DefType,
+		DefConst,
+		Var,
+
+		Elipsis,
+
+		MemberLookup,
+		Call,
+		OpIndex,
+		OpPostInc,
+		OpPostDec,
+		OpAssign,
+		OpBind,
+		OpMulEq,
+		OpDivEq,
+		OpModEq,
+		OpAddEq,
+		OpSubEq,
+		OpConcatEq,
+		OpBitAndEq,
+		OpBitXorEq,
+		OpBitOrEq,
+		OpAndEq,
+		OpXorEq,
+		OpOrEq,
+		OpASLEq,
+		OpASREq,
+		OpLSREq,
+
+		Return,
+		Break,
+	};
+
+	Generic(Type type, Node *l = nullptr, Node *r = nullptr)
+		: Node(), type(type), l(l), r(r) {}
+
+	template <typename T>
+	List<T> asList() const
+	{
+		assert(type == Type::List);
+
+		List<T> l = List<T>::empty();
+		asListImpl(l, this);
+		return l;
+	}
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+	raw_ostream &dumpList(raw_ostream &out, int ind);
+
+	//private:
+	Type type;
+	union
+	{
+		double f;
+		__int64 i;
+		unsigned __int64 u;
+		const char *s;
+	};
+	Node *l;
+	Node *r;
+
+private:
+	template <typename T>
+	static void asListImpl(List<T> &l, const Generic *pList)
+	{
+		if (pList->l)
+		{
+			Generic *gl = dynamic_cast<Generic*>(pList->l);
+			if (gl && gl->type == Generic::Type::List)
+				asListImpl(l, gl);
+			else
+				l.append(dynamic_cast<T>(pList->l));
+		}
+		if (pList->r)
+		{
+			Generic *gr = dynamic_cast<Generic*>(pList->r);
+			if (gr && gr->type == Generic::Type::List)
+				asListImpl(l, gr);
+			else
+				l.append(dynamic_cast<T>(pList->r));
+		}
+	}
+};
+
 Node* Push(Node *n);
 Node* Pop();
 Node* Top();
 
 Generic* String(const char* s);
-Generic* Identifier(const char* i);
 Generic* TypeId(const char* i);
-Generic* Int(__int64 i);
-Generic* UInt(unsigned __int64 i);
-Generic* Float(double f);
 
 Generic* Add(Generic::Type type, Node *l = nullptr, Node *r = nullptr);
 Generic* SetChildren(Generic *node, Node *l = nullptr, Node *r = nullptr);
-
-void Print(Node *n);

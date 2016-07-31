@@ -33,6 +33,7 @@ static StatementList parseTree = StatementList::empty();
 	TypeExprList typeExprList;
 	Statement *statement;
 	StatementList statementList;
+	UnaryOp unaryOp;
 }
 
 // define the constant-string tokens:
@@ -51,17 +52,19 @@ static StatementList parseTree = StatementList::empty();
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
-%type <expr> literal array_literal function_literal value_expression
+%type <expr> literal array_literal function_literal primary_value_expression postfix_value_expression unary_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression xor_value_expression or_value_expression assign_value_expression value_expression
 %type <exprList> value_expression_list
 
 %type <type> primitive_type primary_type_expression type_expression struct_definition tuple_definition
 %type <typeExprList> type_expression_list function_arg_types
 
-%type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement
+%type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement control_statement static_control_statement
 %type <statementList> module_statements struct_statements code_statements body
 
 %type <statement> function_arg
 %type <statementList> function_arguments function_arg_list
+
+%type <unaryOp> unary_operator
 
 %%
 mlang:
@@ -108,7 +111,7 @@ code_statement:
 	def_statement				{ $$ = $1; }
 	| var_statement				{ $$ = $1; }
 //	| static_control_statement
-	| control_statement			{ $$ = (Statement*)Pop(); }
+	| control_statement			{ $$ = $1; }
 //	| expression_statement
 	| empty_statement			{ $$ = $1; }
 	;
@@ -171,8 +174,9 @@ array_index:
 	;
 
 control_statement:
-	RETURN value_expression ';'		{ Push(Add(Generic::Type::Return, $2)); }
-	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
+	RETURN ';'						{ $$ = new ReturnStatement(nullptr); }
+	| RETURN value_expression ';'	{ $$ = new ReturnStatement($2); }
+//	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
 //	| IF '(' value_expression ')' body ELSE body
 //	| IF '(' value_expression ')' body
 //	| WHILE '(' value_expression ')' body
@@ -182,7 +186,7 @@ control_statement:
 	;
 
 static_control_statement:
-	STATIC control_statement
+	STATIC control_statement	{ $$ = $2; }
 	;
 
 body:
@@ -263,121 +267,90 @@ array_literal:
 	;
 
 primary_value_expression:
-	literal							{ Push($1); }
-	| array_literal
-	| function_literal				{ Push($1); }
-	| IDENTIFIER					{ Push(Identifier($1)); }
-	| '(' value_expression ')'		{ Push($2); }
+	literal							{ $$ = $1; }
+	| array_literal					{ $$ = $1; }
+	| function_literal				{ $$ = $1; }
+	| IDENTIFIER					{ $$ = new IdentifierExpr($1); }
+	| '(' value_expression ')'		{ $$ = $2; }
 	;
 
 postfix_value_expression:
-	primary_value_expression
-	| postfix_value_expression '[' ']'							{ Push(Add(Generic::Type::OpIndex, Pop(), Add(Generic::Type::List))); }
-	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Generic::Type::OpIndex, Pop(), Pop())); }
-	| postfix_value_expression function_call					{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
-	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
-	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
-	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
-	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+	primary_value_expression									{ $$ = $1; }
+//	| postfix_value_expression '[' ']'							{ Push(Add(Generic::Type::OpIndex, Pop(), Add(Generic::Type::List))); }
+//	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Generic::Type::OpIndex, Pop(), Pop())); }
+//	| postfix_value_expression function_call					{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
+//	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
+//	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
+//	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
+//	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
 	;
 
 unary_operator:
- 	'+'		{ Push(Add(Generic::Type::OpUnaryPlus)); }
- 	| '-'	{ Push(Add(Generic::Type::OpUnaryMinus)); }
- 	| '!'	{ Push(Add(Generic::Type::OpUnaryNot)); }
- 	| '~'	{ Push(Add(Generic::Type::OpUnaryComp)); }
+ 	'+'		{ $$ = UnaryOp::Pos; }
+ 	| '-'	{ $$ = UnaryOp::Neg; }
+ 	| '~'	{ $$ = UnaryOp::BitNot; }
+ 	| '!'	{ $$ = UnaryOp::LogicNot; }
+ 	| INCOP	{ $$ = UnaryOp::PreInc; }
+ 	| DECOP	{ $$ = UnaryOp::PreDec; }
 	;
-
 unary_value_expression:
-	postfix_value_expression
-	| INCOP postfix_value_expression		{ Push(Add(Generic::Type::OpPreInc, Pop())); }
-	| DECOP postfix_value_expression		{ Push(Add(Generic::Type::OpPreDec, Pop())); }
-	| unary_operator unary_value_expression	{ Push(SetChildren((Generic*)Pop(), Pop())); }
-	;
-
-mul_operator:
- 	'*'		{ Push(Add(Generic::Type::OpMul)); }
- 	| '/'	{ Push(Add(Generic::Type::OpDiv)); }
- 	| '%'	{ Push(Add(Generic::Type::OpMod)); }
+	postfix_value_expression								{ $$ = $1; }
+	| unary_operator postfix_value_expression				{ $$ = new UnaryExpr($1, $2); }
 	;
 
 mul_value_expression:
-	unary_value_expression
-	| mul_value_expression mul_operator unary_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+	unary_value_expression									{ $$ = $1; }
+	| mul_value_expression '*' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Mul, $1, $3); }
+	| mul_value_expression '/' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Div, $1, $3); }
+	| mul_value_expression '%' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Mod, $1, $3); }
 	;
-
-add_operator:
- 	'+'		{ Push(Add(Generic::Type::OpAdd)); }
- 	| '-'	{ Push(Add(Generic::Type::OpSub)); }
-	| '~'	{ Push(Add(Generic::Type::OpConcat)); }
-	;
-
 add_value_expression:
-	mul_value_expression
-	| add_value_expression add_operator mul_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+	mul_value_expression									{ $$ = $1; }
+	| add_value_expression '+' mul_value_expression			{ $$ = new BinaryExpr(BinOp::Add, $1, $3); }
+	| add_value_expression '-' mul_value_expression			{ $$ = new BinaryExpr(BinOp::Sub, $1, $3); }
+	| add_value_expression '~' mul_value_expression			{ $$ = new BinaryExpr(BinOp::Cat, $1, $3); }
 	;
-
-shift_operator:
- 	SHL		{ Push(Add(Generic::Type::OpASL)); }
- 	| ASR	{ Push(Add(Generic::Type::OpASR)); }
- 	| LSR	{ Push(Add(Generic::Type::OpLSR)); }
-	;
-
 shift_value_expression:
- 	add_value_expression
- 	| shift_value_expression shift_operator add_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+ 	add_value_expression									{ $$ = $1; }
+ 	| shift_value_expression SHL add_value_expression		{ $$ = new BinaryExpr(BinOp::ASL, $1, $3); }
+ 	| shift_value_expression ASR add_value_expression		{ $$ = new BinaryExpr(BinOp::ASR, $1, $3); }
+ 	| shift_value_expression LSR add_value_expression		{ $$ = new BinaryExpr(BinOp::LSR, $1, $3); }
 	;
-
-cmp_operator:
- 	'<'		{ Push(Add(Generic::Type::OpLt)); }
-	| '>'	{ Push(Add(Generic::Type::OpGt)); }
-	| LEQ	{ Push(Add(Generic::Type::OpLe)); }
-	| GEQ	{ Push(Add(Generic::Type::OpGe)); }
-	;
-
 cmp_value_expression:
- 	shift_value_expression
- 	| cmp_value_expression cmp_operator shift_value_expression		{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+ 	shift_value_expression									{ $$ = $1; }
+ 	| cmp_value_expression '<' shift_value_expression		{ $$ = new BinaryExpr(BinOp::Lt, $1, $3); }
+ 	| cmp_value_expression '>' shift_value_expression		{ $$ = new BinaryExpr(BinOp::Gt, $1, $3); }
+ 	| cmp_value_expression LEQ shift_value_expression		{ $$ = new BinaryExpr(BinOp::Le, $1, $3); }
+ 	| cmp_value_expression GEQ shift_value_expression		{ $$ = new BinaryExpr(BinOp::Ge, $1, $3); }
 	;
-
-eq_operator:
- 	EQ		{ Push(Add(Generic::Type::OpEq)); }
-	| NEQ	{ Push(Add(Generic::Type::OpNe)); }
-	;
-
 eq_value_expression:
- 	cmp_value_expression
- 	| eq_value_expression eq_operator cmp_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+ 	cmp_value_expression									{ $$ = $1; }
+ 	| eq_value_expression EQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Eq, $1, $3); }
+ 	| eq_value_expression NEQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Ne, $1, $3); }
 	;
-
 bitand_value_expression:
- 	eq_value_expression
- 	| bitand_value_expression '&' eq_value_expression		{ Push(Add(Generic::Type::OpBitAnd, Pop(), Pop())); }
+ 	eq_value_expression										{ $$ = $1; }
+ 	| bitand_value_expression '&' eq_value_expression		{ $$ = new BinaryExpr(BinOp::BitAnd, $1, $3); }
 	;
-
 bitxor_value_expression:
- 	bitand_value_expression
- 	| bitxor_value_expression '^' bitand_value_expression	{ Push(Add(Generic::Type::OpBitXor, Pop(), Pop())); }
+ 	bitand_value_expression									{ $$ = $1; }
+ 	| bitxor_value_expression '^' bitand_value_expression	{ $$ = new BinaryExpr(BinOp::BitXor, $1, $3); }
 	;
-
 bitor_value_expression:
- 	bitxor_value_expression
- 	| bitor_value_expression '|' bitxor_value_expression	{ Push(Add(Generic::Type::OpBitOr, Pop(), Pop())); }
+ 	bitxor_value_expression									{ $$ = $1; }
+ 	| bitor_value_expression '|' bitxor_value_expression	{ $$ = new BinaryExpr(BinOp::BitOr, $1, $3); }
 	;
-
 and_value_expression:
- 	bitor_value_expression
- 	| and_value_expression AND bitor_value_expression		{ Push(Add(Generic::Type::OpAnd, Pop(), Pop())); }
+ 	bitor_value_expression									{ $$ = $1; }
+ 	| and_value_expression AND bitor_value_expression		{ $$ = new BinaryExpr(BinOp::LogicAnd, $1, $3); }
 	;
-
 xor_value_expression:
- 	and_value_expression
- 	| xor_value_expression XOR and_value_expression			{ Push(Add(Generic::Type::OpXor, Pop(), Pop())); }
+ 	and_value_expression									{ $$ = $1; }
+ 	| xor_value_expression XOR and_value_expression			{ $$ = new BinaryExpr(BinOp::LogicXor, $1, $3); }
 	;
-
 or_value_expression:
- 	xor_value_expression
- 	| or_value_expression OR xor_value_expression			{ Push(Add(Generic::Type::OpOr, Pop(), Pop())); }
+ 	xor_value_expression									{ $$ = $1; }
+ 	| or_value_expression OR xor_value_expression			{ $$ = new BinaryExpr(BinOp::LogicOr, $1, $3); }
 	;
 
 assign_operator:
@@ -399,14 +372,13 @@ assign_operator:
 	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
 	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
 	;
-
 assign_value_expression:
-	or_value_expression
-	| or_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+	or_value_expression											{ $$ = $1; }
+//	| or_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 value_expression:
-	assign_value_expression		{ $$ = (Expr*)Pop(); }
+	assign_value_expression		{ $$ = $1; }
 	;
 
 

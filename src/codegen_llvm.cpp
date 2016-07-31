@@ -4,11 +4,12 @@ using namespace llvm;
 using namespace llvm::orc;
 
 
-LLVMGenerator::LLVMGenerator(const std::string& fileName, const std::string& moduleName)
+LLVMGenerator::LLVMGenerator(::Module *_module)
 	: ctx(getGlobalContext())
 	, Builder(ctx)
+	, module(_module)
 	, TheJIT(llvm::make_unique<KaleidoscopeJIT>())
-	, TheModule(llvm::make_unique<llvm::Module>(moduleName, ctx))
+	, TheModule(llvm::make_unique<llvm::Module>(_module->name(), ctx))
 {
 	// Open a new module.
 	TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
@@ -24,19 +25,19 @@ LLVMGenerator::LLVMGenerator(const std::string& fileName, const std::string& mod
 	DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
 
 	// Create the compile unit for the module.
-	KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, fileName, ".", "M-Lang Compiler", 0, "", 0);
+	KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, _module->filename(), ".", "M-Lang Compiler", 0, "", 0);
 }
 
 
-std::string Codegen(::Module *pAST)
+std::string Codegen(::Module *module)
 {
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
 	InitializeNativeTargetAsmParser();
 
-	LLVMGenerator *generator = new LLVMGenerator(pAST->filename(), pAST->name());
+	LLVMGenerator *generator = new LLVMGenerator(module);
 
-	pAST->accept(*generator);
+	module->accept(*generator);
 
 	return generator->codegen();
 }
@@ -77,16 +78,30 @@ void LLVMGenerator::visit(Declaration &n)
 {
 }
 
-void LLVMGenerator::visit(Scope &n)
+void LLVMGenerator::visit(::Module &n)
+{
+	Scope *old = scope;
+	scope = n.scope();
+
+	for (auto &s : scope->symbols())
+		s.second->accept(*this);
+
+	scope = old;
+}
+
+void LLVMGenerator::visit(ModuleStatement &n)
 {
 }
 
-void LLVMGenerator::visit(::Module &n)
+void LLVMGenerator::visit(ReturnStatement &n)
 {
-	scope = &n;
-
-	for (auto &s : n.symbols())
-		s.second->accept(*this);
+	if (n.expression())
+	{
+		n.expression()->accept(*this);
+		Builder.CreateRet(n.expression()->cgData<LLVMData>()->value);
+	}
+	else
+		Builder.CreateRetVoid();
 }
 
 void LLVMGenerator::visit(TypeExpr &n)
@@ -95,31 +110,34 @@ void LLVMGenerator::visit(TypeExpr &n)
 
 void LLVMGenerator::visit(PrimitiveType &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
 	switch (n.type())
 	{
 	case PrimType::v:
-		t_type = Type::getVoidTy(ctx); break;
+		cg->type = Type::getVoidTy(ctx); break;
 	case PrimType::u1:
-		t_type = Type::getInt1Ty(ctx); break;
+		cg->type = Type::getInt1Ty(ctx); break;
 	case PrimType::i8:
 	case PrimType::u8:
 	case PrimType::c8:
-		t_type = Type::getInt8Ty(ctx); break;
+		cg->type = Type::getInt8Ty(ctx); break;
 	case PrimType::i16:
 	case PrimType::u16:
 	case PrimType::c16:
-		t_type = Type::getInt16Ty(ctx); break;
+		cg->type = Type::getInt16Ty(ctx); break;
 	case PrimType::i32:
 	case PrimType::u32:
 	case PrimType::c32:
-		t_type = Type::getInt32Ty(ctx); break;
+		cg->type = Type::getInt32Ty(ctx); break;
 	case PrimType::i64:
 	case PrimType::u64:
-		t_type = Type::getInt64Ty(ctx); break;
+		cg->type = Type::getInt64Ty(ctx); break;
 	case PrimType::f32:
-		t_type = Type::getFloatTy(ctx); break;
+		cg->type = Type::getFloatTy(ctx); break;
 	case PrimType::f64:
-		t_type = Type::getDoubleTy(ctx); break;
+		cg->type = Type::getDoubleTy(ctx); break;
 	default:
 		assert(false);
 	}
@@ -139,18 +157,21 @@ void LLVMGenerator::visit(Struct &n)
 
 void LLVMGenerator::visit(::FunctionType &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
 	n.returnType()->accept(*this);
-	llvm::Type *r = t_type;
+	llvm::Type *r = n.returnType()->cgData<LLVMData>()->type;
 
 	TypeExprList argList = n.argTypes();
 	std::vector<llvm::Type *> args;
 	for (auto a : argList)
 	{
 		a->accept(*this);
-		args.push_back(t_type);
+		args.push_back(a->cgData<LLVMData>()->type);
 	}
 
-	t_type = llvm::FunctionType::get(r, args, false);
+	cg->type = llvm::FunctionType::get(r, args, false);
 }
 
 void LLVMGenerator::visit(Expr &n)
@@ -176,37 +197,40 @@ void LLVMGenerator::visit(Generic &n)
 
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
 	switch (n.primType())
 	{
 	case PrimType::u1:
-		t_value = ConstantInt::get(ctx, APInt(1, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(1, n.getUint(), false)); break;
 	case PrimType::i8:
-		t_value = ConstantInt::get(ctx, APInt(8, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(8, n.getUint(), true)); break;
 	case PrimType::u8:
-		t_value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c8:
-		t_value = ConstantInt::get(ctx, APInt(8, (uint64_t)n.getChar(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(8, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i16:
-		t_value = ConstantInt::get(ctx, APInt(16, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), true)); break;
 	case PrimType::u16:
-		t_value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c16:
-		t_value = ConstantInt::get(ctx, APInt(16, (uint64_t)n.getChar(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i32:
-		t_value = ConstantInt::get(ctx, APInt(32, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(32, n.getUint(), true)); break;
 	case PrimType::u32:
-		t_value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c32:
-		t_value = ConstantInt::get(ctx, APInt(32, (uint64_t)n.getChar(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(32, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i64:
-		t_value = ConstantInt::get(ctx, APInt(64, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(64, n.getUint(), true)); break;
 	case PrimType::u64:
-		t_value = ConstantInt::get(ctx, APInt(64, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(64, n.getUint(), false)); break;
 	case PrimType::f32:
 	case PrimType::f64:
-		t_value = ConstantFP::get(ctx, APFloat(n.getFloat())); break;
+		cg->value = ConstantFP::get(ctx, APFloat(n.getFloat())); break;
 	case PrimType::v:
-		t_value = nullptr; break;
+		cg->value = nullptr; break;
 	default:
 		assert(0);
 	}
@@ -220,8 +244,15 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 {
 }
 
-void LLVMGenerator::visit(VariableExprAST &n)
+void LLVMGenerator::visit(IdentifierExpr &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
+	Declaration *decl = n.target();
+	decl->accept(*this);
+
+	cg->value = Builder.CreateLoad(decl->cgData<LLVMData>()->value);
 /*
 	// Look this variable up in the function.
 	Value *V = NamedValues[Name];
@@ -234,8 +265,48 @@ void LLVMGenerator::visit(VariableExprAST &n)
 */
 }
 
-void LLVMGenerator::visit(UnaryExprAST &n)
+void LLVMGenerator::visit(TypeConvertExpr &n)
 {
+}
+
+void LLVMGenerator::visit(UnaryExpr &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
+	Expr *operand = n.operand();
+	operand->accept(*this);
+
+	LLVMData *operandCg = operand->cgData<LLVMData>();
+
+	switch (n.op())
+	{
+		case UnaryOp::Neg:
+//			n.codegenData = Builder.CreateFNeg(operandCg->value);
+			cg->value = Builder.CreateNeg(n.operand()->cgData<LLVMData>()->value);
+			break;
+		case UnaryOp::Pos:
+			cg->value = operandCg->value;
+			break;
+		case UnaryOp::LogicNot:
+			cg->value = Builder.CreateNot(operandCg->value);
+			break;
+		case UnaryOp::BitNot:
+			cg->value = Builder.CreateXor(operandCg->value, (uint64_t)-1, "neg");
+			break;
+		case UnaryOp::PreDec:
+//			n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
+			assert(false);
+			break;
+		case UnaryOp::PreInc:
+//			n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
+			assert(false);
+			break;
+		default:
+			assert(false);
+			break;
+	}
+
 //	Value *OperandV = Operand->codegen();
 //	if (!OperandV)
 //		return nullptr;
@@ -248,8 +319,96 @@ void LLVMGenerator::visit(UnaryExprAST &n)
 //	return Builder.CreateCall(F, OperandV, "unop");
 }
 
-void LLVMGenerator::visit(BinaryExprAST &n)
+void LLVMGenerator::visit(BinaryExpr &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
+	Expr *lhs = n.lhs();
+	n.lhs()->accept(*this);
+
+	Expr *rhs = n.rhs();
+	n.rhs()->accept(*this);
+
+	LLVMData *lhCg = lhs->cgData<LLVMData>();
+	LLVMData *rhCg = rhs->cgData<LLVMData>();
+
+	switch (n.op())
+	{
+		case BinOp::Add:
+//			n.codegenData = Builder.CreateFAdd((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+			cg->value = Builder.CreateAdd(lhCg->value, rhCg->value);
+			break;
+		case BinOp::Sub:
+//			n.codegenData = Builder.CreateFSub((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+			cg->value = Builder.CreateSub(lhCg->value, rhCg->value);
+			break;
+		case BinOp::Mul:
+//			n.codegenData = Builder.CreateFMul((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+			cg->value = Builder.CreateMul(lhCg->value, rhCg->value);
+			break;
+		case BinOp::Div:
+//			n.codegenData = Builder.CreateFDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+//			n.codegenData = Builder.CreateSDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+//			n.codegenData = Builder.CreateUDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
+			assert(false);
+			break;
+		case BinOp::Mod:
+			assert(false);
+			break;
+		case BinOp::Exp:
+			assert(false);
+			break;
+		case BinOp::Cat:
+			assert(false);
+			break;
+		case BinOp::ASL:
+			assert(false);
+			break;
+		case BinOp::ASR:
+			assert(false);
+			break;
+		case BinOp::LSR:
+			assert(false);
+			break;
+		case BinOp::BitAnd:
+			assert(false);
+			break;
+		case BinOp::BitOr:
+			assert(false);
+			break;
+		case BinOp::BitXor:
+			assert(false);
+			break;
+		case BinOp::LogicAnd:
+			assert(false);
+			break;
+		case BinOp::LogicOr:
+			assert(false);
+			break;
+		case BinOp::LogicXor:
+			assert(false);
+			break;
+		case BinOp::Eq:
+			assert(false);
+			break;
+		case BinOp::Ne:
+			assert(false);
+			break;
+		case BinOp::Gt:
+			assert(false);
+			break;
+		case BinOp::Ge:
+			assert(false);
+			break;
+		case BinOp::Lt:
+			assert(false);
+			break;
+		case BinOp::Le:
+			assert(false);
+			break;
+	}
+
 //	KSDbgInfo.emitLocation(this);
 //
 //	// Special case '=' because we don't want to emit the LHS as an expression.
@@ -259,7 +418,7 @@ void LLVMGenerator::visit(BinaryExprAST &n)
 //		// This assume we're building without RTTI because LLVM builds that way by
 //		// default.  If you build LLVM with RTTI this can be changed to a
 //		// dynamic_cast for automatic error checking.
-//		VariableExprAST *LHSE = static_cast<VariableExprAST *>(LHS.get());
+//		IdentifierExpr *LHSE = static_cast<IdentifierExpr *>(LHS.get());
 //		if (!LHSE)
 //			return ErrorV("destination of '=' must be a variable");
 //		// Codegen the RHS.
@@ -307,11 +466,11 @@ void LLVMGenerator::visit(BinaryExprAST &n)
 //	return Builder.CreateCall(F, Ops, "binop");
 }
 
-void LLVMGenerator::visit(IndexExprAST &n)
+void LLVMGenerator::visit(IndexExpr &n)
 {
 }
 
-void LLVMGenerator::visit(CallExprAST &n)
+void LLVMGenerator::visit(CallExpr &n)
 {
 //	KSDbgInfo.emitLocation(this);
 //
@@ -505,39 +664,44 @@ void LLVMGenerator::visit(TypeDecl &n)
 
 void LLVMGenerator::visit(ValDecl &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
 	::FunctionType *funcType = dynamic_cast<::FunctionType*>(n.type());
 	if (funcType)
 	{
 		// function declaration
 		funcType->accept(*this);
-		llvm::FunctionType *sig = (llvm::FunctionType*)t_type;
+		llvm::FunctionType *sig = (llvm::FunctionType*)funcType->cgData<LLVMData>()->type;
 
 		Function *proto = Function::Create(sig, Function::ExternalLinkage, n.name(), TheModule.get());
+		cg->value = proto;
 
 		FunctionLiteralExpr *func = (FunctionLiteralExpr*)n.init();
 		if (func)
 		{
+			Scope *old = scope;
+			scope = func->scope();
+
+			// Create a new basic block to start insertion into.
+			BasicBlock *block = BasicBlock::Create(ctx, "entry", proto);
+			Builder.SetInsertPoint(block);
+
 			// Set names for all arguments.
 			StatementList args = func->args();
 			size_t i = 0;
 			for (auto &a : proto->args())
 			{
 				VarDecl *arg = (VarDecl*)args[i++];
+
 				a.setName(arg->name());
-			}
 
-			// Create a new basic block to start insertion into.
-			BasicBlock *block = BasicBlock::Create(ctx, "entry", proto);
-			Builder.SetInsertPoint(block);
+				AllocaInst *alloc = Builder.CreateAlloca(a.getType(), nullptr, a.getName());
+				arg->cgData<LLVMData>()->value = alloc;
 
-//			// Record the function arguments in the NamedValues map.
-//			NamedValues.clear();
-//			unsigned ArgIdx = 0;
-			for (auto &a : proto->args())
-			{
 				// Create an alloca for this variable.
-				IRBuilder<> builder(&proto->getEntryBlock(), proto->getEntryBlock().begin());
-				AllocaInst *Alloca = builder.CreateAlloca(a.getType(), nullptr, a.getName());
+//				IRBuilder<> builder(&proto->getEntryBlock(), proto->getEntryBlock().begin());
+//				AllocaInst *Alloca = builder.CreateAlloca(a.getType(), nullptr, a.getName());
 
 //
 //				// Create a debug descriptor for the variable.
@@ -550,14 +714,19 @@ void LLVMGenerator::visit(ValDecl &n)
 //					Builder.GetInsertBlock());
 //
 				// Store the initial value into the alloca.
-				Builder.CreateStore(&a, Alloca);
+				Builder.CreateStore(&a, alloc);
 //
 //				// Add arguments to variable symbol table.
 //				NamedValues[Arg.getName()] = Alloca;
 			}
 //
 //			KSDbgInfo.emitLocation(Body.get());
-//
+
+			for (auto &s : func->statements())
+			{
+				s->accept(*this);
+			}
+
 //			if (Value *RetVal = Body->codegen())
 //			{
 //				// Finish off the function.
@@ -581,32 +750,36 @@ void LLVMGenerator::visit(ValDecl &n)
 //			// Pop off the lexical block for the function since we added it
 //			// unconditionally.
 //			KSDbgInfo.LexicalBlocks.pop_back();
+
+			scope = old;
 		}
 	}
 	else
 	{
 		// constant value
-		assert(false, "TODO");
+		assert(false);
 	}
 }
 
 void LLVMGenerator::visit(VarDecl &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
 	::FunctionType *pFunc = dynamic_cast<::FunctionType*>(n.type());
 	if (pFunc)
 	{
 		// function pointer
-		assert(false, "TODO");
+		assert(false);
 	}
 	else
 	{
-		llvm::Type *pType = nullptr;
 		n.type()->accept(*this);
-		pType = t_type;
+		llvm::Type *pType = n.type()->cgData<LLVMData>()->type;
 
-		if (dynamic_cast<::Module*>(scope))
+		if (dynamic_cast<::Module*>(scope->owner()))
 		{
-			Constant *pGlobal = TheModule->getOrInsertGlobal(n.name(), pType);
+			cg->value = TheModule->getOrInsertGlobal(n.name(), pType);
 		}
 		else
 		{

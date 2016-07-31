@@ -32,6 +32,8 @@ StatementList parse(FILE *file);
 extern "C" {
 	int main(int argc, const char *argv[])
 	{
+		GC_INIT();
+
 		// open source file
 		const char *pFilename = argv[1];
 		FILE *file;

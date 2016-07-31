@@ -32,10 +32,10 @@
     <ClCompile Include="src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\toy.cpp">
+    <ClCompile Include="src\semantic.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\semantic.cpp">
+    <ClCompile Include="src\toy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -13,11 +13,8 @@ void Semantic::run(const char *pFilename, StatementList moduleStatements)
 	if (pDot)
 		s.resize(pDot - pFilename);
 
-	module = new Module(pFilename, s);
-	scope = module;
-
-	for (auto s : moduleStatements)
-		s->accept(*this);
+	module = new Module(pFilename, s, moduleStatements);
+	module->accept(*this);
 }
 
 void Semantic::visit(Node &n)
@@ -32,12 +29,26 @@ void Semantic::visit(Declaration &n)
 {
 }
 
-void Semantic::visit(Scope &n)
-{
-}
-
 void Semantic::visit(Module &n)
 {
+	Scope *old = scope;
+	scope = n.scope();
+
+	for (auto s : n.statements())
+		s->accept(*this);
+
+	scope = old;
+}
+
+void Semantic::visit(ModuleStatement &n)
+{
+	module->name() = n.name();
+}
+
+void Semantic::visit(ReturnStatement &n)
+{
+	if (n.expression())
+		n.expression()->accept(*this);
 }
 
 void Semantic::visit(TypeExpr &n)
@@ -87,6 +98,7 @@ void Semantic::visit(Generic &n)
 
 void Semantic::visit(PrimitiveLiteralExpr &n)
 {
+	// todo: validate that 'value' is within 'type's precision limits
 }
 
 void Semantic::visit(ArrayLiteralExpr &n)
@@ -95,25 +107,51 @@ void Semantic::visit(ArrayLiteralExpr &n)
 
 void Semantic::visit(FunctionLiteralExpr &n)
 {
+	Scope *old = scope;
+	scope = n.scope();
+
+	// resolve parent scope...
+
+	// if is pure, no parent scope
+	// if is method, parent is struct
+	// else parent is module scope
+	scope->_parent = module->scope();
+
+	for (auto a : n.args())
+		a->accept(*this);
+	for (auto s : n.statements())
+		s->accept(*this);
+
+	scope = old;
 }
 
-void Semantic::visit(VariableExprAST &n)
+void Semantic::visit(IdentifierExpr &n)
+{
+	if(!n._target)
+		n._target = scope->getDecl(n.getName());
+}
+
+void Semantic::visit(TypeConvertExpr &n)
+{
+	// TODO: validate conversion is possible...
+}
+
+void Semantic::visit(UnaryExpr &n)
+{
+	n.operand()->accept(*this);
+}
+
+void Semantic::visit(BinaryExpr &n)
+{
+	n.lhs()->accept(*this);
+	n.rhs()->accept(*this);
+}
+
+void Semantic::visit(IndexExpr &n)
 {
 }
 
-void Semantic::visit(UnaryExprAST &n)
-{
-}
-
-void Semantic::visit(BinaryExprAST &n)
-{
-}
-
-void Semantic::visit(IndexExprAST &n)
-{
-}
-
-void Semantic::visit(CallExprAST &n)
+void Semantic::visit(CallExpr &n)
 {
 }
 
@@ -133,14 +171,14 @@ void Semantic::visit(TypeDecl &n)
 		// already declared!
 		return;
 	}
+
+	n._type->accept(*this);
+
 	scope->addDecl(n.name(), &n);
 }
 
 void Semantic::visit(ValDecl &n)
 {
-	if (!n._type && !n._init)
-		assert(false);// , "def statement needs either type or value!");
-
 	Declaration *decl = scope->getDecl(n._name, true);
 	if (decl)
 	{
@@ -148,12 +186,14 @@ void Semantic::visit(ValDecl &n)
 		return;
 	}
 
+	n._init->accept(*this);
+
 	if (!n._type)
 		n._type = n._init->type();
-	else if (!n.init())
-		n._init = n._type->init();
 	else
 	{
+		n._type->accept(*this);
+
 		// TODO: assert init.type -> type
 	}
 
@@ -172,13 +212,21 @@ void Semantic::visit(VarDecl &n)
 		return;
 	}
 
+	if (n._init)
+		n._init->accept(*this);
+
 	if (!n._type)
 		n._type = n._init->type();
-	else if (!n.init())
-		n._init = n._type->init();
 	else
 	{
-		// TODO: assert init.type -> type
+		n._type->accept(*this);
+
+		if (!n.init())
+			n._init = n._type->init();
+		else
+		{
+			// TODO: assert init.type -> type
+		}
 	}
 
 	scope->addDecl(n._name, &n);
