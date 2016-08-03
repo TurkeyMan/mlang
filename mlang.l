@@ -74,10 +74,19 @@ int			{ return I32; }
 uint		{ return U32; }
 long		{ return I64; }
 ulong		{ return U64; }
+cent		{ return I128; }
+ucent		{ return U128; }
+ssize_t		{ return IZ; }
+size_t		{ return UZ; }
+half		{ return F16; }
 float		{ return F32; }
 double		{ return F64; }
+extended	{ return F128; }
 
 "..."		{ return ELIPSIS; }
+
+"->"		{ return ARROW; }
+
 ".."		{ return SLICE; }
 "++"		{ return INCOP; }
 "--"		{ return DECOP; }
@@ -93,7 +102,8 @@ double		{ return F64; }
 
 "&&"		{ return AND; }
 "||"		{ return OR; }
-"^^"		{ return XOR; }
+
+"^^"		{ return POW; }
 
 ":="		{ return BINDEQ; }
 "*="		{ return MULEQ; }
@@ -107,7 +117,7 @@ double		{ return F64; }
 "^="		{ return BITXOREQ; }
 "||="		{ return OREQ; }
 "&&="		{ return ANDEQ; }
-"^^="		{ return XOREQ; }
+"^^="		{ return POWEQ; }
 "<<="		{ return SHLEQ; }
 ">>="		{ return ASREQ; }
 ">>>="		{ return LSREQ; }

@@ -7,12 +7,18 @@ class Semantic : public ASTVisitor
 private:
 	Module *module = nullptr;
 	Scope *scope = nullptr;
+	FunctionLiteralExpr *function = nullptr;
 
 public:
 	Semantic();
 
 	void run(const char *pFilename, StatementList module);
 	Module* getModule() const { return module; }
+
+	TypeExpr* typeForUnaryExpression(UnaryOp op, Expr *expr);
+	TypeExpr* typeForBinaryExpression(BinOp op, Expr *left, Expr *right);
+
+	Expr* makeConversion(Expr *expr, TypeExpr *newType, bool implicit);
 
 	void visit(Node &n) override;
 	void visit(Statement &n) override;

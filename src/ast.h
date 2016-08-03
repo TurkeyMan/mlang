@@ -28,6 +28,21 @@ owner<Expr> Error(const char *Str);
 //using map = std::map<K, T, P, gc_allocator<std::pair<const K, T>>>;
 
 
+enum TypeFlags { TF_Unsigned = 1, TF_Signed = 2, TF_Char = 4, TF_Float = 8, TF_Bool = 16 };
+
+extern uint8_t typeFlags[];
+extern uint8_t typeWidth[];
+extern uint8_t typeBytes[];
+extern const char *primTypeNames[];
+
+#define isFloat(pt) (typeFlags[(int)pt] & TF_Float)
+#define isBinary(pt) (typeFlags[(int)pt] & ~TF_Float)
+#define isSigned(pt) (typeFlags[(int)pt] & TF_Signed)
+#define isUnsigned(pt) (typeFlags[(int)pt] & TF_Unsigned)
+#define isInt(pt) (typeFlags[(int)pt] > 0 && typeFlags[(int)pt] < TF_Char)
+#define isChar(pt) (typeFlags[(int)pt] & TF_Char)
+#define isBool(pt) (typeFlags[(int)pt] & TF_Bool)
+
 template <typename T>
 struct List
 {
@@ -89,7 +104,7 @@ inline raw_ostream &indent(raw_ostream &O, int size) {
 
 enum class PrimType
 {
-	v, u1, i8, u8, i16, u16, i32, u32, i64, u64, iz, uz, f32, f64, c8, c16, c32
+	v, u1, i8, u8, c8, i16, u16, c16, i32, u32, c32, iz, uz, i64, u64, i128, u128, f16, f32, f64, f128
 };
 
 
@@ -220,6 +235,8 @@ public:
 
 class ReturnStatement : public Statement
 {
+	friend class Semantic;
+
 	Expr *_expression;
 
 public:
@@ -497,7 +514,7 @@ public:
 
 	PrimType primType() const { return _type; }
 	double getFloat() const { return f; }
-	int64_t getint() const { return i; }
+	int64_t getInt() const { return i; }
 	uint64_t getUint() const { return u; }
 	char32_t getChar() const { return c; }
 
@@ -509,18 +526,23 @@ public:
 	{
 		switch (_type)
 		{
+			case PrimType::f16:
 			case PrimType::f32:
 			case PrimType::f64:
+			case PrimType::f128:
 				return Expr::dump(out << f, ind) << '\n';
+			case PrimType::u1:
 			case PrimType::u8:
 			case PrimType::u16:
 			case PrimType::u32:
 			case PrimType::u64:
+			case PrimType::u128:
 				return Expr::dump(out << u, ind) << '\n';
 			case PrimType::i8:
 			case PrimType::i16:
 			case PrimType::i32:
 			case PrimType::i64:
+			case PrimType::i128:
 				return Expr::dump(out << i, ind) << '\n';
 			case PrimType::c8:
 			case PrimType::c16:
@@ -627,7 +649,7 @@ public:
 	const std::string &getName() const { return name; }
 
 	Declaration* target() { return _target; }
-	TypeExpr* type() override { assert(false); return nullptr; }
+	TypeExpr* type() override { return static_cast<ValDecl*>(_target)->type(); }
 
 	void accept(ASTVisitor &v) override;
 
@@ -642,10 +664,11 @@ class TypeConvertExpr : public Expr
 
 	Expr *_expr;
 	TypeExpr *_newType;
+	bool _implicit;
 
 public:
-	TypeConvertExpr(Expr *expr, TypeExpr *newType)
-		: Expr(), _expr(expr), _newType(newType){}
+	TypeConvertExpr(Expr *expr, TypeExpr *newType, bool implicit = true)
+		: Expr(), _expr(expr), _newType(newType), _implicit(implicit) {}
 
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _newType; }
@@ -666,8 +689,11 @@ enum class UnaryOp
 };
 class UnaryExpr : public Expr
 {
+	friend class Semantic;
+
 	UnaryOp _op;
 	Expr *_operand;
+	TypeExpr *_type = nullptr;
 
 public:
 	UnaryExpr(UnaryOp op, Expr *operand)
@@ -676,7 +702,7 @@ public:
 	UnaryOp op() { return _op; }
 	Expr* operand() { return _operand; }
 
-	TypeExpr* type() override { assert(false); return nullptr; }
+	TypeExpr* type() override { return _type; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -685,15 +711,18 @@ public:
 
 enum class BinOp
 {
-	Add, Sub, Mul, Div, Mod, Exp, Cat,
+	Add, Sub, Mul, Div, Mod, Pow, Cat,
 	ASL, ASR, LSR,
 	BitAnd, BitOr, BitXor, LogicAnd, LogicOr, LogicXor,
 	Eq, Ne, Gt, Ge, Lt, Le
 };
 class BinaryExpr : public Expr
 {
+	friend class Semantic;
+
 	BinOp _op;
 	Expr *_lhs, *_rhs;
+	TypeExpr *_type = nullptr;
 
 public:
 	BinaryExpr(BinOp op, Expr *lhs, Expr *rhs)
@@ -703,7 +732,7 @@ public:
 	Expr* lhs() { return _lhs; }
 	Expr* rhs() { return _rhs; }
 
-	TypeExpr* type() override { assert(false); return nullptr; }
+	TypeExpr* type() override { return _type; }
 
 	void accept(ASTVisitor &v) override;
 

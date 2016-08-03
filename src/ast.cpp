@@ -1,6 +1,25 @@
 #include "ast.h"
 #include "astvisitor.h"
 
+
+uint8_t typeFlags[] =
+{
+	0, 17, 2, 1, 5, 2, 1, 5, 2, 1, 5, 2, 1, 2, 1, 2, 1, 8, 8, 8, 8
+};
+uint8_t typeWidth[] =
+{
+	0, 1, 8, 8, 8, 16, 16, 16, 32, 32, 32, 64, 64, 64, 64, 128, 128, 16, 32, 64, 128
+};
+uint8_t typeBytes[] =
+{
+	0, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8, 8, 16, 16, 2, 4, 8, 16
+};
+const char *primTypeNames[] =
+{
+	"void", "u1", "i8", "u8", "c8", "i16", "u16", "c16", "i32", "u32", "c32", "iz", "uz", "i64", "u64", "i128", "u128", "f16", "f32", "f64", "f128"
+};
+
+
 void Node::accept(ASTVisitor &v) { v.visit(*this); }
 void Statement::accept(ASTVisitor &v) { v.visit(*this); }
 void Declaration::accept(ASTVisitor &v) { v.visit(*this); }
@@ -19,6 +38,7 @@ void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IdentifierExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void TypeConvertExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -59,13 +79,9 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 //** Type nodes **
 //****************
 
-static const char *primTypes[] =
-{
-	"v", "u1", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "iz", "uz", "f32", "f64", "c8", "c16", "c32"
-};
 std::string PrimitiveType::stringof() const
 {
-	return std::string("@") + primTypes[(size_t)type()];
+	return std::string("@") + primTypeNames[(size_t)type()];
 }
 raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 {
@@ -83,17 +99,23 @@ Expr* PrimitiveType::init()
 		case PrimType::u16:
 		case PrimType::u32:
 		case PrimType::u64:
+		case PrimType::u128:
+		case PrimType::uz:
 		case PrimType::i8:
 		case PrimType::i16:
 		case PrimType::i32:
 		case PrimType::i64:
+		case PrimType::i128:
+		case PrimType::iz:
 			_init = new PrimitiveLiteralExpr(_type, (uint64_t)0); break;
 		case PrimType::c8:
 		case PrimType::c16:
 		case PrimType::c32:
 			_init = new PrimitiveLiteralExpr(_type, (char32_t)0); break;
+		case PrimType::f16:
 		case PrimType::f32:
 		case PrimType::f64:
+		case PrimType::f128:
 			_init = new PrimitiveLiteralExpr(_type, 0.0); break;
 		case PrimType::v:
 		default:

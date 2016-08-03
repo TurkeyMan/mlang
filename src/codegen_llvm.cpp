@@ -13,6 +13,7 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 {
 	// Open a new module.
 	TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
+	TheModule->setTargetTriple(sys::getProcessTriple()); // x86_64-pc-windows-msvc18.0.0 ???
 
 	// Add the current debug info version into the module.
 	TheModule->addModuleFlag(llvm::Module::Warning, "Debug Info Version", DEBUG_METADATA_VERSION);
@@ -134,10 +135,22 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	case PrimType::i64:
 	case PrimType::u64:
 		cg->type = Type::getInt64Ty(ctx); break;
+	case PrimType::i128:
+	case PrimType::u128:
+		cg->type = Type::getInt128Ty(ctx); break;
+	case PrimType::iz:
+	case PrimType::uz:
+		cg->type = Type::getInt64Ty(ctx); break; // TODO: depends on target arch!
+	case PrimType::f16:
+		cg->type = Type::getHalfTy(ctx); break;
 	case PrimType::f32:
 		cg->type = Type::getFloatTy(ctx); break;
 	case PrimType::f64:
 		cg->type = Type::getDoubleTy(ctx); break;
+	case PrimType::f128:
+		cg->type = Type::getFP128Ty(ctx); break;
+//		cg->type = Type::getX86_FP80Ty(ctx); break;
+//		cg->type = Type::getPPC_FP128Ty(ctx); break;
 	default:
 		assert(false);
 	}
@@ -205,29 +218,39 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	case PrimType::u1:
 		cg->value = ConstantInt::get(ctx, APInt(1, n.getUint(), false)); break;
 	case PrimType::i8:
-		cg->value = ConstantInt::get(ctx, APInt(8, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(8, n.getInt(), true)); break;
 	case PrimType::u8:
 		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c8:
 		cg->value = ConstantInt::get(ctx, APInt(8, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i16:
-		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(16, n.getInt(), true)); break;
 	case PrimType::u16:
 		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c16:
 		cg->value = ConstantInt::get(ctx, APInt(16, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i32:
-		cg->value = ConstantInt::get(ctx, APInt(32, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(32, n.getInt(), true)); break;
 	case PrimType::u32:
 		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c32:
 		cg->value = ConstantInt::get(ctx, APInt(32, (uint64_t)n.getChar(), false)); break;
+	case PrimType::iz: // TODO: may not be 64 bits!
 	case PrimType::i64:
-		cg->value = ConstantInt::get(ctx, APInt(64, n.getUint(), true)); break;
+		cg->value = ConstantInt::get(ctx, APInt(64, n.getInt(), true)); break;
+	case PrimType::uz: // TODO: may not be 64 bits!
 	case PrimType::u64:
 		cg->value = ConstantInt::get(ctx, APInt(64, n.getUint(), false)); break;
+	case PrimType::i128:
+		// TODO: literal is not big enough...
+		cg->value = ConstantInt::get(ctx, APInt(128, n.getInt(), true)); break;
+	case PrimType::u128:
+		// TODO: literal is not big enough...
+		cg->value = ConstantInt::get(ctx, APInt(128, n.getUint(), false)); break;
+	case PrimType::f16:
 	case PrimType::f32:
 	case PrimType::f64:
+	case PrimType::f128:
 		cg->value = ConstantFP::get(ctx, APFloat(n.getFloat())); break;
 	case PrimType::v:
 		cg->value = nullptr; break;
@@ -252,7 +275,7 @@ void LLVMGenerator::visit(IdentifierExpr &n)
 	Declaration *decl = n.target();
 	decl->accept(*this);
 
-	cg->value = Builder.CreateLoad(decl->cgData<LLVMData>()->value);
+	cg->value = Builder.CreateLoad(decl->cgData<LLVMData>()->value, n.getName());
 /*
 	// Look this variable up in the function.
 	Value *V = NamedValues[Name];
@@ -265,8 +288,82 @@ void LLVMGenerator::visit(IdentifierExpr &n)
 */
 }
 
+// none=0, trunc=1, se=2, ze=3, fup=4, fdown=5, f2u=6, f2i=7, u2f=8, i2f=9, invalid=-1
+static char cast_flags[] =
+{	/* from     v  u1 b  ub c  s  us wc i  ui dc z  uz l  ul ct uc h  f  d  x */
+	/* v    */  0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+	/* u1   */ -1, 0, 3, 3,-1, 3, 3,-1, 3, 3,-1, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i8   */ -1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u8   */ -1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c8   */ -1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i16  */ -1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u16  */ -1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c16  */ -1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i32  */ -1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u32  */ -1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c32  */ -1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* iz   */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 9, 9, 9, 9,
+	/* uz   */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 3, 3, 8, 8, 8, 8,
+	/* i64  */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 9, 9, 9, 9,
+	/* u64  */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 3, 3, 8, 8, 8, 8,
+	/* i128 */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 9, 9, 9, 9,
+	/* u128 */ -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 8, 8, 8, 8,
+	/* f16  */ -1, 6, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 0, 4, 4, 4,
+	/* f32  */ -1, 6, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 0, 4, 4,
+	/* f64  */ -1, 6, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 5, 0, 4,
+	/* f128 */ -1, 6, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 5, 5, 0,
+};
+
+static llvm::Instruction::CastOps cast_types[] =
+{
+	(llvm::Instruction::CastOps)0,
+	llvm::Instruction::CastOps::Trunc,
+	llvm::Instruction::CastOps::SExt,
+	llvm::Instruction::CastOps::ZExt,
+	llvm::Instruction::CastOps::FPExt,
+	llvm::Instruction::CastOps::FPTrunc,
+	llvm::Instruction::CastOps::FPToUI,
+	llvm::Instruction::CastOps::FPToSI,
+	llvm::Instruction::CastOps::UIToFP,
+	llvm::Instruction::CastOps::SIToFP
+};
+
 void LLVMGenerator::visit(TypeConvertExpr &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+	if (!cg) return;
+
+	Expr *expr = n.expr();
+	expr->accept(*this);
+	TypeExpr *type = n.type();
+	type->accept(*this);
+
+	LLVMData *exprCg = expr->cgData<LLVMData>();
+	LLVMData *typeCg = type->cgData<LLVMData>();
+
+	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(type);
+	if (pt)
+	{
+		TypeExpr *from_type = expr->type();
+
+		PrimType src;
+		PrimitiveType *from_pt = dynamic_cast<PrimitiveType*>(from_type);
+		if (!from_pt)
+		{
+			// TODO: can from_type be wrangled into a primitive type??
+			assert(false);
+		}
+		else
+			src = from_pt->type();
+
+		int castType = cast_flags[(int)src*21 + (int)pt->type()];
+		assert(castType >= 0);
+
+		if (castType == 0)
+			cg->value = exprCg->value;
+		else
+			cg->value = Builder.CreateCast(cast_types[castType], exprCg->value, typeCg->type);
+	}
 }
 
 void LLVMGenerator::visit(UnaryExpr &n)
@@ -276,36 +373,53 @@ void LLVMGenerator::visit(UnaryExpr &n)
 
 	Expr *operand = n.operand();
 	operand->accept(*this);
+	TypeExpr *type = n.type();
+	type->accept(*this);
 
-	LLVMData *operandCg = operand->cgData<LLVMData>();
-
-	switch (n.op())
+	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(type);
+	if (pt)
 	{
+		LLVMData *operandCg = operand->cgData<LLVMData>();
+
+		PrimType primType = pt->type();
+
+		switch (n.op())
+		{
 		case UnaryOp::Neg:
-//			n.codegenData = Builder.CreateFNeg(operandCg->value);
-			cg->value = Builder.CreateNeg(n.operand()->cgData<LLVMData>()->value);
+			assert(isInt(primType) || isFloat(primType));
+			if(isFloat(primType))
+				cg->value = Builder.CreateFNeg(operandCg->value, "fneg");
+			else
+				cg->value = Builder.CreateNeg(operandCg->value, "neg");
 			break;
 		case UnaryOp::Pos:
+			assert(isInt(primType) || isFloat(primType));
 			cg->value = operandCg->value;
 			break;
 		case UnaryOp::LogicNot:
-			cg->value = Builder.CreateNot(operandCg->value);
+			assert(primType > PrimType::v);
+			cg->value = Builder.CreateNot(operandCg->value, "not");
 			break;
 		case UnaryOp::BitNot:
+			assert(isBinary(primType));
 			cg->value = Builder.CreateXor(operandCg->value, (uint64_t)-1, "neg");
 			break;
 		case UnaryOp::PreDec:
-//			n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
+//				n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
 			assert(false);
 			break;
 		case UnaryOp::PreInc:
-//			n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
+//				n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
 			assert(false);
 			break;
 		default:
 			assert(false);
 			break;
+		}
 	}
+	else
+		assert(false);
+
 
 //	Value *OperandV = Operand->codegen();
 //	if (!OperandV)
@@ -326,87 +440,226 @@ void LLVMGenerator::visit(BinaryExpr &n)
 
 	Expr *lhs = n.lhs();
 	n.lhs()->accept(*this);
-
 	Expr *rhs = n.rhs();
 	n.rhs()->accept(*this);
+	TypeExpr *type = n.type();
+	type->accept(*this);
 
 	LLVMData *lhCg = lhs->cgData<LLVMData>();
 	LLVMData *rhCg = rhs->cgData<LLVMData>();
 
-	switch (n.op())
+	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(type);
+	if (pt)
 	{
+		PrimType primType = pt->type();
+
+		switch (n.op())
+		{
 		case BinOp::Add:
-//			n.codegenData = Builder.CreateFAdd((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-			cg->value = Builder.CreateAdd(lhCg->value, rhCg->value);
+			assert(primType > PrimType::u1);
+			if (isFloat(primType))
+				cg->value = Builder.CreateFAdd(lhCg->value, rhCg->value, "fadd");
+			else
+				cg->value = Builder.CreateAdd(lhCg->value, rhCg->value, "add");
 			break;
 		case BinOp::Sub:
-//			n.codegenData = Builder.CreateFSub((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-			cg->value = Builder.CreateSub(lhCg->value, rhCg->value);
+			assert(primType > PrimType::u1);
+			if (isFloat(primType))
+				cg->value = Builder.CreateFSub(lhCg->value, rhCg->value, "fsub");
+			else
+				cg->value = Builder.CreateSub(lhCg->value, rhCg->value, "sub");
 			break;
 		case BinOp::Mul:
-//			n.codegenData = Builder.CreateFMul((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-			cg->value = Builder.CreateMul(lhCg->value, rhCg->value);
+			assert(primType > PrimType::u1);
+			if (isFloat(primType))
+				cg->value = Builder.CreateFMul(lhCg->value, rhCg->value, "fmul");
+			else
+				cg->value = Builder.CreateMul(lhCg->value, rhCg->value, "mul");
 			break;
 		case BinOp::Div:
-//			n.codegenData = Builder.CreateFDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-//			n.codegenData = Builder.CreateSDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-//			n.codegenData = Builder.CreateUDiv((llvm::Value*)n.lhs()->codegenData, (llvm::Value*)n.rhs()->codegenData);
-			assert(false);
+			assert(primType > PrimType::u1);
+			if (isFloat(primType))
+				cg->value = Builder.CreateFDiv(lhCg->value, rhCg->value, "fdiv");
+			else if (isUnsigned(primType))
+				cg->value = Builder.CreateUDiv(lhCg->value, rhCg->value, "udiv");
+			else
+				cg->value = Builder.CreateSDiv(lhCg->value, rhCg->value, "sdiv");
 			break;
 		case BinOp::Mod:
-			assert(false);
+			assert(primType > PrimType::u1);
+			if (isFloat(primType))
+				cg->value = Builder.CreateFRem(lhCg->value, rhCg->value, "fmod");
+			else if (isUnsigned(primType))
+				cg->value = Builder.CreateURem(lhCg->value, rhCg->value, "umod");
+			else
+				cg->value = Builder.CreateSRem(lhCg->value, rhCg->value, "smod");
 			break;
-		case BinOp::Exp:
-			assert(false);
+		case BinOp::Pow:
+		{
+			assert(primType > PrimType::u1);
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			PrimitiveType *rhpt = dynamic_cast<PrimitiveType*>(rhs->type());
+			assert(lhpt && rhpt);
+			PrimType lh = lhpt->type();
+			PrimType rh = rhpt->type();
+			if (isFloat(rh))
+			{
+				llvm::Function *pow = TheModule->getFunction(std::string("llvm.pow.").append(primTypeNames[(int)lh]));
+				llvm::Value* args[2] = { lhCg->value, rhCg->value };
+				cg->value = Builder.CreateCall(pow, args, "pow");
+			}
+			else if (isInt(rh))
+			{
+				llvm::Function *pow = TheModule->getFunction(std::string("llvm.powi.").append(primTypeNames[(int)lh]));
+				llvm::Value* args[2] = { lhCg->value, rhCg->value };
+				cg->value = Builder.CreateCall(pow, args, "powi");
+			}
 			break;
+		}
 		case BinOp::Cat:
 			assert(false);
 			break;
 		case BinOp::ASL:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateShl(lhCg->value, rhCg->value, "asl");
 			break;
 		case BinOp::ASR:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateAShr(lhCg->value, rhCg->value, "asr");
 			break;
 		case BinOp::LSR:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateLShr(lhCg->value, rhCg->value, "lsr");
 			break;
 		case BinOp::BitAnd:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateAnd(lhCg->value, rhCg->value, "and");
 			break;
 		case BinOp::BitOr:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateOr(lhCg->value, rhCg->value, "or");
 			break;
 		case BinOp::BitXor:
-			assert(false);
+			assert(isBinary(primType));
+			cg->value = Builder.CreateXor(lhCg->value, rhCg->value, "xor");
 			break;
 		case BinOp::LogicAnd:
-			assert(false);
+			assert(isBool(primType));
+			cg->value = Builder.CreateAnd(lhCg->value, rhCg->value, "and");
 			break;
 		case BinOp::LogicOr:
-			assert(false);
+			assert(isBool(primType));
+			cg->value = Builder.CreateOr(lhCg->value, rhCg->value, "or");
 			break;
 		case BinOp::LogicXor:
-			assert(false);
+			assert(isBool(primType));
+			cg->value = Builder.CreateXor(lhCg->value, rhCg->value, "xor");
 			break;
 		case BinOp::Eq:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpOEQ(lhCg->value, rhCg->value, "feq");
+				else if (isBinary(lhPrimType))
+					cg->value = Builder.CreateICmpEQ(lhCg->value, rhCg->value, "eq");
+				else
+					assert(false);
+			}
 			break;
+		}
 		case BinOp::Ne:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpONE(lhCg->value, rhCg->value, "fne");
+				else if (isBinary(lhPrimType))
+					cg->value = Builder.CreateICmpNE(lhCg->value, rhCg->value, "ne");
+				else
+					assert(false);
+			}
 			break;
+		}
 		case BinOp::Gt:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpOGT(lhCg->value, rhCg->value, "fgt");
+				else if (isUnsigned(lhPrimType))
+					cg->value = Builder.CreateICmpUGT(lhCg->value, rhCg->value, "ugt");
+				else if (isSigned(lhPrimType))
+					cg->value = Builder.CreateICmpSGT(lhCg->value, rhCg->value, "sgt");
+				else
+					assert(false);
+			}
 			break;
+		}
 		case BinOp::Ge:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpOGE(lhCg->value, rhCg->value, "fge");
+				else if (isUnsigned(lhPrimType))
+					cg->value = Builder.CreateICmpUGE(lhCg->value, rhCg->value, "uge");
+				else if (isSigned(lhPrimType))
+					cg->value = Builder.CreateICmpSGE(lhCg->value, rhCg->value, "sge");
+				else
+					assert(false);
+			}
 			break;
+		}
 		case BinOp::Lt:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpOLT(lhCg->value, rhCg->value, "flt");
+				else if (isUnsigned(lhPrimType))
+					cg->value = Builder.CreateICmpULT(lhCg->value, rhCg->value, "ult");
+				else if (isSigned(lhPrimType))
+					cg->value = Builder.CreateICmpSLT(lhCg->value, rhCg->value, "slt");
+				else
+					assert(false);
+			}
 			break;
+		}
 		case BinOp::Le:
-			assert(false);
+		{
+			assert(isBool(primType));
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
+			if (lhpt)
+			{
+				PrimType lhPrimType = lhpt->type();
+				if (isFloat(lhPrimType))
+					cg->value = Builder.CreateFCmpOLE(lhCg->value, rhCg->value, "fle");
+				else if (isUnsigned(lhPrimType))
+					cg->value = Builder.CreateICmpULE(lhCg->value, rhCg->value, "ule");
+				else if (isSigned(lhPrimType))
+					cg->value = Builder.CreateICmpSLE(lhCg->value, rhCg->value, "sle");
+				else
+					assert(false);
+			}
 			break;
+		}
+		}
 	}
 
 //	KSDbgInfo.emitLocation(this);
@@ -696,7 +949,7 @@ void LLVMGenerator::visit(ValDecl &n)
 
 				a.setName(arg->name());
 
-				AllocaInst *alloc = Builder.CreateAlloca(a.getType(), nullptr, a.getName());
+				AllocaInst *alloc = Builder.CreateAlloca(a.getType(), nullptr, a.getName() + ".addr");
 				arg->cgData<LLVMData>()->value = alloc;
 
 				// Create an alloca for this variable.

@@ -41,10 +41,10 @@ static StatementList parseTree = StatementList::empty();
 %token DEF VAR
 %token CONST
 %token IF ELSE FOR FOREACH WHILE MATCH RETURN BREAK
-%token ELIPSIS SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR XOR
-%token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ XOREQ SHLEQ ASREQ LSREQ
+%token ELIPSIS ARROW SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW
+%token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
 
-%token VOID U1 I8 U8 I16 U16 I32 U32 I64 U64 F32 F64
+%token VOID U1 I8 U8 I16 U16 I32 U32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
 
 // define the "terminal symbol" token types I'm going to use (in CAPS
 // by convention), and associate each with a field of the union:
@@ -52,7 +52,7 @@ static StatementList parseTree = StatementList::empty();
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
-%type <expr> literal array_literal function_literal primary_value_expression postfix_value_expression unary_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression xor_value_expression or_value_expression assign_value_expression value_expression
+%type <expr> literal array_literal function_literal primary_value_expression postfix_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
 %type <exprList> value_expression_list
 
 %type <type> primitive_type primary_type_expression type_expression struct_definition tuple_definition
@@ -228,6 +228,7 @@ tuple_definition:
 function_literal:
 	function_arguments '{' '}'						{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr); }
 	| function_arguments '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($3, $1, nullptr); }
+	| function_arguments ARROW type_expression '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3); }
 	;
 
 value_expression_list:
@@ -298,11 +299,15 @@ unary_value_expression:
 	| unary_operator postfix_value_expression				{ $$ = new UnaryExpr($1, $2); }
 	;
 
-mul_value_expression:
+pow_value_expression:
 	unary_value_expression									{ $$ = $1; }
-	| mul_value_expression '*' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Mul, $1, $3); }
-	| mul_value_expression '/' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Div, $1, $3); }
-	| mul_value_expression '%' unary_value_expression		{ $$ = new BinaryExpr(BinOp::Mod, $1, $3); }
+	| pow_value_expression POW unary_value_expression		{ $$ = new BinaryExpr(BinOp::Pow, $1, $3); }
+
+mul_value_expression:
+	pow_value_expression									{ $$ = $1; }
+	| mul_value_expression '*' pow_value_expression			{ $$ = new BinaryExpr(BinOp::Mul, $1, $3); }
+	| mul_value_expression '/' pow_value_expression			{ $$ = new BinaryExpr(BinOp::Div, $1, $3); }
+	| mul_value_expression '%' pow_value_expression			{ $$ = new BinaryExpr(BinOp::Mod, $1, $3); }
 	;
 add_value_expression:
 	mul_value_expression									{ $$ = $1; }
@@ -344,13 +349,9 @@ and_value_expression:
  	bitor_value_expression									{ $$ = $1; }
  	| and_value_expression AND bitor_value_expression		{ $$ = new BinaryExpr(BinOp::LogicAnd, $1, $3); }
 	;
-xor_value_expression:
- 	and_value_expression									{ $$ = $1; }
- 	| xor_value_expression XOR and_value_expression			{ $$ = new BinaryExpr(BinOp::LogicXor, $1, $3); }
-	;
 or_value_expression:
- 	xor_value_expression									{ $$ = $1; }
- 	| or_value_expression OR xor_value_expression			{ $$ = new BinaryExpr(BinOp::LogicOr, $1, $3); }
+ 	and_value_expression									{ $$ = $1; }
+ 	| or_value_expression OR and_value_expression			{ $$ = new BinaryExpr(BinOp::LogicOr, $1, $3); }
 	;
 
 assign_operator:
@@ -362,12 +363,12 @@ assign_operator:
 	| ADDEQ		{ Push(Add(Generic::Type::OpAddEq)); }
 	| SUBEQ		{ Push(Add(Generic::Type::OpSubEq)); }
 	| CONCATEQ	{ Push(Add(Generic::Type::OpConcatEq)); }
-	| BITOREQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
-	| BITANDEQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
-	| BITXOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
-	| OREQ		{ Push(Add(Generic::Type::OpAndEq)); }
-	| ANDEQ		{ Push(Add(Generic::Type::OpXorEq)); }
-	| XOREQ		{ Push(Add(Generic::Type::OpOrEq)); }
+	| BITOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
+	| BITANDEQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
+	| BITXOREQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
+	| OREQ		{ Push(Add(Generic::Type::OpOrEq)); }
+	| ANDEQ		{ Push(Add(Generic::Type::OpAndEq)); }
+	| POWEQ		{ Push(Add(Generic::Type::OpPowEq)); }
 	| SHLEQ		{ Push(Add(Generic::Type::OpASLEq)); }
 	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
 	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
@@ -395,8 +396,14 @@ primitive_type:
 	| U32	{ $$ = new PrimitiveType(PrimType::u32); }
 	| I64	{ $$ = new PrimitiveType(PrimType::i64); }
 	| U64	{ $$ = new PrimitiveType(PrimType::u64); }
+	| I128	{ $$ = new PrimitiveType(PrimType::i128); }
+	| U128	{ $$ = new PrimitiveType(PrimType::u128); }
+	| IZ	{ $$ = new PrimitiveType(PrimType::iz); }
+	| UZ	{ $$ = new PrimitiveType(PrimType::uz); }
+	| F16	{ $$ = new PrimitiveType(PrimType::f16); }
 	| F32	{ $$ = new PrimitiveType(PrimType::f32); }
 	| F64	{ $$ = new PrimitiveType(PrimType::f64); }
+	| F128	{ $$ = new PrimitiveType(PrimType::f128); }
 	;
 
 primary_type_expression:

@@ -17,6 +17,44 @@ void Semantic::run(const char *pFilename, StatementList moduleStatements)
 	module->accept(*this);
 }
 
+TypeExpr* Semantic::typeForUnaryExpression(UnaryOp op, Expr *expr)
+{
+	switch (op)
+	{
+		case UnaryOp::LogicNot:
+			return new PrimitiveType(PrimType::u1);
+		default:
+			break;
+	}
+	return expr->type();
+}
+TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
+{
+	switch (op)
+	{
+		case BinOp::LogicAnd:
+		case BinOp::LogicOr:
+		case BinOp::LogicXor:
+		case BinOp::Eq:
+		case BinOp::Ne:
+		case BinOp::Gt:
+		case BinOp::Ge:
+		case BinOp::Lt:
+		case BinOp::Le:
+			return new PrimitiveType(PrimType::u1);
+		default:
+			break;
+	}
+
+	// TODO: check the conversion is okay...
+	return left->type();
+}
+
+Expr* Semantic::makeConversion(Expr *expr, TypeExpr *newType, bool implicit)
+{
+	return new TypeConvertExpr(expr, newType, implicit);
+}
+
 void Semantic::visit(Node &n)
 {
 }
@@ -47,8 +85,14 @@ void Semantic::visit(ModuleStatement &n)
 
 void Semantic::visit(ReturnStatement &n)
 {
-	if (n.expression())
-		n.expression()->accept(*this);
+	Expr *expr = n.expression();
+	if (expr)
+		expr->accept(*this);
+
+	// TODO: only do conversion if we need to!
+	FunctionType *fntype = dynamic_cast<FunctionType*>(function->type());
+	n._expression = makeConversion(expr, fntype->returnType(), true);
+	n._expression->accept(*this);
 }
 
 void Semantic::visit(TypeExpr &n)
@@ -109,6 +153,8 @@ void Semantic::visit(FunctionLiteralExpr &n)
 {
 	Scope *old = scope;
 	scope = n.scope();
+	FunctionLiteralExpr *oldfn = function;
+	function = &n;
 
 	// resolve parent scope...
 
@@ -122,6 +168,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	for (auto s : n.statements())
 		s->accept(*this);
 
+	function = oldfn;
 	scope = old;
 }
 
@@ -139,12 +186,52 @@ void Semantic::visit(TypeConvertExpr &n)
 void Semantic::visit(UnaryExpr &n)
 {
 	n.operand()->accept(*this);
+
+	// TODO: choose proper result type
+	//       cast operant to result type
+	n._type = typeForUnaryExpression(n.op(), n.operand());
 }
 
 void Semantic::visit(BinaryExpr &n)
 {
 	n.lhs()->accept(*this);
 	n.rhs()->accept(*this);
+
+	switch (n.op())
+	{
+		case BinOp::Pow:
+		{
+			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(n.lhs()->type());
+			PrimitiveType *rhpt = dynamic_cast<PrimitiveType*>(n.rhs()->type());
+			if (lhpt && rhpt)
+			{
+				PrimType lh = rhpt->type();
+				PrimType rh = rhpt->type();
+				if (isInt(lh) && isInt(rh))
+				{
+					// int pow
+					// HACK, powi for now...
+					n._lhs = makeConversion(n.lhs(), new PrimitiveType(PrimType::f64), true);
+					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32), true);
+				}
+				else if (isFloat(lh) && isInt(rh))
+				{
+					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32), true);
+				}
+				else if (isFloat(lh) && isFloat(rh))
+				{
+					// int pow
+					// HACK, powi for now...
+				}
+			}
+
+			break;
+		}
+	}
+
+	// TODO: choose proper result type
+	//       cast args to result type
+	n._type = typeForBinaryExpression(n.op(), n.lhs(), n.rhs());
 }
 
 void Semantic::visit(IndexExpr &n)
