@@ -15,7 +15,7 @@ module test;
 
 var x : long = 2;
 
-def main : int(long) = (argc : long) -> int {
+def main : int(long, float) = (argc : long, poo : float) -> int {
 	return (~argc + argc*argc << 2) >= argc%2;
 };
 
