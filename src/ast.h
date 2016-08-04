@@ -677,7 +677,7 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
 		Expr::dump(out << "cast\n", ind);
-		_newType->dump(indent(out, ind + 1) << "targettype: ", ind + 1);
+		_newType->dump(indent(out, ind + 1) << "target: ", ind + 1);
 		_expr->dump(indent(out, ind + 1) << "expr: ", ind + 1);
 		return out;
 	}
@@ -781,25 +781,33 @@ public:
 	}
 };
 
-/// IfExprAST - Expression class for if/then/else.
-class IfExprAST : public Expr {
-	owner<Expr> Cond, Then, Else;
+class IfStatement : public Statement
+{
+	friend class Semantic;
+
+	Expr *_cond;
+	Scope *_then = nullptr;
+	Scope *_else = nullptr;
+
+	StatementList _thenStatements;
+	StatementList _elseStatements;
 
 public:
-	IfExprAST(SourceLocation Loc, owner<Expr> Cond,
-		owner<Expr> Then, owner<Expr> Else)
-		: Expr(Loc), Cond(std::move(Cond)), Then(std::move(Then)),
-		Else(std::move(Else)) {}
+	IfStatement(Expr *cond, StatementList thenStatements, StatementList elseStatements)
+		: _cond(cond), _thenStatements(thenStatements), _elseStatements(elseStatements)
+	{}
+
+	Expr *cond() { return _cond; }
+
+	Scope* thenScope() { return _then; }
+	StatementList thenStatements() { return _thenStatements; }
+
+	Scope* elseScope() { return _else; }
+	StatementList elseStatements() { return _elseStatements; }
 
 	void accept(ASTVisitor &v) override;
 
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		Expr::dump(out << "if", ind);
-		Cond->dump(indent(out, ind) << "Cond:", ind + 1);
-		Then->dump(indent(out, ind) << "Then:", ind + 1);
-		Else->dump(indent(out, ind) << "Else:", ind + 1);
-		return out;
-	}
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
 /// ForExprAST - Expression class for for/in.

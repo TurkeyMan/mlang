@@ -113,7 +113,7 @@ public:
 	void visit(BinaryExpr &n) override;
 	void visit(IndexExpr &n) override;
 	void visit(CallExpr &n) override;
-	void visit(IfExprAST &n) override;
+	void visit(IfStatement &n) override;
 	void visit(ForExprAST &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;

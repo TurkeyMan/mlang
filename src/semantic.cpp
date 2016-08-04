@@ -50,7 +50,7 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 	return left->type();
 }
 
-Expr* Semantic::makeConversion(Expr *expr, TypeExpr *newType, bool implicit)
+Expr* Semantic::makeConversion(Expr *expr, TypeExpr *newType, bool implicit = true)
 {
 	return new TypeConvertExpr(expr, newType, implicit);
 }
@@ -91,7 +91,7 @@ void Semantic::visit(ReturnStatement &n)
 
 	// TODO: only do conversion if we need to!
 	FunctionType *fntype = dynamic_cast<FunctionType*>(function->type());
-	n._expression = makeConversion(expr, fntype->returnType(), true);
+	n._expression = makeConversion(expr, fntype->returnType());
 	n._expression->accept(*this);
 }
 
@@ -211,12 +211,12 @@ void Semantic::visit(BinaryExpr &n)
 				{
 					// int pow
 					// HACK, powi for now...
-					n._lhs = makeConversion(n.lhs(), new PrimitiveType(PrimType::f64), true);
-					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32), true);
+					n._lhs = makeConversion(n.lhs(), new PrimitiveType(PrimType::f64));
+					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32));
 				}
 				else if (isFloat(lh) && isInt(rh))
 				{
-					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32), true);
+					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32));
 				}
 				else if (isFloat(lh) && isFloat(rh))
 				{
@@ -242,8 +242,26 @@ void Semantic::visit(CallExpr &n)
 {
 }
 
-void Semantic::visit(IfExprAST &n)
+void Semantic::visit(IfStatement &n)
 {
+	n._cond = makeConversion(n._cond, new PrimitiveType(PrimType::u1));
+
+	if (n._thenStatements.length > 0)
+		n._then = new Scope(scope, &n);
+	if (n._elseStatements.length > 0)
+		n._else = new Scope(scope, &n);
+
+	Scope *old = scope;
+
+	scope = n._then;
+	for (auto s : n._thenStatements)
+		s->accept(*this);
+
+	scope = n._else;
+	for (auto s : n._elseStatements)
+		s->accept(*this);
+
+	scope = old;
 }
 
 void Semantic::visit(ForExprAST &n)

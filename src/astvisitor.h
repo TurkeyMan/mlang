@@ -28,7 +28,7 @@ public:
 	virtual void visit(BinaryExpr &n) {}
 	virtual void visit(IndexExpr &n) {}
 	virtual void visit(CallExpr &n) {}
-	virtual void visit(IfExprAST &n) {}
+	virtual void visit(IfStatement &n) {}
 	virtual void visit(ForExprAST &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}

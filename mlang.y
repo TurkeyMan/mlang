@@ -40,7 +40,7 @@ static StatementList parseTree = StatementList::empty();
 %token MODULE STATIC
 %token DEF VAR
 %token CONST
-%token IF ELSE FOR FOREACH WHILE MATCH RETURN BREAK
+%token IF ELSE FOR FOREACH WHILE MATCH RETURN BREAK CAST
 %token ELIPSIS ARROW SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW
 %token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
 
@@ -112,7 +112,7 @@ code_statement:
 	| var_statement				{ $$ = $1; }
 //	| static_control_statement
 	| control_statement			{ $$ = $1; }
-//	| expression_statement
+//	| expression_statement		{ $$ = $1; }
 	| empty_statement			{ $$ = $1; }
 	;
 
@@ -145,7 +145,7 @@ var_statement:
 	;
 
 expression_statement:
-	value_expression ';'			{ Print($1); }
+//	value_expression ';'			{ $$ = $1; }
 	;
 
 template_arguments:
@@ -177,8 +177,8 @@ control_statement:
 	RETURN ';'						{ $$ = new ReturnStatement(nullptr); }
 	| RETURN value_expression ';'	{ $$ = new ReturnStatement($2); }
 //	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
-//	| IF '(' value_expression ')' body ELSE body
-//	| IF '(' value_expression ')' body
+	| IF '(' value_expression ')' body ELSE body	{ $$ = new IfExpr($3, $5, $7); }
+	| IF '(' value_expression ')' body				{ $$ = new IfExpr($3, $5, StatementList::empty()); }
 //	| WHILE '(' value_expression ')' body
 //	| FOR body
 //	| FOREACH body
@@ -297,6 +297,7 @@ unary_operator:
 unary_value_expression:
 	postfix_value_expression								{ $$ = $1; }
 	| unary_operator postfix_value_expression				{ $$ = new UnaryExpr($1, $2); }
+	| CAST '(' type_expression ')' postfix_value_expression	{ $$ = new TypeConvertExpr($5, $3, false); }
 	;
 
 pow_value_expression:

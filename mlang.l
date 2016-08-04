@@ -64,6 +64,8 @@ match		{ return MATCH; }
 return		{ return RETURN; }
 break		{ return BREAK; }
 
+cast		{ return CAST; }
+
 void		{ return VOID; }
 bool		{ return U1; }
 byte		{ return I8; }

@@ -43,7 +43,7 @@ void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void IfExprAST::accept(ASTVisitor &v) { v.visit(*this); }
+void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ForExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
@@ -195,8 +195,28 @@ static const char *binOps[] =
 raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "binary" << binOps[(int)_op] << "\n", ind);
-	_lhs->dump(indent(out, ind + 1) << "lhs: ", ind + 1);
-	_rhs->dump(indent(out, ind + 1) << "rhs: ", ind + 1);
+	_lhs->dump(indent(out, ind) << "lhs: ", ind + 1);
+	_rhs->dump(indent(out, ind) << "rhs: ", ind + 1);
+	return out;
+}
+
+
+raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
+{
+	Statement::dump(out << "if\n", ind);
+	ind++;
+	_cond->dump(indent(out, ind) << "cond: ", ind + 1);
+	indent(out, ind) << "then: {\n";
+	for (auto s : _thenStatements)
+		s->dump(indent(out, ind + 1), ind + 1);
+	indent(out, ind) << "}\n";
+	if (_elseStatements.length > 0)
+	{
+		indent(out, ind) << "else: {\n";
+		for (auto s : _elseStatements)
+			s->dump(indent(out, ind + 1), ind + 1);
+		indent(out, ind) << "}\n";
+	}
 	return out;
 }
 

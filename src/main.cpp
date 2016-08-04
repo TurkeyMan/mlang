@@ -50,6 +50,10 @@ extern "C" {
 		// done with the file
 		fclose(file);
 
+		// semantic
+		Semantic semantic;
+		semantic.run(pFilename, module);
+
 		// dump parse tree
 		FILE *ast = nullptr;
 		if (argc >= 4)
@@ -80,10 +84,6 @@ extern "C" {
 			s->dump(os, 0);
 		os.flush();
 		fclose(ast);
-
-		// semantic
-		Semantic semantic;
-		semantic.run(pFilename, module);
 
 		// codegen
 		std::string code = Codegen(semantic.getModule());

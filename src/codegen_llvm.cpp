@@ -752,8 +752,62 @@ void LLVMGenerator::visit(CallExpr &n)
 //	return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
 }
 
-void LLVMGenerator::visit(IfExprAST &n)
+void LLVMGenerator::visit(IfStatement &n)
 {
+	n.cond()->accept(*this);
+	LLVMData *cg = n.cond()->cgData<LLVMData>();
+
+	Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+	BasicBlock *thenBlock = BasicBlock::Create(ctx, "then", TheFunction);
+	BasicBlock *elseBlock = n.elseStatements().length > 0 ? BasicBlock::Create(ctx, "else") : nullptr;
+	BasicBlock *afterBlock = BasicBlock::Create(ctx, "continue");
+
+	Builder.CreateCondBr(cg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
+
+	// emit 'then' block
+	Scope *old = scope;
+	scope = n.thenScope();
+	Builder.SetInsertPoint(thenBlock);
+
+	// emit statements...
+	for (auto &s : n.thenStatements())
+		s->accept(*this);
+
+//	Value *thenV = block result expression; for if statement *expressions*
+
+	Builder.CreateBr(afterBlock);
+	thenBlock = Builder.GetInsertBlock();
+
+	if (elseBlock)
+	{
+		// emit 'else' block
+		scope = n.elseScope();
+		TheFunction->getBasicBlockList().push_back(elseBlock);
+		Builder.SetInsertPoint(elseBlock);
+
+		// emit statements...
+		for (auto &s : n.elseStatements())
+			s->accept(*this);
+
+//		Value *elseV = block result expression; for if statement *expressions*
+
+		Builder.CreateBr(afterBlock);
+		elseBlock = Builder.GetInsertBlock();
+	}
+
+	// continue
+	scope = old;
+	TheFunction->getBasicBlockList().push_back(afterBlock);
+	Builder.SetInsertPoint(afterBlock);
+
+	// saw we want the if statement to be an expression... then PHI node will select the 'result' from each block...
+//	PHINode *PN = Builder.CreatePHI(llvm::Type::getDoubleTy(ctx), 2, "iftmp");
+//	PN->addIncoming(thenV, thenBlock);
+//	PN->addIncoming(elseV, elseBlock);
+//	cg->value = PN;
+
+
 //	KSDbgInfo.emitLocation(this);
 //
 //	Value *CondV = Cond->codegen();
