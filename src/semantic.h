@@ -25,7 +25,10 @@ public:
 	void visit(Declaration &n) override;
 	void visit(Module &n) override;
 	void visit(ModuleStatement &n) override;
+	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
+	void visit(IfStatement &n) override;
+	void visit(LoopStatement &n) override;
 	void visit(TypeExpr &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(TypeIdentifier &n) override;
@@ -43,8 +46,6 @@ public:
 	void visit(BinaryExpr &n) override;
 	void visit(IndexExpr &n) override;
 	void visit(CallExpr &n) override;
-	void visit(IfStatement &n) override;
-	void visit(ForExprAST &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;

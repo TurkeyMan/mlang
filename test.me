@@ -15,10 +15,27 @@ module test;
 
 var x : long = 2;
 
-def main : int(long, float) = (argc : long, poo : float) -> int {
-	if(1) return cast(double)2;
+def aa(x : long) {}
+
+def fn(x : int)
+{
+	for(i = 0; i < 10; i+1)
+	{
+		var j = 20;
+		aa(i+j);
+	}
+
+	return x*5;
+}
+
+def main(argc : long, poo : float) -> int
+{
+	if(x : int; 1) return cast(double)x+2;
+	argc/fn(10);
 	return (~argc + argc*argc << 2) >= argc%2;
-};
+}
+
+def f = a : long => a^2;
 
 /+
 // definitions

@@ -59,6 +59,7 @@ if			{ return IF; }
 else		{ return ELSE;   }
 for			{ return FOR; }
 foreach		{ return FOREACH; }
+do			{ return DO; }
 while		{ return WHILE; }
 match		{ return MATCH; }
 return		{ return RETURN; }
@@ -68,6 +69,7 @@ cast		{ return CAST; }
 
 void		{ return VOID; }
 bool		{ return U1; }
+
 byte		{ return I8; }
 ubyte		{ return U8; }
 short		{ return I16; }
@@ -80,6 +82,11 @@ cent		{ return I128; }
 ucent		{ return U128; }
 ssize_t		{ return IZ; }
 size_t		{ return UZ; }
+
+char		{ return C8; }
+wchar		{ return C16; }
+dchar		{ return C32; }
+
 half		{ return F16; }
 float		{ return F32; }
 double		{ return F64; }
@@ -87,7 +94,11 @@ extended	{ return F128; }
 
 "..."		{ return ELIPSIS; }
 
+!is			{ return ISNOT; }
+is			{ return IS; }
+
 "->"		{ return ARROW; }
+"=>"		{ return IMPLY; }
 
 ".."		{ return SLICE; }
 "++"		{ return INCOP; }
@@ -107,7 +118,9 @@ extended	{ return F128; }
 
 "^^"		{ return POW; }
 
-":="		{ return BINDEQ; }
+":="		{ return BIND; }
+
+"^^="		{ return POWEQ; }
 "*="		{ return MULEQ; }
 "/="		{ return DIVEQ; }
 "%="		{ return MODEQ; }
@@ -119,7 +132,6 @@ extended	{ return F128; }
 "^="		{ return BITXOREQ; }
 "||="		{ return OREQ; }
 "&&="		{ return ANDEQ; }
-"^^="		{ return POWEQ; }
 "<<="		{ return SHLEQ; }
 ">>="		{ return ASREQ; }
 ">>>="		{ return LSREQ; }
@@ -127,6 +139,9 @@ extended	{ return F128; }
 \"(\\.|[^\\"])*\" { yylval.sval = _strdup(yytext); return STRING; }
 \`(\\.|[^\\`])*\` { yylval.sval = _strdup(yytext); return STRING; }
 \'(\\.|[^\\'])*\' { yylval.ival = charval(yytext); return CHAR; }
+
+true			{ yylval.ival = 1; return BOOL; }
+false			{ yylval.ival = 0; return BOOL; }
 
 {D}+\.{D}+{E}	{ yylval.fval = atof(yytext); return FLOAT; }
 {D}+\.{D}+		{ yylval.fval = atof(yytext); return FLOAT; }
@@ -178,6 +193,9 @@ extended	{ return F128; }
 "^"				{ return('^'); }
 "|"				{ return('|'); }
 "?"				{ return('?'); }
+"#"				{ return('#'); }
+"@"				{ return('@'); }
+"$"				{ return('$'); }
 
 .				;
 

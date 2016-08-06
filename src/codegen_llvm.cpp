@@ -94,6 +94,11 @@ void LLVMGenerator::visit(ModuleStatement &n)
 {
 }
 
+void LLVMGenerator::visit(ExpressionStatement &n)
+{
+	n.expression()->accept(*this);
+}
+
 void LLVMGenerator::visit(ReturnStatement &n)
 {
 	if (n.expression())
@@ -103,6 +108,123 @@ void LLVMGenerator::visit(ReturnStatement &n)
 	}
 	else
 		Builder.CreateRetVoid();
+}
+
+void LLVMGenerator::visit(IfStatement &n)
+{
+	Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+	Scope *old = scope;
+
+	if (n.initScope())
+	{
+		scope = n.initScope();
+
+		for (auto &s : n.initStatements())
+			s->accept(*this);
+	}
+
+	BasicBlock *thenBlock = BasicBlock::Create(ctx, "if.then", TheFunction);
+	BasicBlock *elseBlock = n.elseStatements().length > 0 ? BasicBlock::Create(ctx, "if.else") : nullptr;
+	BasicBlock *afterBlock = BasicBlock::Create(ctx, "if.end");
+
+	n.cond()->accept(*this);
+	LLVMData *cg = n.cond()->cgData<LLVMData>();
+	Builder.CreateCondBr(cg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
+
+	// emit 'then' block
+	scope = n.thenScope();
+	Builder.SetInsertPoint(thenBlock);
+
+	// emit statements...
+	for (auto &s : n.thenStatements())
+		s->accept(*this);
+
+//	Value *thenV = block result expression; for if statement *expressions*
+
+	Builder.CreateBr(afterBlock);
+	thenBlock = Builder.GetInsertBlock();
+
+	if (elseBlock)
+	{
+		// emit 'else' block
+		scope = n.elseScope();
+		TheFunction->getBasicBlockList().push_back(elseBlock);
+		Builder.SetInsertPoint(elseBlock);
+
+		// emit statements...
+		for (auto &s : n.elseStatements())
+			s->accept(*this);
+
+//		Value *elseV = block result expression; for if statement *expressions*
+
+		Builder.CreateBr(afterBlock);
+		elseBlock = Builder.GetInsertBlock();
+	}
+
+	// continue
+	scope = old;
+	TheFunction->getBasicBlockList().push_back(afterBlock);
+	Builder.SetInsertPoint(afterBlock);
+
+	// saw we want the if statement to be an expression... then PHI node will select the 'result' from each block...
+//	PHINode *PN = Builder.CreatePHI(llvm::Type::getDoubleTy(ctx), 2, "iftmp");
+//	PN->addIncoming(thenV, thenBlock);
+//	PN->addIncoming(elseV, elseBlock);
+//	cg->value = PN;
+}
+
+void LLVMGenerator::visit(LoopStatement &n)
+{
+	Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+	// emit loop block
+	Scope *old = scope;
+	scope = n.bodyScope();
+
+	// emit iterators
+	for (auto i : n.iterators())
+		i->accept(*this);
+
+	Expr *cond = n.cond();
+
+	BasicBlock *condBlock = cond ? BasicBlock::Create(ctx, "loop.cond", TheFunction) : nullptr;
+	BasicBlock *loopBlock = BasicBlock::Create(ctx, "loop.body", cond ? nullptr : TheFunction);
+	BasicBlock *afterBlock = BasicBlock::Create(ctx, "loop.end");
+
+	if (cond)
+	{
+		Builder.CreateBr(condBlock);
+		Builder.SetInsertPoint(condBlock);
+
+		n.cond()->accept(*this);
+		LLVMData *condCg = n.cond()->cgData<LLVMData>();
+		Builder.CreateCondBr(condCg->value, loopBlock, afterBlock);
+
+		TheFunction->getBasicBlockList().push_back(loopBlock);
+	}
+	else
+		Builder.CreateBr(loopBlock);
+
+	Builder.SetInsertPoint(loopBlock);
+
+	// emit loop entry
+	for (auto s : n.entryStatements())
+		s->accept(*this);
+
+	// emit body
+	for (auto s : n.bodyStatements())
+		s->accept(*this);
+
+	// emit body
+	for (auto s : n.incrementExpressions())
+		s->accept(*this);
+
+	Builder.CreateBr(loopBlock);
+
+	// emit post-loop
+	TheFunction->getBasicBlockList().push_back(afterBlock);
+	Builder.SetInsertPoint(afterBlock);
 }
 
 void LLVMGenerator::visit(TypeExpr &n)
@@ -273,8 +395,6 @@ void LLVMGenerator::visit(IdentifierExpr &n)
 	if (!cg) return;
 
 	Declaration *decl = n.target();
-	decl->accept(*this);
-
 	cg->value = Builder.CreateLoad(decl->cgData<LLVMData>()->value, n.getName());
 /*
 	// Look this variable up in the function.
@@ -362,9 +482,9 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 		if (castType == 0)
 			cg->value = exprCg->value;
 		else if (castType == 10)
-			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(ctx, APInt(64, 0, false)), "u1cast");
+			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(ctx, APInt(64, 0, false)), "tobool");
 		else if (castType == 11)
-			cg->value = Builder.CreateFCmpONE(exprCg->value, ConstantFP::get(ctx, APFloat(0.0)), "u1cast");
+			cg->value = Builder.CreateFCmpUNE(exprCg->value, ConstantFP::get(ctx, APFloat(0.0)), "tobool");
 		else
 			cg->value = Builder.CreateCast(cast_types[castType], exprCg->value, typeCg->type, "cast");
 	}
@@ -730,6 +850,37 @@ void LLVMGenerator::visit(IndexExpr &n)
 
 void LLVMGenerator::visit(CallExpr &n)
 {
+	LLVMData *cg = n.cgData<LLVMData>();
+
+//	n.function()->accept(*this);
+	IdentifierExpr *ident = dynamic_cast<IdentifierExpr*>(n.function());
+	if (ident)
+	{
+		ValDecl *decl = dynamic_cast<ValDecl*>(ident->target());
+		if (decl)
+		{
+			::FunctionType *fn = decl->type()->asFunction();
+			if (fn)
+			{
+				LLVMData *cgFn = decl->cgData<LLVMData>();
+				std::vector<llvm::Value*> args;
+				for (auto a : n.callArgs())
+				{
+					a->accept(*this);
+					LLVMData *cgArg = a->cgData<LLVMData>();
+					args.push_back(cgArg->value);
+				}
+				if (fn->returnType()->isVoid())
+					Builder.CreateCall((llvm::Function*)cgFn->value, args);
+				else
+					cg->value = Builder.CreateCall((llvm::Function*)cgFn->value, args, decl->name());
+				return;
+			}
+		}
+	}
+
+	assert(false);
+
 //	KSDbgInfo.emitLocation(this);
 //
 //	// Look up the name in the global module table.
@@ -750,224 +901,6 @@ void LLVMGenerator::visit(CallExpr &n)
 //	}
 //
 //	return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
-}
-
-void LLVMGenerator::visit(IfStatement &n)
-{
-	n.cond()->accept(*this);
-	LLVMData *cg = n.cond()->cgData<LLVMData>();
-
-	Function *TheFunction = Builder.GetInsertBlock()->getParent();
-
-	BasicBlock *thenBlock = BasicBlock::Create(ctx, "then", TheFunction);
-	BasicBlock *elseBlock = n.elseStatements().length > 0 ? BasicBlock::Create(ctx, "else") : nullptr;
-	BasicBlock *afterBlock = BasicBlock::Create(ctx, "continue");
-
-	Builder.CreateCondBr(cg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
-
-	// emit 'then' block
-	Scope *old = scope;
-	scope = n.thenScope();
-	Builder.SetInsertPoint(thenBlock);
-
-	// emit statements...
-	for (auto &s : n.thenStatements())
-		s->accept(*this);
-
-//	Value *thenV = block result expression; for if statement *expressions*
-
-	Builder.CreateBr(afterBlock);
-	thenBlock = Builder.GetInsertBlock();
-
-	if (elseBlock)
-	{
-		// emit 'else' block
-		scope = n.elseScope();
-		TheFunction->getBasicBlockList().push_back(elseBlock);
-		Builder.SetInsertPoint(elseBlock);
-
-		// emit statements...
-		for (auto &s : n.elseStatements())
-			s->accept(*this);
-
-//		Value *elseV = block result expression; for if statement *expressions*
-
-		Builder.CreateBr(afterBlock);
-		elseBlock = Builder.GetInsertBlock();
-	}
-
-	// continue
-	scope = old;
-	TheFunction->getBasicBlockList().push_back(afterBlock);
-	Builder.SetInsertPoint(afterBlock);
-
-	// saw we want the if statement to be an expression... then PHI node will select the 'result' from each block...
-//	PHINode *PN = Builder.CreatePHI(llvm::Type::getDoubleTy(ctx), 2, "iftmp");
-//	PN->addIncoming(thenV, thenBlock);
-//	PN->addIncoming(elseV, elseBlock);
-//	cg->value = PN;
-
-
-//	KSDbgInfo.emitLocation(this);
-//
-//	Value *CondV = Cond->codegen();
-//	if (!CondV)
-//		return nullptr;
-//
-//	// Convert condition to a bool by comparing equal to 0.0.
-//	CondV = Builder.CreateFCmpONE(
-//		CondV, ConstantFP::get(ctx, APFloat(0.0)), "ifcond");
-//
-//	Function *TheFunction = Builder.GetInsertBlock()->getParent();
-//
-//	// Create blocks for the then and else cases.  Insert the 'then' block at the
-//	// end of the function.
-//	BasicBlock *ThenBB =
-//		BasicBlock::Create(ctx, "then", TheFunction);
-//	BasicBlock *ElseBB = BasicBlock::Create(ctx, "else");
-//	BasicBlock *MergeBB = BasicBlock::Create(ctx, "ifcont");
-//
-//	Builder.CreateCondBr(CondV, ThenBB, ElseBB);
-//
-//	// Emit then value.
-//	Builder.SetInsertPoint(ThenBB);
-//
-//	Value *ThenV = Then->codegen();
-//	if (!ThenV)
-//		return nullptr;
-//
-//	Builder.CreateBr(MergeBB);
-//	// Codegen of 'Then' can change the current block, update ThenBB for the PHI.
-//	ThenBB = Builder.GetInsertBlock();
-//
-//	// Emit else block.
-//	TheFunction->getBasicBlockList().push_back(ElseBB);
-//	Builder.SetInsertPoint(ElseBB);
-//
-//	Value *ElseV = Else->codegen();
-//	if (!ElseV)
-//		return nullptr;
-//
-//	Builder.CreateBr(MergeBB);
-//	// Codegen of 'Else' can change the current block, update ElseBB for the PHI.
-//	ElseBB = Builder.GetInsertBlock();
-//
-//	// Emit merge block.
-//	TheFunction->getBasicBlockList().push_back(MergeBB);
-//	Builder.SetInsertPoint(MergeBB);
-//	PHINode *PN =
-//		Builder.CreatePHI(llvm::Type::getDoubleTy(ctx), 2, "iftmp");
-//
-//	PN->addIncoming(ThenV, ThenBB);
-//	PN->addIncoming(ElseV, ElseBB);
-//	return PN;
-}
-
-void LLVMGenerator::visit(ForExprAST &n)
-{
-//	// Output for-loop as:
-//	//   var = alloca double
-//	//   ...
-//	//   start = startexpr
-//	//   store start -> var
-//	//   goto loop
-//	// loop:
-//	//   ...
-//	//   bodyexpr
-//	//   ...
-//	// loopend:
-//	//   step = stepexpr
-//	//   endcond = endexpr
-//	//
-//	//   curvar = load var
-//	//   nextvar = curvar + step
-//	//   store nextvar -> var
-//	//   br endcond, loop, endloop
-//	// outloop:
-//	Function *TheFunction = Builder.GetInsertBlock()->getParent();
-//
-//	// Create an alloca for the variable in the entry block.
-//	AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName);
-//
-//	KSDbgInfo.emitLocation(this);
-//
-//	// Emit the start code first, without 'variable' in scope.
-//	Value *StartVal = Start->codegen();
-//	if (!StartVal)
-//		return nullptr;
-//
-//	// Store the value into the alloca.
-//	Builder.CreateStore(StartVal, Alloca);
-//
-//	// Make the new basic block for the loop header, inserting after current
-//	// block.
-//	BasicBlock *LoopBB =
-//		BasicBlock::Create(ctx, "loop", TheFunction);
-//
-//	// Insert an explicit fall through from the current block to the LoopBB.
-//	Builder.CreateBr(LoopBB);
-//
-//	// Start insertion in LoopBB.
-//	Builder.SetInsertPoint(LoopBB);
-//
-//	// Within the loop, the variable is defined equal to the PHI node.  If it
-//	// shadows an existing variable, we have to restore it, so save it now.
-//	AllocaInst *OldVal = NamedValues[VarName];
-//	NamedValues[VarName] = Alloca;
-//
-//	// Emit the body of the loop.  This, like any other expr, can change the
-//	// current BB.  Note that we ignore the value computed by the body, but don't
-//	// allow an error.
-//	if (!Body->codegen())
-//		return nullptr;
-//
-//	// Emit the step value.
-//	Value *StepVal = nullptr;
-//	if (Step)
-//	{
-//		StepVal = Step->codegen();
-//		if (!StepVal)
-//			return nullptr;
-//	}
-//	else
-//	{
-//		// If not specified, use 1.0.
-//		StepVal = ConstantFP::get(ctx, APFloat(1.0));
-//	}
-//
-//	// Compute the end condition.
-//	Value *EndCond = End->codegen();
-//	if (!EndCond)
-//		return nullptr;
-//
-//	// Reload, increment, and restore the alloca.  This handles the case where
-//	// the body of the loop mutates the variable.
-//	Value *CurVar = Builder.CreateLoad(Alloca, VarName.c_str());
-//	Value *NextVar = Builder.CreateFAdd(CurVar, StepVal, "nextvar");
-//	Builder.CreateStore(NextVar, Alloca);
-//
-//	// Convert condition to a bool by comparing equal to 0.0.
-//	EndCond = Builder.CreateFCmpONE(
-//		EndCond, ConstantFP::get(ctx, APFloat(0.0)), "loopcond");
-//
-//	// Create the "after loop" block and insert it.
-//	BasicBlock *AfterBB =
-//		BasicBlock::Create(ctx, "afterloop", TheFunction);
-//
-//	// Insert the conditional branch into the end of LoopEndBB.
-//	Builder.CreateCondBr(EndCond, LoopBB, AfterBB);
-//
-//	// Any new code will be inserted in AfterBB.
-//	Builder.SetInsertPoint(AfterBB);
-//
-//	// Restore the unshadowed variable.
-//	if (OldVal)
-//		NamedValues[VarName] = OldVal;
-//	else
-//		NamedValues.erase(VarName);
-//
-//	// for expr always returns 0.0.
-//	return Constant::getNullValue(llvm::Type::getDoubleTy(ctx));
 }
 
 void LLVMGenerator::visit(TypeDecl &n)
@@ -1000,11 +933,11 @@ void LLVMGenerator::visit(ValDecl &n)
 			Builder.SetInsertPoint(block);
 
 			// Set names for all arguments.
-			StatementList args = func->args();
+			DeclList args = func->args();
 			size_t i = 0;
 			for (auto &a : proto->args())
 			{
-				VarDecl *arg = (VarDecl*)args[i++];
+				ValDecl *arg = args[i++];
 
 				a.setName(arg->name());
 
@@ -1035,9 +968,7 @@ void LLVMGenerator::visit(ValDecl &n)
 //			KSDbgInfo.emitLocation(Body.get());
 
 			for (auto &s : func->statements())
-			{
 				s->accept(*this);
-			}
 
 //			if (Value *RetVal = Body->codegen())
 //			{
@@ -1078,7 +1009,7 @@ void LLVMGenerator::visit(VarDecl &n)
 	LLVMData *cg = n.cgData<LLVMData>();
 	if (!cg) return;
 
-	::FunctionType *pFunc = dynamic_cast<::FunctionType*>(n.type());
+	::FunctionType *pFunc = n.type()->asFunction();
 	if (pFunc)
 	{
 		// function pointer
@@ -1087,15 +1018,21 @@ void LLVMGenerator::visit(VarDecl &n)
 	else
 	{
 		n.type()->accept(*this);
-		llvm::Type *pType = n.type()->cgData<LLVMData>()->type;
+		llvm::Type *type = n.type()->cgData<LLVMData>()->type;
 
 		if (dynamic_cast<::Module*>(scope->owner()))
 		{
-			cg->value = TheModule->getOrInsertGlobal(n.name(), pType);
+			cg->value = TheModule->getOrInsertGlobal(n.name(), type);
 		}
 		else
 		{
-			// other scopes?
+			cg->value = Builder.CreateAlloca(type, nullptr, n.name() + ".addr");
+			if (!n.init()->type()->isVoid())
+			{
+				n.init()->accept(*this);
+				llvm::Value *val = n.init()->cgData<LLVMData>()->value;
+				Builder.CreateStore(val, cg->value, false);
+			}
 		}
 	}
 }

@@ -24,7 +24,10 @@ void Node::accept(ASTVisitor &v) { v.visit(*this); }
 void Statement::accept(ASTVisitor &v) { v.visit(*this); }
 void Declaration::accept(ASTVisitor &v) { v.visit(*this); }
 void ModuleStatement::accept(ASTVisitor &v) { v.visit(*this); }
+void ExpressionStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ReturnStatement::accept(ASTVisitor &v) { v.visit(*this); }
+void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
+void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
@@ -43,13 +46,46 @@ void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
-void ForExprAST::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
+
+
+Statement* makeForEach(DeclList iterators, Expr *range, StatementList body)
+{
+	assert(false); // TODO!!
+
+	// only [value], or [key, value] are allowed!
+	assert(iterators.length <= 2);
+
+	// assign void initialisation for counters (initialised at head of loop body)
+	for (auto &i : iterators)
+		i->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
+
+	VarDecl *r = new VarDecl("__loop_range", nullptr, range);
+	iterators.prepend(r);
+
+	StatementList entry = StatementList::empty();
+	if (iterators.length)
+	{
+		if (iterators.length == 3)
+		{
+			// iterators[1] = __loop_range.front.key;
+			// entry.append(assignment);
+		}
+
+		// iterators[iterators.length-1] = __loop_range.front.value;
+		// entry.append(assignment);
+	}
+
+	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
+
+	Expr *increment = nullptr; // __loop_range = __loop_range.popFront();
+
+	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body, entry);
+}
 
 
 Declaration *Scope::getDecl(const std::string& name, bool onlyLocal) const
@@ -68,6 +104,11 @@ void Scope::addDecl(const std::string& name, Declaration *decl)
 	_declarations.insert({ name, decl });
 }
 
+raw_ostream &ExpressionStatement::dump(raw_ostream &out, int ind)
+{
+	return _expression->dump(out, ind);
+}
+
 raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 {
 	Statement::dump(out << "return: ", ind);
@@ -78,6 +119,14 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 //****************
 //** Type nodes **
 //****************
+
+bool PrimitiveType::isSame(TypeExpr *other) const
+{
+	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(other);
+	if (!pt)
+		return false;
+	return _type == pt->_type;
+}
 
 std::string PrimitiveType::stringof() const
 {
@@ -126,6 +175,23 @@ Expr* PrimitiveType::init()
 }
 
 
+bool FunctionType::isSame(TypeExpr *other) const
+{
+	FunctionType *ft = dynamic_cast<FunctionType*>(other);
+	if (!ft)
+		return false;
+	if (!_returnType->isSame(ft->_returnType))
+		return false;
+	if (_args.length != ft->_args.length)
+		return false;
+	for (size_t i = 0; i < _args.length; ++i)
+	{
+		if (!_args[i]->isSame(ft->_args[i]))
+			return false;
+	}
+	return true;
+}
+
 //***********************
 //** Declaration nodes **
 //***********************
@@ -173,7 +239,6 @@ TypeExpr* PrimitiveLiteralExpr::type()
 	return _typeExpr;
 }
 
-
 static const char *unaryOps[] =
 {
 	"+", "-", "~", "!", "++", "--"
@@ -181,7 +246,7 @@ static const char *unaryOps[] =
 raw_ostream &UnaryExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "unary" << unaryOps[(int)_op] << "\n", ind);
-	_operand->dump(indent(out, ind + 1) << "operand: ", ind + 1);
+	_operand->dump(indent(out, ind) << "operand: ", ind + 1);
 	return out;
 }
 
@@ -200,6 +265,16 @@ raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+raw_ostream &CallExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "call\n", ind);
+	_func->dump(indent(out, ind) << "function: ", ind + 1);
+	indent(out, ind) << "args: (\n";
+	for (auto a : _callArgs)
+		a->dump(indent(out, ind + 1), ind + 1);
+	indent(out, ind) << ")\n";
+	return out;
+}
 
 raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 {
@@ -220,7 +295,32 @@ raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-
+raw_ostream &LoopStatement::dump(raw_ostream &out, int ind)
+{
+	Statement::dump(out << "loop\n", ind);
+	ind++;
+	if (_iterators.length)
+	{
+		indent(out, ind) << "iterators: {\n";
+		for (auto i : _iterators)
+			i->dump(indent(out, ind + 1), ind + 1);
+		indent(out, ind) << "}\n";
+	}
+	if (_cond)
+		_cond->dump(indent(out, ind) << "while: ", ind + 1);
+	if (_increments.length)
+	{
+		indent(out, ind) << "increments: {\n";
+		for (auto i : _increments)
+			i->dump(indent(out, ind + 1), ind + 1);
+		indent(out, ind) << "}\n";
+	}
+	indent(out, ind) << "body: {\n";
+	for (auto s : _bodyStatements)
+		s->dump(indent(out, ind + 1), ind + 1);
+	indent(out, ind) << "}\n";
+	return out;
+}
 
 
 /////////////////////////////////////////////

@@ -10,7 +10,10 @@ public:
 	virtual void visit(Declaration &n) {}
 	virtual void visit(Module &n) {}
 	virtual void visit(ModuleStatement &n) {}
+	virtual void visit(ExpressionStatement &n) {}
 	virtual void visit(ReturnStatement &n) {}
+	virtual void visit(IfStatement &n) {}
+	virtual void visit(LoopStatement &n) {}
 	virtual void visit(TypeExpr &n) {}
 	virtual void visit(PrimitiveType &n) {}
 	virtual void visit(TypeIdentifier &n) {}
@@ -28,8 +31,6 @@ public:
 	virtual void visit(BinaryExpr &n) {}
 	virtual void visit(IndexExpr &n) {}
 	virtual void visit(CallExpr &n) {}
-	virtual void visit(IfStatement &n) {}
-	virtual void visit(ForExprAST &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}

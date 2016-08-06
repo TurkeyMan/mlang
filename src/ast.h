@@ -66,6 +66,19 @@ struct List
 		return *this;
 	}
 
+	template <typename U>
+	List& prepend(U &&v)
+	{
+		expand();
+		for (size_t i = length - 1; i > 0; --i)
+		{
+			new(&ptr[i]) T(std::move(ptr[i - 1]));
+			ptr[i - 1].~T();
+		}
+		new(&ptr[0]) T(std::forward<U>(v));
+		return *this;
+	}
+
 	T* begin() const { return ptr; }
 	T* end() const { return ptr + length; }
 
@@ -96,6 +109,17 @@ private:
 inline raw_ostream &indent(raw_ostream &O, int size) {
 	return O << std::string(size*2, ' ');
 }
+
+
+// prototype nodes used for arguments?
+class Expr;
+class TypeExpr;
+class Statement;
+class ValDecl;
+using ExprList = List<Expr*>;
+using TypeExprList = List<TypeExpr*>;
+using StatementList = List<Statement*>;
+using DeclList = List<ValDecl*>;
 
 
 //===----------------------------------------------------------------------===//
@@ -153,7 +177,6 @@ public:
 
 	void accept(ASTVisitor &v) override;
 };
-using StatementList = List<Statement*>;
 
 class Declaration : public Statement
 {
@@ -233,6 +256,25 @@ public:
 	}
 };
 
+class ExpressionStatement : public Statement
+{
+	friend class Semantic;
+
+	Expr *_expression;
+
+public:
+	ExpressionStatement(Expr *expression)
+		: Statement(), _expression(expression)
+	{
+	}
+
+	Expr* expression() const { return _expression; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 class ReturnStatement : public Statement
 {
 	friend class Semantic;
@@ -252,10 +294,80 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+class IfStatement : public Statement
+{
+	friend class Semantic;
+
+	Expr *_cond;
+	Scope *_init = nullptr;
+	Scope *_then = nullptr;
+	Scope *_else = nullptr;
+
+	DeclList _initStatements;
+
+	StatementList _thenStatements;
+	StatementList _elseStatements;
+
+public:
+	IfStatement(Expr *cond, StatementList thenStatements, StatementList elseStatements, DeclList initStatements = DeclList::empty())
+		: _cond(cond), _thenStatements(thenStatements), _elseStatements(elseStatements), _initStatements(initStatements)
+	{}
+
+	Expr *cond() { return _cond; }
+
+	Scope* initScope() { return _init; }
+	DeclList initStatements() { return _initStatements; }
+
+	Scope* thenScope() { return _then; }
+	StatementList thenStatements() { return _thenStatements; }
+
+	Scope* elseScope() { return _else; }
+	StatementList elseStatements() { return _elseStatements; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
+class LoopStatement : public Statement
+{
+	friend class Semantic;
+
+	DeclList _iterators;
+	Expr *_cond;
+	ExprList _increments;
+	Scope *_body = nullptr;
+
+	StatementList _loopEntry;
+	StatementList _bodyStatements;
+
+public:
+	LoopStatement(DeclList iterators, Expr *cond, ExprList increments, StatementList bodyStatements, StatementList loopEntry = StatementList::empty())
+		: _iterators(iterators), _cond(cond), _increments(increments), _bodyStatements(bodyStatements), _loopEntry(loopEntry)
+	{}
+
+	DeclList iterators() { return _iterators; }
+
+	Expr *cond() { return _cond; }
+
+	StatementList entryStatements() { return _loopEntry; }
+	StatementList bodyStatements() { return _bodyStatements; }
+	ExprList incrementExpressions() { return _increments; }
+
+	Scope* bodyScope() { return _body; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 
 //****************
 //** Type nodes **
 //****************
+
+class PrimitiveType;
+class FunctionType;
 
 class TypeExpr : public Node
 {
@@ -267,11 +379,20 @@ public:
 
 	virtual Expr* init() = 0;
 
+	virtual bool isSame(TypeExpr *other) const = 0;
+
+	PrimitiveType* asPrimitive();
+	FunctionType* asFunction();
+
+	bool isVoid();
+	bool isBoolean();
+	bool isIntegral();
+	bool isFloatingPoint();
+
 	void accept(ASTVisitor &v) override;
 
 //	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out << ':' << getLine() << ':' << getCol() << '\n'; }
 };
-using TypeExprList = List<TypeExpr*>;
 
 class PrimitiveType : public TypeExpr
 {
@@ -284,6 +405,8 @@ public:
 
 	PrimType type() const { return _type; }
 	Expr* init() override;
+
+	bool isSame(TypeExpr *other) const override;
 
 	void accept(ASTVisitor &v) override;
 
@@ -303,6 +426,8 @@ public:
 	TypeExpr* type() { assert(false); return nullptr; }
 	Expr* init() override { return type()->init(); }
 
+	bool isSame(TypeExpr *other) const override { assert(false); return false; }
+
 	void accept(ASTVisitor &v) override;
 
 	std::string stringof() const override { return std::string("@") + name; }
@@ -320,6 +445,8 @@ public:
 
 	TypeExprList types() { return _types; }
 	Expr* init() override { assert(false); return nullptr; }
+
+	bool isSame(TypeExpr *other) const override { assert(false); return false; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -356,6 +483,8 @@ public:
 
 	Expr* init() override { assert(false); return nullptr; }
 
+	bool isSame(TypeExpr *other) const override { assert(false); return false; }
+
 	void accept(ASTVisitor &v) override;
 
 	std::string stringof() const override { return "struct{ ... }"; }
@@ -379,6 +508,8 @@ public:
 	~FunctionType() {}
 
 	Expr* init() override { assert(false); return nullptr; }
+
+	bool isSame(TypeExpr *other) const override;
 
 	TypeExpr* returnType() const { return _returnType; }
 	TypeExprList argTypes() const { return _args; }
@@ -411,6 +542,13 @@ public:
 	}
 };
 
+inline PrimitiveType* TypeExpr::asPrimitive() { return dynamic_cast<PrimitiveType*>(this); }
+inline FunctionType* TypeExpr::asFunction() { return dynamic_cast<FunctionType*>(this); }
+inline bool TypeExpr::isVoid() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && pt->type() == PrimType::v; }
+inline bool TypeExpr::isBoolean() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isBool(pt->type()); }
+inline bool TypeExpr::isIntegral() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isInt(pt->type()); }
+inline bool TypeExpr::isFloatingPoint() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isFloat(pt->type()); }
+
 
 //***********************
 //** Declaration nodes **
@@ -439,6 +577,7 @@ public:
 class ValDecl : public Declaration
 {
 	friend class Semantic;
+	friend Statement* makeForEach(DeclList, Expr*, StatementList);
 protected:
 	std::string _name;
 	TypeExpr *_type;
@@ -487,7 +626,6 @@ public:
 
 //	raw_ostream &dump(raw_ostream &out, int ind) override { return out << ':' << getLine() << ':' << getCol() << '\n'; }
 };
-using ExprList = List<Expr*>;
 
 class PrimitiveLiteralExpr : public Expr
 {
@@ -511,6 +649,7 @@ public:
 	PrimitiveLiteralExpr(int64_t v) : Expr(), _type(PrimType::i64), i(v) {}
 	PrimitiveLiteralExpr(double v) : Expr(), _type(PrimType::f64), f(v) {}
 	PrimitiveLiteralExpr(char32_t v) : Expr(), _type(PrimType::c32), c(v) {}
+	PrimitiveLiteralExpr(bool b) : Expr(), _type(PrimType::u1), u(b ? 1 : 0) {}
 
 	PrimType primType() const { return _type; }
 	double getFloat() const { return f; }
@@ -573,40 +712,27 @@ public:
 
 class FunctionLiteralExpr : public Expr
 {
+	friend class Semantic;
+
 	Scope body;
 
 	StatementList bodyStatements;
 
-	StatementList _args;
+	DeclList _args;
 	TypeExpr *returnType;
+	bool inferReturnType;
 
 	TypeExprList argTypes = TypeExprList::empty();
 	FunctionType *_type = nullptr;
 
 public:
-	FunctionLiteralExpr(StatementList bodyStatements, StatementList args, TypeExpr *returnType)
-		: Expr(), body(nullptr, this), bodyStatements(bodyStatements), _args(args), returnType(returnType)
+	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType)
+		: Expr(), body(nullptr, this), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
 	{}
 
-	TypeExpr* type() override
-	{
-		if (!_type)
-		{
-			if (_args.length && !argTypes.length)
-			{
-				for (auto a : _args)
-				{
-					VarDecl *decl = dynamic_cast<VarDecl*>(a);
-					assert(decl);
-					argTypes.append(decl->type());
-				}
-			}
-			_type = new FunctionType(returnType, argTypes);
-		}
-		return _type;
-	}
+	FunctionType* type() override { return _type; }
 
-	StatementList args() const { return _args; }
+	DeclList args() const { return _args; }
 	StatementList statements() { return bodyStatements; }
 
 	Scope* scope() { return &body; }
@@ -677,8 +803,8 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
 		Expr::dump(out << "cast\n", ind);
-		_newType->dump(indent(out, ind + 1) << "target: ", ind + 1);
-		_expr->dump(indent(out, ind + 1) << "expr: ", ind + 1);
+		_newType->dump(indent(out, ind) << "target: ", ind + 1);
+		_expr->dump(indent(out, ind) << "expr: ", ind + 1);
 		return out;
 	}
 };
@@ -759,81 +885,31 @@ public:
 	}
 };
 
-/// CallExpr - Expression class for function calls.
-class CallExpr : public Expr {
-	std::string Callee;
-	std::vector<owner<Expr>> Args;
-
-public:
-	CallExpr(SourceLocation Loc, const std::string &Callee,
-		std::vector<owner<Expr>> Args)
-		: Expr(Loc), Callee(Callee), Args(std::move(Args)) {}
-
-	TypeExpr* type() override;
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		Expr::dump(out << "call " << Callee, ind);
-		for (const auto &Arg : Args)
-			Arg->dump(indent(out, ind + 1), ind + 1);
-		return out;
-	}
-};
-
-class IfStatement : public Statement
+class CallExpr : public Expr
 {
 	friend class Semantic;
 
-	Expr *_cond;
-	Scope *_then = nullptr;
-	Scope *_else = nullptr;
-
-	StatementList _thenStatements;
-	StatementList _elseStatements;
+	Expr *_func;
+	ExprList _callArgs;
 
 public:
-	IfStatement(Expr *cond, StatementList thenStatements, StatementList elseStatements)
-		: _cond(cond), _thenStatements(thenStatements), _elseStatements(elseStatements)
+	CallExpr(Expr *func, ExprList callArgs)
+		: _func(func), _callArgs(callArgs)
 	{}
 
-	Expr *cond() { return _cond; }
+	TypeExpr* type() override
+	{
+		FunctionType *f = dynamic_cast<FunctionType*>(_func->type());
+		return f->returnType();
+	}
 
-	Scope* thenScope() { return _then; }
-	StatementList thenStatements() { return _thenStatements; }
-
-	Scope* elseScope() { return _else; }
-	StatementList elseStatements() { return _elseStatements; }
+	Expr *function() { return _func; }
+	ExprList callArgs() { return _callArgs; }
 
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
-
-/// ForExprAST - Expression class for for/in.
-class ForExprAST : public Expr
-{
-	std::string VarName;
-	owner<Expr> Start, End, Step, Body;
-
-public:
-	ForExprAST(const std::string &VarName, owner<Expr> Start, owner<Expr> End, owner<Expr> Step, owner<Expr> Body)
-		: Expr(), VarName(VarName), Start(std::move(Start)), End(std::move(End)), Step(std::move(Step)), Body(std::move(Body))
-	{}
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		Expr::dump(out << "for", ind);
-		Start->dump(indent(out, ind) << "Cond:", ind + 1);
-		End->dump(indent(out, ind) << "End:", ind + 1);
-		Step->dump(indent(out, ind) << "Step:", ind + 1);
-		Body->dump(indent(out, ind) << "Body:", ind + 1);
-		return out;
-	}
-};
-
 
 /// Prototype - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
@@ -894,7 +970,7 @@ public:
 	}
 };
 
-
+Statement* makeForEach(DeclList iterators, Expr *range, StatementList body);
 
 
 

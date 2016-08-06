@@ -33,6 +33,8 @@ static StatementList parseTree = StatementList::empty();
 	TypeExprList typeExprList;
 	Statement *statement;
 	StatementList statementList;
+	ValDecl *decl;
+	DeclList declList;
 	UnaryOp unaryOp;
 }
 
@@ -40,29 +42,27 @@ static StatementList parseTree = StatementList::empty();
 %token MODULE STATIC
 %token DEF VAR
 %token CONST
-%token IF ELSE FOR FOREACH WHILE MATCH RETURN BREAK CAST
-%token ELIPSIS ARROW SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW
-%token BINDEQ MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
+%token IF ELSE FOR FOREACH DO WHILE MATCH RETURN BREAK CAST
+%token ELIPSIS IS ISNOT ARROW IMPLY SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW BIND
+%token MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
 
-%token VOID U1 I8 U8 I16 U16 I32 U32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
+%token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
 
-// define the "terminal symbol" token types I'm going to use (in CAPS
-// by convention), and associate each with a field of the union:
-%token <ival> INT CHAR
+%token <ival> INT CHAR BOOL
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
-%type <expr> literal array_literal function_literal primary_value_expression postfix_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
-%type <exprList> value_expression_list
+%type <expr> literal array_literal function_literal lambda_function primary_value_expression postfix_value_expression cast_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
+%type <exprList> value_expression_list function_call
 
 %type <type> primitive_type primary_type_expression type_expression struct_definition tuple_definition
 %type <typeExprList> type_expression_list function_arg_types
 
-%type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement control_statement static_control_statement
+%type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement expression_statement control_statement static_control_statement
 %type <statementList> module_statements struct_statements code_statements body
 
-%type <statement> function_arg
-%type <statementList> function_arguments function_arg_list
+%type <decl> var_decl var_decl_assign
+%type <declList> var_decl_list var_decl_assign_list function_arguments
 
 %type <unaryOp> unary_operator
 
@@ -112,7 +112,7 @@ code_statement:
 	| var_statement				{ $$ = $1; }
 //	| static_control_statement
 	| control_statement			{ $$ = $1; }
-//	| expression_statement		{ $$ = $1; }
+	| expression_statement		{ $$ = $1; }
 	| empty_statement			{ $$ = $1; }
 	;
 
@@ -130,22 +130,24 @@ def_statement:
 	DEF IDENTIFIER ':' type_expression ';'											{ $$ = new TypeDecl($2, $4); }
 	| DEF IDENTIFIER ':' type_expression '=' value_expression ';'					{ $$ = new ValDecl($2, $4, $6); }
 	| DEF IDENTIFIER '=' value_expression ';'										{ $$ = new ValDecl($2, nullptr, $4); }
+	| DEF IDENTIFIER function_literal												{ $$ = new ValDecl($2, nullptr, $3); }
 	;
-/*
-	| DEF def_identifier ':' type_expression function_arguments '{' '}'					{ ... Print(Top()); }
-	| DEF def_identifier ':' type_expression function_arguments '{' code_statements '}'	{ ... Print(Top()); }
-	;
-*/
 
+var_decl:
+	IDENTIFIER												{ $$ = new VarDecl($1, nullptr, nullptr); }
+	| IDENTIFIER ':' type_expression						{ $$ = new VarDecl($1, $3, nullptr); }
+	;
+var_decl_assign:
+	var_decl												{ $$ = $1; }
+	| IDENTIFIER ':' type_expression '=' value_expression	{ $$ = new VarDecl($1, $3, $5); }
+	| IDENTIFIER '=' value_expression						{ $$ = new VarDecl($1, nullptr, $3); }
+	;
 var_statement:
-	VAR IDENTIFIER ';'												{ $$ = new VarDecl($2, nullptr, nullptr); }
-	| VAR IDENTIFIER ':' type_expression ';'						{ $$ = new VarDecl($2, $4, nullptr); }
-	| VAR IDENTIFIER ':' type_expression '=' value_expression ';'	{ $$ = new VarDecl($2, $4, $6); }
-	| VAR IDENTIFIER '=' value_expression ';'						{ $$ = new VarDecl($2, nullptr, $4); }
+	VAR var_decl_assign ';'									{ $$ = $2; }
 	;
 
 expression_statement:
-//	value_expression ';'			{ $$ = $1; }
+	value_expression ';'			{ $$ = new ExpressionStatement($1); }
 	;
 
 template_arguments:
@@ -154,8 +156,8 @@ template_arguments:
 	;
 
 function_arguments:
-	'(' ')'							{ $$ = StatementList::empty(); }
-	| '(' function_arg_list ')'		{ $$ = $2; }
+	'(' ')'							{ $$ = DeclList::empty(); }
+	| '(' var_decl_assign_list ')'	{ $$ = $2; }
 	;
 
 function_arg_types:
@@ -164,8 +166,8 @@ function_arg_types:
 	;
 
 function_call:
-	'(' ')'							{ Push(Add(Generic::Type::List)); }
-	| '(' value_expression_list ')'
+	'(' ')'							{ $$ = ExprList::empty(); }
+	| '(' value_expression_list ')'	{ $$ = $2; }
 	;
 
 array_index:
@@ -177,11 +179,22 @@ control_statement:
 	RETURN ';'						{ $$ = new ReturnStatement(nullptr); }
 	| RETURN value_expression ';'	{ $$ = new ReturnStatement($2); }
 //	| BREAK ';'						{ Push(Add(Generic::Type::Break)); }
-	| IF '(' value_expression ')' body ELSE body	{ $$ = new IfExpr($3, $5, $7); }
-	| IF '(' value_expression ')' body				{ $$ = new IfExpr($3, $5, StatementList::empty()); }
-//	| WHILE '(' value_expression ')' body
-//	| FOR body
-//	| FOREACH body
+	| IF '(' value_expression ')' body ELSE body							{ $$ = new IfStatement($3, $5, $7); }
+	| IF '(' value_expression ')' body										{ $$ = new IfStatement($3, $5, StatementList::empty()); }
+	| IF '(' var_decl_assign_list ';' value_expression ')' body ELSE body	{ $$ = new IfStatement($5, $7, $9, $3); }
+	| IF '(' var_decl_assign_list ';' value_expression ')' body				{ $$ = new IfStatement($5, $7, StatementList::empty(), $3); }
+	| DO body																				{ $$ = new LoopStatement(DeclList::empty(), nullptr, ExprList::empty(), $2); }
+	| WHILE '(' value_expression ')' body													{ $$ = new LoopStatement(DeclList::empty(), $3, ExprList::empty(), $5); }
+	| FOR '('                      ';'                  ';'                       ')' body	{ $$ = new LoopStatement(DeclList::empty(), nullptr, ExprList::empty(), $6); }
+	| FOR '('                      ';'                  ';' value_expression_list ')' body	{ $$ = new LoopStatement(DeclList::empty(), nullptr, $5, $7); }
+	| FOR '('                      ';' value_expression ';'                       ')' body	{ $$ = new LoopStatement(DeclList::empty(), $4, ExprList::empty(), $7); }
+	| FOR '('                      ';' value_expression ';' value_expression_list ')' body	{ $$ = new LoopStatement(DeclList::empty(), $4, $6, $8); }
+	| FOR '(' var_decl_assign_list ';'                  ';'                       ')' body	{ $$ = new LoopStatement($3, nullptr, ExprList::empty(), $7); }
+	| FOR '(' var_decl_assign_list ';'                  ';' value_expression_list ')' body	{ $$ = new LoopStatement($3, nullptr, $6, $8); }
+	| FOR '(' var_decl_assign_list ';' value_expression ';'                       ')' body	{ $$ = new LoopStatement($3, $5, ExprList::empty(), $8); }
+	| FOR '(' var_decl_assign_list ';' value_expression ';' value_expression_list ')' body	{ $$ = new LoopStatement($3, $5, $7, $9); }
+	| FOREACH '(' value_expression ')' body													{ $$ = makeForEach(DeclList::empty(), $3, $5); }
+	| FOREACH '(' var_decl_list ';' value_expression ')' body								{ $$ = makeForEach($3, $5, $7); }
 //	| MATCH body
 	;
 
@@ -208,13 +221,6 @@ template_arg:
 	| IDENTIFIER ':' type_expression '=' value_expression	{ Push(Add(Generic::Type::OpAssign, Add(Generic::Type::TypedId, Identifier($1), $3), $5)); }
 	;
 
-function_arg:
-	IDENTIFIER												{ $$ = new VarDecl($1, nullptr, nullptr); }
-	| IDENTIFIER ':' type_expression						{ $$ = new VarDecl($1, $3, nullptr); }
-	| IDENTIFIER '=' value_expression						{ $$ = new VarDecl($1, nullptr, $3); }
-	| IDENTIFIER ':' type_expression '=' value_expression	{ $$ = new VarDecl($1, $3, $5); }
-	;
-
 struct_definition:
 	'{' '}'											{ $$ = new Struct(); }
 	| '{' struct_statements '}'						{ $$ = new Struct($2); }
@@ -223,12 +229,6 @@ struct_definition:
 tuple_definition:
 	'[' ']'											{ $$ = new TupleType(); }
 	| '[' type_expression_list ']'					{ $$ = new TupleType($2); }
-	;
-
-function_literal:
-	function_arguments '{' '}'						{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr); }
-	| function_arguments '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($3, $1, nullptr); }
-	| function_arguments ARROW type_expression '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3); }
 	;
 
 value_expression_list:
@@ -246,11 +246,14 @@ template_arg_list:
 	| template_arg_list ',' template_arg			{ Push(Add(Generic::Type::List, Pop(), Pop())); }
 	;
 
-function_arg_list:
-	function_arg									{ $$ = StatementList::empty().append($1); }
-	| function_arg_list ',' function_arg			{ $$ = $1.append($3); }
+var_decl_list:
+	var_decl										{ $$ = DeclList::empty().append($1); }
+	| var_decl_list ',' var_decl					{ $$ = $1.append($3); }
 	;
-
+var_decl_assign_list:
+	var_decl_assign									{ $$ = DeclList::empty().append($1); }
+	| var_decl_assign_list ',' var_decl_assign		{ $$ = $1.append($3); }
+	;
 
 
 /**** VALUE EXPRESSION ****/
@@ -258,8 +261,9 @@ function_arg_list:
 literal:
 	INT			{ $$ = new PrimitiveLiteralExpr($1); }
 	| FLOAT		{ $$ = new PrimitiveLiteralExpr($1); }
-//	| STRING	{ $$ = new PrimitiveLiteralExpr($1); }
 	| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1); }
+	| BOOL		{ $$ = new PrimitiveLiteralExpr((bool)$1); }
+//	| STRING	{ $$ = new PrimitiveLiteralExpr($1); }
 	;
 
 array_literal:
@@ -267,10 +271,23 @@ array_literal:
 	| '[' value_expression_list ']'	{ $$ = new ArrayLiteralExpr($2); }
 	;
 
+function_literal:
+	function_arguments '{' '}'						{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr); }
+	| function_arguments '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($3, $1, nullptr); }
+	| function_arguments ARROW type_expression '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3); }
+	;
+
+lambda_function:
+	var_decl IMPLY value_expression					{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($3)), DeclList::empty().append($1), nullptr); }
+	| '(' ')' IMPLY value_expression				{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($4)), DeclList::empty(), nullptr); }
+	| '(' var_decl_list ')' IMPLY value_expression	{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($5)), $2, nullptr); }
+	;
+
 primary_value_expression:
 	literal							{ $$ = $1; }
 	| array_literal					{ $$ = $1; }
 	| function_literal				{ $$ = $1; }
+	| lambda_function				{ $$ = $1; }
 	| IDENTIFIER					{ $$ = new IdentifierExpr($1); }
 	| '(' value_expression ')'		{ $$ = $2; }
 	;
@@ -279,11 +296,16 @@ postfix_value_expression:
 	primary_value_expression									{ $$ = $1; }
 //	| postfix_value_expression '[' ']'							{ Push(Add(Generic::Type::OpIndex, Pop(), Add(Generic::Type::List))); }
 //	| postfix_value_expression '[' value_expression_list ']'	{ Push(Add(Generic::Type::OpIndex, Pop(), Pop())); }
-//	| postfix_value_expression function_call					{ Push(Add(Generic::Type::Call, Pop(), Pop())); }
+	| postfix_value_expression function_call					{ $$ = new CallExpr($1, $2); }
 //	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
 //	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
 //	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
 //	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+	;
+
+cast_value_expression:
+	postfix_value_expression
+	| CAST '(' type_expression ')' postfix_value_expression	{ $$ = new TypeConvertExpr($5, $3, false); }
 	;
 
 unary_operator:
@@ -291,13 +313,13 @@ unary_operator:
  	| '-'	{ $$ = UnaryOp::Neg; }
  	| '~'	{ $$ = UnaryOp::BitNot; }
  	| '!'	{ $$ = UnaryOp::LogicNot; }
- 	| INCOP	{ $$ = UnaryOp::PreInc; }
- 	| DECOP	{ $$ = UnaryOp::PreDec; }
+// 	| '#'	{ $$ = UnaryOp::Length; } // should we have unary length operator? ;)
+// 	| INCOP	{ $$ = UnaryOp::PreInc; }
+// 	| DECOP	{ $$ = UnaryOp::PreDec; }
 	;
 unary_value_expression:
-	postfix_value_expression								{ $$ = $1; }
-	| unary_operator postfix_value_expression				{ $$ = new UnaryExpr($1, $2); }
-	| CAST '(' type_expression ')' postfix_value_expression	{ $$ = new TypeConvertExpr($5, $3, false); }
+	cast_value_expression									{ $$ = $1; }
+	| unary_operator cast_value_expression					{ $$ = new UnaryExpr($1, $2); }
 	;
 
 pow_value_expression:
@@ -357,26 +379,26 @@ or_value_expression:
 
 assign_operator:
 	'='			{ Push(Add(Generic::Type::OpAssign)); }
-	| BINDEQ	{ Push(Add(Generic::Type::OpBind)); }
-	| MULEQ		{ Push(Add(Generic::Type::OpMulEq)); }
-	| DIVEQ		{ Push(Add(Generic::Type::OpDivEq)); }
-	| MODEQ		{ Push(Add(Generic::Type::OpModEq)); }
-	| ADDEQ		{ Push(Add(Generic::Type::OpAddEq)); }
-	| SUBEQ		{ Push(Add(Generic::Type::OpSubEq)); }
-	| CONCATEQ	{ Push(Add(Generic::Type::OpConcatEq)); }
-	| BITOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
-	| BITANDEQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
-	| BITXOREQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
-	| OREQ		{ Push(Add(Generic::Type::OpOrEq)); }
-	| ANDEQ		{ Push(Add(Generic::Type::OpAndEq)); }
-	| POWEQ		{ Push(Add(Generic::Type::OpPowEq)); }
-	| SHLEQ		{ Push(Add(Generic::Type::OpASLEq)); }
-	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
-	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
+//	| BIND		{ Push(Add(Generic::Type::OpBind)); }
+//	| POWEQ		{ Push(Add(Generic::Type::OpPowEq)); }
+//	| MULEQ		{ Push(Add(Generic::Type::OpMulEq)); }
+//	| DIVEQ		{ Push(Add(Generic::Type::OpDivEq)); }
+//	| MODEQ		{ Push(Add(Generic::Type::OpModEq)); }
+//	| ADDEQ		{ Push(Add(Generic::Type::OpAddEq)); }
+//	| SUBEQ		{ Push(Add(Generic::Type::OpSubEq)); }
+//	| CONCATEQ	{ Push(Add(Generic::Type::OpConcatEq)); }
+//	| BITOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
+//	| BITANDEQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
+//	| BITXOREQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
+//	| OREQ		{ Push(Add(Generic::Type::OpOrEq)); }
+//	| ANDEQ		{ Push(Add(Generic::Type::OpAndEq)); }
+//	| SHLEQ		{ Push(Add(Generic::Type::OpASLEq)); }
+//	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
+//	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
 	;
 assign_value_expression:
 	or_value_expression											{ $$ = $1; }
-//	| or_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+//	| cast_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
 	;
 
 value_expression:
@@ -401,6 +423,9 @@ primitive_type:
 	| U128	{ $$ = new PrimitiveType(PrimType::u128); }
 	| IZ	{ $$ = new PrimitiveType(PrimType::iz); }
 	| UZ	{ $$ = new PrimitiveType(PrimType::uz); }
+	| C8	{ $$ = new PrimitiveType(PrimType::c8); }
+	| C16	{ $$ = new PrimitiveType(PrimType::c16); }
+	| C32	{ $$ = new PrimitiveType(PrimType::c32); }
 	| F16	{ $$ = new PrimitiveType(PrimType::f16); }
 	| F32	{ $$ = new PrimitiveType(PrimType::f32); }
 	| F64	{ $$ = new PrimitiveType(PrimType::f64); }
