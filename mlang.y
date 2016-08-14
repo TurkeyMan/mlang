@@ -55,7 +55,7 @@ static StatementList parseTree = StatementList::empty();
 %type <expr> literal array_literal function_literal lambda_function primary_value_expression postfix_value_expression cast_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
 %type <exprList> value_expression_list function_call
 
-%type <type> primitive_type primary_type_expression type_expression struct_definition tuple_definition
+%type <type> primitive_type primary_type_expression postfix_type_expression modified_type type_expression struct_definition tuple_definition
 %type <typeExprList> type_expression_list function_arg_types
 
 %type <statement> module_statement struct_statement code_statement empty_statement module def_statement var_statement expression_statement control_statement static_control_statement
@@ -68,7 +68,7 @@ static StatementList parseTree = StatementList::empty();
 
 %%
 mlang:
-	module_statements						{ parseTree = $1; cout << "Parsed successfully!" << endl; }
+	module_statements						{ parseTree = $1; }
 	;
 
 module_statements:
@@ -441,24 +441,25 @@ primary_type_expression:
 	;
 
 postfix_type_expression:
-	primary_type_expression									{ Push($1); }
-	| postfix_type_expression '*'							{ Push(Add(Generic::Type::Pointer, Pop())); }
-	| postfix_type_expression '&'							{ Push(Add(Generic::Type::Ref, Pop())); }
-	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
-	| postfix_type_expression function_arg_types			{ Push(new FunctionType((TypeExpr*)Pop(), $2)); }
-	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+	primary_type_expression									{ $$ = $1; }
+	| postfix_type_expression '*'							{ $$ = new PointerType(PtrType::RawPtr, $1); }
+	| postfix_type_expression '^'							{ $$ = new PointerType(PtrType::UniquePtr, $1); }
+	| postfix_type_expression '&'							{ $$ = new PointerType(PtrType::BorrowedPtr, $1); }
+//	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
+	| postfix_type_expression function_arg_types			{ $$ = new FunctionType($1, $2); }
+//	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
 //	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, $3))); }
 //	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }
 //	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Generic::Type::Instantiate, Identifier($1), Pop())); }
 	;
 
 modified_type:
-	postfix_type_expression			//{ $$ = $1; }
-	| CONST postfix_type_expression	{ Push(Add(Generic::Type::Const, Pop())); }
+	postfix_type_expression			{ $$ = $1; }
+//	| CONST postfix_type_expression	{ Push(Add(Generic::Type::Const, Pop())); }
 	;
 
 type_expression:
-	modified_type					{ $$ = (TypeExpr*)Pop(); }
+	modified_type					{ $$ = $1; }
 	;
 
 %%

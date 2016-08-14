@@ -6,8 +6,16 @@
 #include <Windows.h>
 
 
-std::string Codegen(Module *pAST);
+void Codegen(Module *pAST, Mode mode, std::string outFile, std::string irFile);
 
+std::vector<std::string> srcFiles;
+std::string curSrcFile;
+std::string outFile;
+std::string irFile;
+std::string astFile;
+
+Mode mode = Mode::CompileAndLink;
+int opt = 0;
 
 SourceLocation CurLoc;
 SourceLocation LexLoc = { 1, 0 };
@@ -34,13 +42,89 @@ extern "C" {
 	{
 		GC_INIT();
 
+		// parse command line
+		int arg = 1;
+		while (arg < argc)
+		{
+			if (!strncmp(argv[arg], "-o", 2))
+			{
+				outFile = argv[++arg];
+			}
+			else if (!strncmp(argv[arg], "-emit-ir", 2))
+			{
+				irFile = argv[++arg];
+			}
+			else if (!strncmp(argv[arg], "-emit-ast", 2))
+			{
+				astFile = argv[++arg];
+			}
+			else if (!strcmp(argv[arg], "-C"))
+			{
+				mode = Mode::Compile;
+			}
+			else if (!strcmp(argv[arg], "-S"))
+			{
+				mode = Mode::OutputAsm;
+			}
+			else if (!strcmp(argv[arg], "-B"))
+			{
+				mode = Mode::OutputBC;
+			}
+			else if (!strcmp(argv[arg], "-O"))
+			{
+				if (argv[arg][2])
+					opt = atoi(argv[arg] + 2);
+				else
+					opt = 2;
+			}
+			else
+				srcFiles.push_back(argv[arg]);
+
+			++arg;
+		}
+
+		if (outFile.empty())
+		{
+			if (mode == Mode::Compile)
+#if defined(_MSC_VER)
+				outFile = "out.obj";
+#else
+				outFile = "out.o";
+#endif
+			else if (mode == Mode::CompileAndLink)
+#if defined(_MSC_VER)
+				outFile = "out.exe";
+#else
+				outFile = "a.out";
+#endif
+			else if (mode == Mode::OutputAsm)
+#if defined(_MSC_VER)
+				outFile = "out.asm";
+#else
+				outFile = "out.s";
+#endif
+			else if (mode == Mode::OutputBC)
+				outFile = "out.bc";
+		}
+
+		bool bFirst = true;
+		for (auto &file : srcFiles)
+		{
+			if(bFirst)
+				printf("%s", file.c_str());
+			else
+				printf("%s", (file + " ").c_str());
+		}
+		printf("\n");
+
+		curSrcFile = srcFiles[0];
+
 		// open source file
-		const char *pFilename = argv[1];
 		FILE *file;
-		fopen_s(&file, pFilename, "r");
+		fopen_s(&file, srcFiles[0].c_str(), "r");
 		if (!file)
 		{
-			printf("Can't open file: %s\n", pFilename);
+			printf("Can't open file: %s\n", srcFiles[0].c_str());
 			return -1;
 		}
 
@@ -52,52 +136,44 @@ extern "C" {
 
 		// semantic
 		Semantic semantic;
-		semantic.run(pFilename, module);
+		semantic.run(srcFiles[0], module);
 
 		// dump parse tree
 		FILE *ast = nullptr;
-		if (argc >= 4)
+		if (!astFile.empty())
 		{
-			fopen_s(&ast, argv[3], "w");
+			fopen_s(&ast, astFile.c_str(), "w");
 			if (!file)
 			{
 				printf("Can't open ast file: %s\n", argv[3]);
 				return -1;
 			}
-		}
-		class OS : public llvm::raw_ostream
-		{
-			FILE *ast;
-			uint64_t offset = 0;
-		public:
-			OS(FILE *ast) : ast(ast) {}
-			void write_impl(const char *Ptr, size_t Size) override
+			class OS : public llvm::raw_ostream
 			{
-				if (ast)
-					fwrite(Ptr, 1, Size, ast);
-				offset += Size;
-			}
-			uint64_t current_pos() const override { return offset; }
-		};
-		OS os(ast);
-		for (auto s : module)
-			s->dump(os, 0);
-		os.flush();
-		fclose(ast);
+				FILE *ast;
+				uint64_t offset = 0;
+			public:
+				OS(FILE *ast) : ast(ast) {}
+				void write_impl(const char *Ptr, size_t Size) override
+				{
+					if (ast)
+						fwrite(Ptr, 1, Size, ast);
+					offset += Size;
+				}
+				uint64_t current_pos() const override { return offset; }
+			};
+			OS os(ast);
+			for (auto s : module)
+				s->dump(os, 0);
+			os.flush();
+			fclose(ast);
+		}
 
 		// codegen
-		std::string code = Codegen(semantic.getModule());
+		if(mode != Mode::Parse)
+			Codegen(semantic.getModule(), mode, outFile, irFile);
 
-		pFilename = argv[2];
-		fopen_s(&file, pFilename, "w");
-		if (!file)
-		{
-			printf("Can't open file for output: %s\n", pFilename);
-			return -1;
-		}
-		fwrite(code.c_str(), 1, code.size(), file);
-		fclose(file);
-
+		while (1) {}
 		return 0;
 	}
 }

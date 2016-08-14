@@ -17,6 +17,7 @@ public:
 	virtual void visit(TypeExpr &n) {}
 	virtual void visit(PrimitiveType &n) {}
 	virtual void visit(TypeIdentifier &n) {}
+	virtual void visit(PointerType &n) {}
 	virtual void visit(TupleType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(FunctionType &n) {}

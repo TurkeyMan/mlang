@@ -21,8 +21,6 @@
 using namespace llvm;
 
 
-void Codegen(const char *pFilename, Node *pAST);
-
 class LLVMGenerator;
 
 struct LLVMData
@@ -88,7 +86,7 @@ private:
 public:
 	LLVMGenerator(::Module *module);
 
-	std::string codegen();
+	std::string codegen(Mode mode, std::string outFile, std::string irFile);
 
 	void visit(Node &n) override;
 	void visit(Statement &n) override;
@@ -102,6 +100,7 @@ public:
 	void visit(TypeExpr &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(TypeIdentifier &v) override;
+	void visit(::PointerType &v) override;
 	void visit(TupleType &v) override;
 	void visit(Struct &n) override;
 	void visit(::FunctionType &v) override;

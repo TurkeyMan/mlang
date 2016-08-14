@@ -5,15 +5,13 @@ Semantic::Semantic()
 {
 }
 
-void Semantic::run(const char *pFilename, StatementList moduleStatements)
+void Semantic::run(const std::string &srcFile, StatementList moduleStatements)
 {
 	// TODO: make default module name from filename without extension
-	const char *pDot = strchr(pFilename, '.');
-	std::string s(pFilename);
-	if (pDot)
-		s.resize(pDot - pFilename);
+	size_t dot = srcFile.find('.');
+	std::string moduleName = srcFile.substr(0, dot);
 
-	module = new Module(pFilename, s, moduleStatements);
+	module = new Module(srcFile, moduleName, moduleStatements);
 	module->accept(*this);
 }
 
@@ -186,12 +184,30 @@ void Semantic::visit(TypeIdentifier &n)
 {
 }
 
+void Semantic::visit(PointerType &n)
+{
+	TypeExpr *type = n.targetType();
+	if (!type)
+	{
+		// TODO: deduce pointer target type...?
+		assert(0);
+	}
+	type->accept(*this);
+	Expr *init = n.init();
+	if (!init)
+		init = new PrimitiveLiteralExpr(0ull);
+	init->accept(*this);
+}
+
 void Semantic::visit(TupleType &n)
 {
 }
 
 void Semantic::visit(Struct &n)
 {
+	// data members...
+
+	// methods...
 }
 
 void Semantic::visit(FunctionType &n)

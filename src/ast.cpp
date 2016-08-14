@@ -174,6 +174,45 @@ Expr* PrimitiveType::init()
 	return _init;
 }
 
+static const char *ptrTypeStrings[] = { "*", "^", "&" };
+bool PointerType::isSame(TypeExpr *other) const
+{
+	PointerType *t = dynamic_cast<PointerType*>(other);
+	if (!t)
+		return false;
+	return _pointerTarget->isSame(t->_pointerTarget);
+}
+std::string PointerType::stringof() const
+{
+	return _pointerTarget->stringof() + "*";
+}
+raw_ostream &PointerType::dump(raw_ostream &out, int ind)
+{
+	TypeExpr::dump(out << ptrTypeStrings[(int)_type], ind) << "\n";
+	++ind;
+	if (_pointerTarget)
+		_pointerTarget->dump(indent(out, ind) << "target: ", ind);
+	if (_init)
+		_init->dump(indent(out, ind) << "init: ", ind);
+	return out;
+}
+
+bool Struct::isSame(TypeExpr *other) const
+{
+	assert(false);
+	return false;
+}
+std::string Struct::stringof() const
+{
+	return "struct{ ... }";
+}
+raw_ostream &Struct::dump(raw_ostream &out, int ind)
+{
+	out << "struct: {\n";
+	for (auto m : _members)
+		m->dump(out, ind + 1);
+	return indent(out, ind) << "}\n";
+}
 
 bool FunctionType::isSame(TypeExpr *other) const
 {

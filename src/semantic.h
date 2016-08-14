@@ -12,7 +12,7 @@ private:
 public:
 	Semantic();
 
-	void run(const char *pFilename, StatementList module);
+	void run(const std::string &srcFile, StatementList module);
 	Module* getModule() const { return module; }
 
 	TypeExpr* typeForUnaryExpression(UnaryOp op, Expr *expr);
@@ -32,6 +32,7 @@ public:
 	void visit(TypeExpr &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(TypeIdentifier &n) override;
+	void visit(PointerType &v) override;
 	void visit(TupleType &n) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;

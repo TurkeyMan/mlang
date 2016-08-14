@@ -4,6 +4,7 @@
 #include "gc_allocator.h"
 
 #include "sourceloc.h"
+#include "util.h"
 
 #include <string>
 #include <vector>
@@ -434,6 +435,34 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override { return out << stringof() << '\n'; }
 };
 
+enum class PtrType
+{
+	RawPtr,
+	UniquePtr,
+	BorrowedPtr
+};
+class PointerType : public TypeExpr
+{
+	PtrType _type;
+	TypeExpr *_pointerTarget;
+	Expr *_init = nullptr;
+
+public:
+	PointerType(PtrType type, TypeExpr *targetType) : TypeExpr(), _type(type), _pointerTarget(targetType) {}
+	~PointerType() {}
+
+	PtrType ptrType() const { return _type; }
+	TypeExpr *targetType() const { return _pointerTarget; }
+	Expr* init() override { return _init; }
+
+	bool isSame(TypeExpr *other) const override;
+
+	void accept(ASTVisitor &v) override;
+
+	std::string stringof() const override;
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 class TupleType : public TypeExpr
 {
 	TypeExprList _types = TypeExprList::empty();
@@ -471,15 +500,17 @@ class Struct : public TypeExpr
 {
 	Scope body;
 
-	StatementList _members;
+	DeclList _members;
+	DeclList _dataMembers;
 
 public:
-	Struct(StatementList members = StatementList::empty())
+	Struct(DeclList members)
 		: TypeExpr(), body(nullptr, this), _members(members)
 	{}
 
 	Scope* scope() { return &body; }
-	StatementList members() { return _members; }
+	DeclList members() { return _members; }
+	DeclList dataMembers() { return _dataMembers; }
 
 	Expr* init() override { assert(false); return nullptr; }
 
@@ -580,6 +611,7 @@ class ValDecl : public Declaration
 	friend Statement* makeForEach(DeclList, Expr*, StatementList);
 protected:
 	std::string _name;
+	std::string _mangledName;
 	TypeExpr *_type;
 	Expr *_init;
 
@@ -588,7 +620,8 @@ public:
 		: Declaration(), _name(move(name)), _type(type), _init(init)
 	{}
 
-	const std::string& name() { return _name; }
+	const std::string& name() const { return _name; }
+	const std::string& mangledName() const { return _mangledName; }
 	TypeExpr* type() { return _type; }
 	Expr* init() { return _init; }
 

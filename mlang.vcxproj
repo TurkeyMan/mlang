@@ -33,7 +33,6 @@
     <ClCompile Include="src\codegen_llvm.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\semantic.cpp" />
-    <ClCompile Include="src\toy.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="KaleidoscopeJIT.h" />
@@ -146,7 +145,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>D:\WinDev\llvm-3.8.0.src\output\Debug\lib;lib/gc/x64/debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>D:\WinDev\llvm-3.8.0.src\build\Debug\lib;lib/gc/x64/debug;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>LLVMX86Disassembler.lib;LLVMX86AsmParser.lib;LLVMX86CodeGen.lib;LLVMSelectionDAG.lib;LLVMAsmPrinter.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMInstrumentation.lib;LLVMProfileData.lib;LLVMTransformUtils.lib;LLVMBitWriter.lib;LLVMX86Desc.lib;LLVMMCDisassembler.lib;LLVMX86Info.lib;LLVMX86AsmPrinter.lib;LLVMX86Utils.lib;LLVMMCJIT.lib;LLVMExecutionEngine.lib;LLVMTarget.lib;LLVMAnalysis.lib;LLVMRuntimeDyld.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMMC.lib;LLVMCore.lib;LLVMSupport.lib;gc-lib.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/NODEFAULTLIB:libcmt %(AdditionalOptions)</AdditionalOptions>
     </Link>

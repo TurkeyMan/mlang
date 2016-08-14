@@ -30,7 +30,7 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 }
 
 
-std::string Codegen(::Module *module)
+`void Codegen(::Module *module, Mode mode, std::string outFile, std::string irFile)
 {
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
@@ -40,10 +40,23 @@ std::string Codegen(::Module *module)
 
 	module->accept(*generator);
 
-	return generator->codegen();
+	std::string ir = generator->codegen(mode, outFile, irFile);
+
+	if (!irFile.empty())
+	{
+		FILE *file;
+		fopen_s(&file, irFile.c_str(), "w");
+		if (!file)
+		{
+			printf("Can't open file for output: %s\n", irFile.c_str());
+			return;
+		}
+		fwrite(ir.c_str(), 1, ir.size(), file);
+		fclose(file);
+	}
 }
 
-std::string LLVMGenerator::codegen()
+std::string LLVMGenerator::codegen(Mode mode, std::string outFile, std::string irFile)
 {
 	// Finalize the debug info.
 	DBuilder->finalize();
@@ -282,12 +295,20 @@ void LLVMGenerator::visit(TypeIdentifier &n)
 {
 }
 
+void LLVMGenerator::visit(::PointerType &n)
+{
+	n.targetType()->accept(*this);
+	LLVMData *cg = n.cgData<LLVMData>();
+	cg->type = llvm::PointerType::getUnqual(cg->type);
+}
+
 void LLVMGenerator::visit(TupleType &n)
 {
 }
 
 void LLVMGenerator::visit(Struct &n)
 {
+	// find variable declarations, populate _dataMembers
 }
 
 void LLVMGenerator::visit(::FunctionType &n)
