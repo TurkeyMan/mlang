@@ -52,7 +52,7 @@ static StatementList parseTree = StatementList::empty();
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
-%type <expr> literal array_literal function_literal lambda_function primary_value_expression postfix_value_expression cast_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
+%type <expr> literal array_literal function_literal lambda_function primary_value_expression postfix_value_expression cast_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression is_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
 %type <exprList> value_expression_list function_call
 
 %type <type> primitive_type primary_type_expression postfix_type_expression modified_type type_expression struct_definition tuple_definition
@@ -222,7 +222,7 @@ template_arg:
 	;
 
 struct_definition:
-	'{' '}'											{ $$ = new Struct(); }
+	'{' '}'											{ $$ = new Struct(StatementList::empty()); }
 	| '{' struct_statements '}'						{ $$ = new Struct($2); }
 	;
 
@@ -344,12 +344,17 @@ shift_value_expression:
  	| shift_value_expression ASR add_value_expression		{ $$ = new BinaryExpr(BinOp::ASR, $1, $3); }
  	| shift_value_expression LSR add_value_expression		{ $$ = new BinaryExpr(BinOp::LSR, $1, $3); }
 	;
-cmp_value_expression:
+is_value_expression:
  	shift_value_expression									{ $$ = $1; }
- 	| cmp_value_expression '<' shift_value_expression		{ $$ = new BinaryExpr(BinOp::Lt, $1, $3); }
- 	| cmp_value_expression '>' shift_value_expression		{ $$ = new BinaryExpr(BinOp::Gt, $1, $3); }
- 	| cmp_value_expression LEQ shift_value_expression		{ $$ = new BinaryExpr(BinOp::Le, $1, $3); }
- 	| cmp_value_expression GEQ shift_value_expression		{ $$ = new BinaryExpr(BinOp::Ge, $1, $3); }
+ 	| is_value_expression IS shift_value_expression			{ $$ = new BinaryExpr(BinOp::Is, $1, $3); }
+ 	| is_value_expression ISNOT shift_value_expression		{ $$ = new BinaryExpr(BinOp::IsNot, $1, $3); }
+	;
+cmp_value_expression:
+ 	is_value_expression										{ $$ = $1; }
+ 	| cmp_value_expression '<' is_value_expression			{ $$ = new BinaryExpr(BinOp::Lt, $1, $3); }
+ 	| cmp_value_expression '>' is_value_expression			{ $$ = new BinaryExpr(BinOp::Gt, $1, $3); }
+ 	| cmp_value_expression LEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Le, $1, $3); }
+ 	| cmp_value_expression GEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Ge, $1, $3); }
 	;
 eq_value_expression:
  	cmp_value_expression									{ $$ = $1; }

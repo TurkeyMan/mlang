@@ -6,8 +6,8 @@ class Semantic : public ASTVisitor
 {
 private:
 	Module *module = nullptr;
-	Scope *scope = nullptr;
-	FunctionLiteralExpr *function = nullptr;
+	std::vector<Scope*> _scope;
+	std::vector<FunctionLiteralExpr*> _function;
 
 public:
 	Semantic();
@@ -15,10 +15,16 @@ public:
 	void run(const std::string &srcFile, StatementList module);
 	Module* getModule() const { return module; }
 
-	TypeExpr* typeForUnaryExpression(UnaryOp op, Expr *expr);
-	TypeExpr* typeForBinaryExpression(BinOp op, Expr *left, Expr *right);
+	TypeExpr* typeForUnaryExpression(UnaryOp op, TypeExpr *expr);
+	TypeExpr* typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *right);
 
-	Expr* makeConversion(Expr *expr, TypeExpr *newType, bool implicit);
+	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
+	void pushScope(Scope *s) { _scope.push_back(s); }
+	void popScope() { _scope.pop_back(); }
+
+	FunctionLiteralExpr* function() const { return _function.size() ? _function.back() : nullptr; }
+	void pushFunction(FunctionLiteralExpr *f) { _function.push_back(f); }
+	void popFunction() { _function.pop_back(); }
 
 	void visit(Node &n) override;
 	void visit(Statement &n) override;
@@ -42,6 +48,7 @@ public:
 	void visit(ArrayLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
 	void visit(IdentifierExpr &n) override;
+	void visit(DerefExpr &n) override;
 	void visit(TypeConvertExpr &n) override;
 	void visit(UnaryExpr &n) override;
 	void visit(BinaryExpr &n) override;

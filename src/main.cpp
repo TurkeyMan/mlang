@@ -46,15 +46,15 @@ extern "C" {
 		int arg = 1;
 		while (arg < argc)
 		{
-			if (!strncmp(argv[arg], "-o", 2))
+			if (!strcmp(argv[arg], "-o"))
 			{
 				outFile = argv[++arg];
 			}
-			else if (!strncmp(argv[arg], "-emit-ir", 2))
+			else if (!strcmp(argv[arg], "-emit-ir"))
 			{
 				irFile = argv[++arg];
 			}
-			else if (!strncmp(argv[arg], "-emit-ast", 2))
+			else if (!strcmp(argv[arg], "-emit-ast"))
 			{
 				astFile = argv[++arg];
 			}
@@ -173,7 +173,6 @@ extern "C" {
 		if(mode != Mode::Parse)
 			Codegen(semantic.getModule(), mode, outFile, irFile);
 
-		while (1) {}
 		return 0;
 	}
 }

@@ -15,7 +15,7 @@ void Semantic::run(const std::string &srcFile, StatementList moduleStatements)
 	module->accept(*this);
 }
 
-TypeExpr* Semantic::typeForUnaryExpression(UnaryOp op, Expr *expr)
+TypeExpr* Semantic::typeForUnaryExpression(UnaryOp op, TypeExpr *type)
 {
 	switch (op)
 	{
@@ -24,21 +24,10 @@ TypeExpr* Semantic::typeForUnaryExpression(UnaryOp op, Expr *expr)
 		default:
 			break;
 	}
-	return expr->type();
+	return type->evalType();
 }
-TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
+TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *right)
 {
-	TypeExpr *lt = left->type();
-	TypeExpr *rt = right->type();
-
-	PrimitiveType *pl = lt->asPrimitive();
-	PrimitiveType *pr = rt->asPrimitive();
-
-	if (!pl || !pr)
-	{
-		// this gets hard...
-	}
-
 	switch (op)
 	{
 		case BinOp::LogicAnd:
@@ -50,7 +39,23 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 		case BinOp::Ge:
 		case BinOp::Lt:
 		case BinOp::Le:
+		case BinOp::Is:
+		case BinOp::IsNot:
 			return new PrimitiveType(PrimType::u1);
+	}
+
+	TypeExpr *let = left->evalType();
+	TypeExpr *ret = right->evalType();
+	PrimitiveType *pl = let->asPrimitive();
+	PrimitiveType *pr = ret->asPrimitive();
+
+	if (!pl || !pr)
+	{
+		// this gets hard...
+	}
+
+	switch (op)
+	{
 		case BinOp::BitAnd:
 		case BinOp::BitOr:
 		case BinOp::BitXor:
@@ -58,7 +63,7 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 			if (pl && pr)
 			{
 				// type is biggest integer arg
-				return typeWidth[(int)pl->type()] > typeWidth[(int)pr->type()] ? lt : rt;
+				return typeWidth[(int)pl->type()] > typeWidth[(int)pr->type()] ? let : ret;
 			}
 			else
 				assert(false); // dunno...
@@ -67,7 +72,7 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 		case BinOp::ASR:
 		case BinOp::LSR:
 			assert((!pl || !pl->isFloatingPoint()) && (!pr || pr->isIntegral()));
-			return lt;
+			return let;
 		case BinOp::Add:
 		case BinOp::Sub:
 		case BinOp::Mul:
@@ -86,16 +91,16 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 					if (pl->isFloatingPoint())
 					{
 						if (pr->isFloatingPoint())
-							return (int)pl->type() > (int)pr->type() ? lt : rt;
-						return lt;
+							return (int)pl->type() > (int)pr->type() ? let : ret;
+						return let;
 					}
 					else
-						return rt;
+						return ret;
 				}
 				else
 				{
 					// TODO: this logic needs a lot of work!
-					return typeWidth[(int)pl->type()] > typeWidth[(int)pr->type()] ? lt : rt;
+					return typeWidth[(int)pl->type()] > typeWidth[(int)pr->type()] ? let : ret;
 				}
 			}
 			break;
@@ -106,13 +111,6 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, Expr *left, Expr *right)
 			assert(false); // what op?
 	}
 	return nullptr; // dunno?!
-}
-
-Expr* Semantic::makeConversion(Expr *expr, TypeExpr *newType, bool implicit = true)
-{
-	if (expr->type()->isSame(newType))
-		return expr;
-	return new TypeConvertExpr(expr, newType, implicit);
 }
 
 void Semantic::visit(Node &n)
@@ -129,13 +127,12 @@ void Semantic::visit(Declaration &n)
 
 void Semantic::visit(Module &n)
 {
-	Scope *old = scope;
-	scope = n.scope();
+	pushScope(n.scope());
 
 	for (auto s : n.statements())
 		s->accept(*this);
 
-	scope = old;
+	popScope();
 }
 
 void Semantic::visit(ModuleStatement &n)
@@ -154,21 +151,21 @@ void Semantic::visit(ReturnStatement &n)
 	if (expr)
 		expr->accept(*this);
 
-	if (function->inferReturnType)
+	if (function()->inferReturnType)
 	{
-		if (!function->returnType)
-			function->returnType = expr->type();
+		if (!function()->returnType)
+			function()->returnType = expr->type();
 		else
 		{
 			// TODO: validate expr->type() == function->returnType or error
 
-			n._expression = makeConversion(expr, function->returnType);
+			n._expression = expr->makeConversion(function()->returnType);
 		}
 	}
 	else
 	{
 		// TODO: only do conversion if we need to!
-		n._expression = makeConversion(expr, function->returnType);
+		n._expression = expr->makeConversion(function()->returnType);
 	}
 }
 
@@ -178,6 +175,10 @@ void Semantic::visit(TypeExpr &n)
 
 void Semantic::visit(PrimitiveType &n)
 {
+	if (n.doneSemantic()) return;
+
+	n._init = new PrimitiveLiteralExpr(n._type, (uint64_t)0);
+	n._init->accept(*this);
 }
 
 void Semantic::visit(TypeIdentifier &n)
@@ -186,6 +187,8 @@ void Semantic::visit(TypeIdentifier &n)
 
 void Semantic::visit(PointerType &n)
 {
+	if (n.doneSemantic()) return;
+
 	TypeExpr *type = n.targetType();
 	if (!type)
 	{
@@ -193,21 +196,40 @@ void Semantic::visit(PointerType &n)
 		assert(0);
 	}
 	type->accept(*this);
-	Expr *init = n.init();
-	if (!init)
-		init = new PrimitiveLiteralExpr(0ull);
-	init->accept(*this);
+
+	n._init = new PrimitiveLiteralExpr(PrimType::uz, 0ull);
+	n._init->accept(*this);
 }
 
 void Semantic::visit(TupleType &n)
 {
 }
 
+
 void Semantic::visit(Struct &n)
 {
-	// data members...
+	n.scope()->_parent = scope();
+	pushScope(n.scope());
 
-	// methods...
+	for (auto m : n._members)
+	{
+		m->accept(*this);
+
+		// TODO: static if...
+
+		Declaration *decl = dynamic_cast<Declaration*>(m);
+		scope()->addDecl(decl->name(), decl);
+
+		VarDecl *var = dynamic_cast<VarDecl*>(decl);
+		if (var)
+		{
+			n._dataMembers.append(var);
+
+			// TODO: accumulate sizeof...
+		}
+	}
+
+	popScope();
 }
 
 void Semantic::visit(FunctionType &n)
@@ -237,6 +259,8 @@ void Semantic::visit(Generic &n)
 
 void Semantic::visit(PrimitiveLiteralExpr &n)
 {
+	n._typeExpr->accept(*this);
+
 	// todo: validate that 'value' is within 'type's precision limits
 }
 
@@ -246,17 +270,15 @@ void Semantic::visit(ArrayLiteralExpr &n)
 
 void Semantic::visit(FunctionLiteralExpr &n)
 {
-	Scope *old = scope;
-	scope = n.scope();
-	FunctionLiteralExpr *oldfn = function;
-	function = &n;
+	pushScope(n.scope());
+	pushFunction(&n);
 
 	// resolve parent scope...
 
 	// if is pure, no parent scope
 	// if is method, parent is struct
 	// else parent is module scope
-	scope->_parent = module->scope();
+	scope()->_parent = module->scope();
 
 	for (auto a : n.args())
 	{
@@ -264,14 +286,14 @@ void Semantic::visit(FunctionLiteralExpr &n)
 
 		VarDecl *decl = dynamic_cast<VarDecl*>(a);
 		assert(decl);
-		n.argTypes.append(decl->type());
+		n.argTypes.append(decl->dataType());
 	}
 
 	for (auto s : n.statements())
 		s->accept(*this);
 
-	function = oldfn;
-	scope = old;
+	popFunction();
+	popScope();
 
 	if (n.inferReturnType && !n.returnType)
 		n.returnType = new PrimitiveType(PrimType::v);
@@ -282,7 +304,12 @@ void Semantic::visit(FunctionLiteralExpr &n)
 void Semantic::visit(IdentifierExpr &n)
 {
 	if(!n._target)
-		n._target = scope->getDecl(n.getName());
+		n._target = scope()->getDecl(n.getName());
+}
+
+void Semantic::visit(DerefExpr &n)
+{
+	n._expr->accept(*this);
 }
 
 void Semantic::visit(TypeConvertExpr &n)
@@ -290,16 +317,24 @@ void Semantic::visit(TypeConvertExpr &n)
 	n._expr->accept(*this);
 	n._newType->accept(*this);
 
+	PointerType *pt = n._expr->type()->asPointer();
+	while (pt)
+	{
+		n._expr = new DerefExpr(n._expr);
+		pt = n._expr->type()->asPointer();
+	}
+
 	// TODO: validate conversion is possible...
 }
 
 void Semantic::visit(UnaryExpr &n)
 {
-	n.operand()->accept(*this);
+	n._operand->accept(*this);
 
 	// TODO: choose proper result type
 	//       cast operant to result type
-	n._type = typeForUnaryExpression(n.op(), n.operand());
+	n._type = typeForUnaryExpression(n.op(), n._operand->type());
+	n._operand = n._operand->makeConversion(n._type);
 }
 
 void Semantic::visit(BinaryExpr &n)
@@ -311,6 +346,7 @@ void Semantic::visit(BinaryExpr &n)
 	{
 		case BinOp::Pow:
 		{
+			assert(false); // call the pow intrinsic...
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(n.lhs()->type());
 			PrimitiveType *rhpt = dynamic_cast<PrimitiveType*>(n.rhs()->type());
 			if (lhpt && rhpt)
@@ -321,12 +357,12 @@ void Semantic::visit(BinaryExpr &n)
 				{
 					// int pow
 					// HACK, powi for now...
-					n._lhs = makeConversion(n.lhs(), new PrimitiveType(PrimType::f64));
-					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32));
+					n._lhs = n.lhs()->makeConversion(new PrimitiveType(PrimType::f64));
+					n._rhs = n.rhs()->makeConversion(new PrimitiveType(PrimType::i32));
 				}
 				else if (isFloat(lh) && isInt(rh))
 				{
-					n._rhs = makeConversion(n.rhs(), new PrimitiveType(PrimType::i32));
+					n._rhs = n.rhs()->makeConversion(new PrimitiveType(PrimType::i32));
 				}
 				else if (isFloat(lh) && isFloat(rh))
 				{
@@ -339,9 +375,9 @@ void Semantic::visit(BinaryExpr &n)
 		}
 	}
 
-	n._type = typeForBinaryExpression(n.op(), n.lhs(), n.rhs());
-	n._lhs = makeConversion(n._lhs, n._type);
-	n._rhs = makeConversion(n._rhs, n._type);
+	n._type = typeForBinaryExpression(n.op(), n.lhs()->type(), n.rhs()->type());
+	n._lhs = n._lhs->makeConversion(n._type);
+	n._rhs = n._rhs->makeConversion(n._type);
 }
 
 void Semantic::visit(IndexExpr &n)
@@ -371,7 +407,7 @@ void Semantic::visit(CallExpr &n)
 		if (i < n._callArgs.length)
 		{
 			n._callArgs[i]->accept(*this);
-			n._callArgs[i] = makeConversion(n._callArgs[i], args[i]);
+			n._callArgs[i] = n._callArgs[i]->makeConversion(args[i]);
 		}
 		else
 		{
@@ -383,43 +419,42 @@ void Semantic::visit(CallExpr &n)
 
 void Semantic::visit(IfStatement &n)
 {
-	Scope *old = scope;
-
 	if (n._initStatements.length > 0)
 	{
-		n._init = new Scope(scope, &n);
-		scope = n._init;
+		n._init = new Scope(scope(), &n);
+		pushScope(n._init);
 
 		for (auto s : n._initStatements)
 			s->accept(*this);
 	}
 
 	n._cond->accept(*this);
-	n._cond = makeConversion(n._cond, new PrimitiveType(PrimType::u1));
+	n._cond = n._cond->makeConversion(new PrimitiveType(PrimType::u1));
 
 	if (n._thenStatements.length > 0)
-		n._then = new Scope(scope, &n);
+		n._then = new Scope(scope(), &n);
 
 	if (n._elseStatements.length > 0)
-		n._else = new Scope(scope, &n);
+		n._else = new Scope(scope(), &n);
 
-	scope = n._then;
+	pushScope(n._then);
 	for (auto s : n._thenStatements)
 		s->accept(*this);
+	popScope();
 
-	scope = n._else;
+	pushScope(n._else);
 	for (auto s : n._elseStatements)
 		s->accept(*this);
+	popScope();
 
-	scope = old;
+	if (n._initStatements.length > 0)
+		popScope();
 }
 
 void Semantic::visit(LoopStatement &n)
 {
-	n._body = new Scope(scope, &n);
-
-	Scope *old = scope;
-	scope = n._body;
+	n._body = new Scope(scope(), &n);
+	pushScope(n._body);
 
 	for (auto i : n._iterators)
 		i->accept(*this);
@@ -427,7 +462,7 @@ void Semantic::visit(LoopStatement &n)
 	if (n._cond)
 	{
 		n._cond->accept(*this);
-		n._cond = makeConversion(n._cond, new PrimitiveType(PrimType::u1));
+		n._cond = n._cond->makeConversion(new PrimitiveType(PrimType::u1));
 	}
 
 	for (auto s : n._loopEntry)
@@ -439,12 +474,12 @@ void Semantic::visit(LoopStatement &n)
 	for (auto i : n._increments)
 		i->accept(*this);
 
-	scope = old;
+	popScope();
 }
 
 void Semantic::visit(TypeDecl &n)
 {
-	Declaration *decl = scope->getDecl(n.name(), true);
+	Declaration *decl = scope()->getDecl(n.name(), true);
 	if (decl)
 	{
 		// already declared!
@@ -453,12 +488,12 @@ void Semantic::visit(TypeDecl &n)
 
 	n._type->accept(*this);
 
-	scope->addDecl(n.name(), &n);
+	scope()->addDecl(n.name(), &n);
 }
 
 void Semantic::visit(ValDecl &n)
 {
-	Declaration *decl = scope->getDecl(n._name, true);
+	Declaration *decl = scope()->getDecl(n._name, true);
 	if (decl)
 	{
 		// already declared!
@@ -476,7 +511,7 @@ void Semantic::visit(ValDecl &n)
 		// TODO: assert init.type -> type
 	}
 
-	scope->addDecl(n._name, &n);
+	scope()->addDecl(n._name, &n);
 }
 
 void Semantic::visit(VarDecl &n)
@@ -484,7 +519,7 @@ void Semantic::visit(VarDecl &n)
 	if (!n._type && !n._init)
 		assert(false);// , "var statement needs either type or init value!");
 
-	Declaration *decl = scope->getDecl(n._name, true);
+	Declaration *decl = scope()->getDecl(n._name, true);
 	if (decl)
 	{
 		// already declared!
@@ -495,7 +530,7 @@ void Semantic::visit(VarDecl &n)
 		n._init->accept(*this);
 
 	if (!n._type)
-		n._type = n._init->type();
+		n._type = new PointerType(PtrType::ImplicitPointer, n._init->type());
 	else
 	{
 		n._type->accept(*this);
@@ -503,21 +538,23 @@ void Semantic::visit(VarDecl &n)
 		if (!n.init())
 			n._init = n._type->init();
 		else
-			n._init = makeConversion(n._init, n._type);
+			n._init = n._init->makeConversion(n._type);
+
+		n._type = new PointerType(PtrType::ImplicitPointer, n._type);
 	}
 
-	scope->addDecl(n._name, &n);
+	scope()->addDecl(n._name, &n);
 }
 
 void Semantic::visit(PrototypeDecl &n)
 {
-	Declaration *decl = scope->getDecl(n.name(), true);
+	Declaration *decl = scope()->getDecl(n.name(), true);
 	if (decl)
 	{
 		// error!
 		return;
 	}
-	scope->addDecl(n.name(), &n);
+	scope()->addDecl(n.name(), &n);
 }
 
 void Semantic::visit(FunctionDecl &n)

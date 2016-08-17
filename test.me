@@ -17,8 +17,10 @@ var x : long = 2;
 
 def aa(x : long) {}
 
-def fn(x : int)
+def fn(x : int&)
 {
+	aa(x);
+
 	for(i = 0; i < 10; i+1)
 	{
 		var j = 20;
@@ -30,8 +32,9 @@ def fn(x : int)
 
 def main(argc : long, poo : float) -> int
 {
-	if(x : int; 1) return cast(double)x+2;
-	argc/fn(10);
+	if(t : int = 1; t) return cast(double)t+2;
+	var s : int = 10;
+	argc/fn(s);
 	return (~argc + argc*argc << 2) >= argc%2;
 }
 

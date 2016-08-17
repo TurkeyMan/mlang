@@ -27,6 +27,7 @@ public:
 	virtual void visit(ArrayLiteralExpr &n) {}
 	virtual void visit(FunctionLiteralExpr &n) {}
 	virtual void visit(IdentifierExpr &n) {}
+	virtual void visit(DerefExpr &n) {}
 	virtual void visit(TypeConvertExpr &n) {}
 	virtual void visit(UnaryExpr &n) {}
 	virtual void visit(BinaryExpr &n) {}

@@ -44,6 +44,9 @@ extern const char *primTypeNames[];
 #define isChar(pt) (typeFlags[(int)pt] & TF_Char)
 #define isBool(pt) (typeFlags[(int)pt] & TF_Bool)
 
+#define tyWidth(pt) typeWidth[(int)pt]
+#define tyBytes(pt) typeBytes[(int)pt]
+
 template <typename T>
 struct List
 {
@@ -135,6 +138,7 @@ enum class PrimType
 
 class Node : public gc_cleanup
 {
+	friend class LLVMGenerator;
 public:
 	Node(SourceLocation loc = CurLoc) : loc(loc) {}
 	virtual ~Node()
@@ -159,14 +163,21 @@ public:
 
 	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out; }
 
-protected:
-	friend class LLVMGenerator;
-
 private:
 	uint64_t _codegenData[3];
 	void(*destroyCodegen)(void*) = nullptr;
 
 	SourceLocation loc;
+	bool _doneSemantic = false;
+
+protected:
+	bool doneSemantic()
+	{
+		if (_doneSemantic)
+			return true;
+		_doneSemantic = true;
+		return false;
+	}
 };
 
 class Statement : public Node
@@ -181,9 +192,16 @@ public:
 
 class Declaration : public Statement
 {
+protected:
+	std::string _name;
+	std::string _mangledName;
+
 public:
-	Declaration()
-		: Statement()
+	const std::string& name() const { return _name; }
+	const std::string& mangledName() const { return _mangledName; }
+
+	Declaration(std::string name)
+		: Statement(), _name(std::move(name))
 	{}
 
 	void accept(ASTVisitor &v) override;
@@ -367,8 +385,17 @@ public:
 //** Type nodes **
 //****************
 
+enum class ConvType
+{
+	Convertible,
+	LosesPrecision,
+	OnlyExplicit,
+	NoConversion
+};
+
 class PrimitiveType;
 class FunctionType;
+class PointerType;
 
 class TypeExpr : public Node
 {
@@ -378,17 +405,30 @@ public:
 
 	virtual std::string stringof() const = 0;
 
-	virtual Expr* init() = 0;
+	virtual Expr* init() const = 0;
 
-	virtual bool isSame(TypeExpr *other) const = 0;
+	virtual Node *getMember(const std::string &name, const Expr *expr = nullptr) const = 0;
+
+	virtual bool isSame(const TypeExpr *other) const = 0;
+	virtual ConvType convertible(const TypeExpr *target) const = 0;
+	virtual Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const = 0;
+
+	TypeExpr* resultType();
+	TypeExpr* evalType();
+
+	int ptrDepth() const;
 
 	PrimitiveType* asPrimitive();
+	const PrimitiveType* asPrimitive() const;
 	FunctionType* asFunction();
+	const FunctionType* asFunction() const;
+	PointerType* asPointer();
+	const PointerType* asPointer() const;
 
-	bool isVoid();
-	bool isBoolean();
-	bool isIntegral();
-	bool isFloatingPoint();
+	bool isVoid() const;
+	bool isBoolean() const;
+	bool isIntegral() const;
+	bool isFloatingPoint() const;
 
 	void accept(ASTVisitor &v) override;
 
@@ -397,6 +437,8 @@ public:
 
 class PrimitiveType : public TypeExpr
 {
+	friend class Semantic;
+
 	PrimType _type;
 	Expr *_init = nullptr;
 
@@ -405,9 +447,13 @@ public:
 	~PrimitiveType() {}
 
 	PrimType type() const { return _type; }
-	Expr* init() override;
+	Expr* init() const override;
 
-	bool isSame(TypeExpr *other) const override;
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override;
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override;
 
 	void accept(ASTVisitor &v) override;
 
@@ -424,10 +470,14 @@ public:
 		: TypeExpr(), name(name)
 	{}
 
-	TypeExpr* type() { assert(false); return nullptr; }
-	Expr* init() override { return type()->init(); }
+	TypeExpr* type() const { assert(false); return nullptr; }
+	Expr* init() const override { return type()->init(); }
 
-	bool isSame(TypeExpr *other) const override { assert(false); return false; }
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
+	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -439,10 +489,13 @@ enum class PtrType
 {
 	RawPtr,
 	UniquePtr,
-	BorrowedPtr
+	BorrowedPtr,
+	ImplicitPointer // lvalues
 };
 class PointerType : public TypeExpr
 {
+	friend class Semantic;
+
 	PtrType _type;
 	TypeExpr *_pointerTarget;
 	Expr *_init = nullptr;
@@ -453,9 +506,14 @@ public:
 
 	PtrType ptrType() const { return _type; }
 	TypeExpr *targetType() const { return _pointerTarget; }
-	Expr* init() override { return _init; }
+	Expr* init() const override { return _init; }
 
-	bool isSame(TypeExpr *other) const override;
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override;
+	bool canPromote(PtrType to) const;
 
 	void accept(ASTVisitor &v) override;
 
@@ -473,9 +531,13 @@ public:
 	{}
 
 	TypeExprList types() { return _types; }
-	Expr* init() override { assert(false); return nullptr; }
+	Expr* init() const override { assert(false); return nullptr; }
 
-	bool isSame(TypeExpr *other) const override { assert(false); return false; }
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
+	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -498,34 +560,33 @@ public:
 
 class Struct : public TypeExpr
 {
+	friend class Semantic;
+
 	Scope body;
 
-	DeclList _members;
-	DeclList _dataMembers;
+	StatementList _members;
+	DeclList _dataMembers = DeclList::empty();
 
 public:
-	Struct(DeclList members)
+	Struct(StatementList members)
 		: TypeExpr(), body(nullptr, this), _members(members)
 	{}
 
 	Scope* scope() { return &body; }
-	DeclList members() { return _members; }
 	DeclList dataMembers() { return _dataMembers; }
 
-	Expr* init() override { assert(false); return nullptr; }
+	Expr* init() const override { assert(false); return nullptr; }
 
-	bool isSame(TypeExpr *other) const override { assert(false); return false; }
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
-	std::string stringof() const override { return "struct{ ... }"; }
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		out << "struct: {\n";
-		for (auto m : _members)
-			m->dump(out, ind + 1);
-		return indent(out, ind) << "}\n";
-	}
+	std::string stringof() const override;
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
 class FunctionType : public TypeExpr
@@ -538,9 +599,13 @@ public:
 		: TypeExpr(), _returnType(returnType), _args(args) {}
 	~FunctionType() {}
 
-	Expr* init() override { assert(false); return nullptr; }
+	Expr* init() const override { assert(false); return nullptr; }
 
-	bool isSame(TypeExpr *other) const override;
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	TypeExpr* returnType() const { return _returnType; }
 	TypeExprList argTypes() const { return _args; }
@@ -574,11 +639,15 @@ public:
 };
 
 inline PrimitiveType* TypeExpr::asPrimitive() { return dynamic_cast<PrimitiveType*>(this); }
+inline const PrimitiveType* TypeExpr::asPrimitive() const { return dynamic_cast<const PrimitiveType*>(this); }
 inline FunctionType* TypeExpr::asFunction() { return dynamic_cast<FunctionType*>(this); }
-inline bool TypeExpr::isVoid() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && pt->type() == PrimType::v; }
-inline bool TypeExpr::isBoolean() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isBool(pt->type()); }
-inline bool TypeExpr::isIntegral() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isInt(pt->type()); }
-inline bool TypeExpr::isFloatingPoint() { PrimitiveType *pt = dynamic_cast<PrimitiveType*>(this); return pt && isFloat(pt->type()); }
+inline const FunctionType* TypeExpr::asFunction() const { return dynamic_cast<const FunctionType*>(this); }
+inline PointerType* TypeExpr::asPointer() { return dynamic_cast<PointerType*>(this); }
+inline const PointerType* TypeExpr::asPointer() const { return dynamic_cast<const PointerType*>(this); }
+inline bool TypeExpr::isVoid() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && pt->type() == PrimType::v; }
+inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isBool(pt->type()); }
+inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }
+inline bool TypeExpr::isFloatingPoint() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isFloat(pt->type()); }
 
 
 //***********************
@@ -589,15 +658,13 @@ class TypeDecl : public Declaration
 {
 	friend class Semantic;
 protected:
-	std::string _name;
 	TypeExpr *_type;
 
 public:
 	TypeDecl(std::string name, TypeExpr *type) // TODO: template args
-		: Declaration(), _name(move(name)), _type(type)
+		: Declaration(move(name)), _type(type)
 	{}
 
-	const std::string& name() const { return _name; }
 	TypeExpr* type() const { return _type; }
 
 	void accept(ASTVisitor &v) override;
@@ -610,19 +677,16 @@ class ValDecl : public Declaration
 	friend class Semantic;
 	friend Statement* makeForEach(DeclList, Expr*, StatementList);
 protected:
-	std::string _name;
-	std::string _mangledName;
 	TypeExpr *_type;
 	Expr *_init;
 
 public:
 	ValDecl(std::string name, TypeExpr *type, Expr *init)
-		: Declaration(), _name(move(name)), _type(type), _init(init)
+		: Declaration(move(name)), _type(type), _init(init)
 	{}
 
-	const std::string& name() const { return _name; }
-	const std::string& mangledName() const { return _mangledName; }
 	TypeExpr* type() { return _type; }
+	TypeExpr* dataType() { return _type->asPointer()->targetType(); }
 	Expr* init() { return _init; }
 
 	void accept(ASTVisitor &v) override;
@@ -634,7 +698,7 @@ class VarDecl : public ValDecl
 	friend class Semantic;
 public:
 	VarDecl(std::string name, TypeExpr *type, Expr *init)
-		: ValDecl(name, type, init)
+		: ValDecl(move(name), type, init)
 	{}
 
 	void accept(ASTVisitor &v) override;
@@ -653,7 +717,11 @@ public:
 	Expr(SourceLocation Loc = CurLoc) : Node(Loc) {}
 	virtual ~Expr() {}
 
-	virtual TypeExpr* type() = 0;
+	virtual TypeExpr* type() const = 0;
+
+	Node *getMember(const std::string &name) const { return type()->getMember(name, this); }
+
+	Expr* makeConversion(TypeExpr *targetType, bool implicit = true) { return type()->makeConversion(this, targetType, implicit); }
 
 	void accept(ASTVisitor &v) override;
 
@@ -662,8 +730,10 @@ public:
 
 class PrimitiveLiteralExpr : public Expr
 {
+	friend class Semantic;
+
 	PrimType _type;
-	TypeExpr *_typeExpr = nullptr;
+	PrimitiveType *_typeExpr = nullptr;
 
 	union
 	{
@@ -674,15 +744,15 @@ class PrimitiveLiteralExpr : public Expr
 	};
 
 public:
-	PrimitiveLiteralExpr(PrimType type, uint64_t v) : Expr(), _type(type), u(v) {}
-	PrimitiveLiteralExpr(PrimType type, int64_t v) : Expr(), _type(type), i(v) {}
-	PrimitiveLiteralExpr(PrimType type, double v) : Expr(), _type(type), f(v) {}
-	PrimitiveLiteralExpr(PrimType type, char32_t v) : Expr(), _type(type), c(v) {}
-	PrimitiveLiteralExpr(uint64_t v) : Expr(), _type(PrimType::u64), u(v) {}
-	PrimitiveLiteralExpr(int64_t v) : Expr(), _type(PrimType::i64), i(v) {}
-	PrimitiveLiteralExpr(double v) : Expr(), _type(PrimType::f64), f(v) {}
-	PrimitiveLiteralExpr(char32_t v) : Expr(), _type(PrimType::c32), c(v) {}
-	PrimitiveLiteralExpr(bool b) : Expr(), _type(PrimType::u1), u(b ? 1 : 0) {}
+	PrimitiveLiteralExpr(PrimType type, uint64_t v) : Expr(), _type(type), _typeExpr(new PrimitiveType(type)), u(v) {}
+	PrimitiveLiteralExpr(PrimType type, int64_t v) : Expr(), _type(type), _typeExpr(new PrimitiveType(type)), i(v) {}
+	PrimitiveLiteralExpr(PrimType type, double v) : Expr(), _type(type), _typeExpr(new PrimitiveType(type)), f(v) {}
+	PrimitiveLiteralExpr(PrimType type, char32_t v) : Expr(), _type(type), _typeExpr(new PrimitiveType(type)), c(v) {}
+	PrimitiveLiteralExpr(uint64_t v) : PrimitiveLiteralExpr(PrimType::u64, v) {}
+	PrimitiveLiteralExpr(int64_t v) : PrimitiveLiteralExpr(PrimType::i64, v) {}
+	PrimitiveLiteralExpr(double v) : PrimitiveLiteralExpr(PrimType::f64, v) {}
+	PrimitiveLiteralExpr(char32_t v) : PrimitiveLiteralExpr(PrimType::c32, v) {}
+	PrimitiveLiteralExpr(bool b) : PrimitiveLiteralExpr(PrimType::u1, b ? 1ull : 0ull) {}
 
 	PrimType primType() const { return _type; }
 	double getFloat() const { return f; }
@@ -690,40 +760,11 @@ public:
 	uint64_t getUint() const { return u; }
 	char32_t getChar() const { return c; }
 
-	TypeExpr* type() override;
+	PrimitiveType* type() const override { return _typeExpr; }
 
 	void accept(ASTVisitor &v) override;
 
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		switch (_type)
-		{
-			case PrimType::f16:
-			case PrimType::f32:
-			case PrimType::f64:
-			case PrimType::f128:
-				return Expr::dump(out << f, ind) << '\n';
-			case PrimType::u1:
-			case PrimType::u8:
-			case PrimType::u16:
-			case PrimType::u32:
-			case PrimType::u64:
-			case PrimType::u128:
-				return Expr::dump(out << u, ind) << '\n';
-			case PrimType::i8:
-			case PrimType::i16:
-			case PrimType::i32:
-			case PrimType::i64:
-			case PrimType::i128:
-				return Expr::dump(out << i, ind) << '\n';
-			case PrimType::c8:
-			case PrimType::c16:
-			case PrimType::c32:
-				return Expr::dump(out << c, ind) << '\n';
-			default:
-				assert(0); return out;
-		}
-	}
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
 class ArrayLiteralExpr: public Expr {
@@ -733,7 +774,7 @@ public:
 	ArrayLiteralExpr(ExprList items)
 		: Expr(), items(move(items)) {}
 
-	TypeExpr* type() override { return nullptr; }
+	TypeExpr* type() const override { return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -763,7 +804,7 @@ public:
 		: Expr(), body(nullptr, this), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
 	{}
 
-	FunctionType* type() override { return _type; }
+	FunctionType* type() const override { return _type; }
 
 	DeclList args() const { return _args; }
 	StatementList statements() { return bodyStatements; }
@@ -808,13 +849,31 @@ public:
 	const std::string &getName() const { return name; }
 
 	Declaration* target() { return _target; }
-	TypeExpr* type() override { return static_cast<ValDecl*>(_target)->type(); }
+	TypeExpr* type() const override { return static_cast<ValDecl*>(_target)->type(); }
 
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
 		return Expr::dump(out << '#' << name << "\n", ind);
 	}
+};
+
+class DerefExpr : public Expr
+{
+	friend class Semantic;
+
+	Expr *_expr;
+
+public:
+	DerefExpr(Expr *expr)
+		: Expr(), _expr(expr) {}
+
+	Expr* expr() { return _expr; }
+	TypeExpr* type() const override { return _expr->type()->asPointer()->targetType(); }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
 class TypeConvertExpr : public Expr
@@ -830,16 +889,11 @@ public:
 		: Expr(), _expr(expr), _newType(newType), _implicit(implicit) {}
 
 	Expr* expr() { return _expr; }
-	TypeExpr* type() override { return _newType; }
+	TypeExpr* type() const override { return _newType; }
 
 	void accept(ASTVisitor &v) override;
 
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		Expr::dump(out << "cast\n", ind);
-		_newType->dump(indent(out, ind) << "target: ", ind + 1);
-		_expr->dump(indent(out, ind) << "expr: ", ind + 1);
-		return out;
-	}
+	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
 enum class UnaryOp
@@ -861,7 +915,7 @@ public:
 	UnaryOp op() { return _op; }
 	Expr* operand() { return _operand; }
 
-	TypeExpr* type() override { return _type; }
+	TypeExpr* type() const override { return _type; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -873,7 +927,8 @@ enum class BinOp
 	Add, Sub, Mul, Div, Mod, Pow, Cat,
 	ASL, ASR, LSR,
 	BitAnd, BitOr, BitXor, LogicAnd, LogicOr, LogicXor,
-	Eq, Ne, Gt, Ge, Lt, Le
+	Eq, Ne, Gt, Ge, Lt, Le,
+	Is, IsNot
 };
 class BinaryExpr : public Expr
 {
@@ -891,7 +946,7 @@ public:
 	Expr* lhs() { return _lhs; }
 	Expr* rhs() { return _rhs; }
 
-	TypeExpr* type() override { return _type; }
+	TypeExpr* type() const override { return _type; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -908,7 +963,7 @@ public:
 		std::vector<owner<Expr>> Args)
 		: Expr(Loc), Source(move(Source)), Args(std::move(Args)) {}
 
-	TypeExpr* type() override;
+	TypeExpr* type() const override;
 
 	void accept(ASTVisitor &v) override;
 
@@ -930,7 +985,7 @@ public:
 		: _func(func), _callArgs(callArgs)
 	{}
 
-	TypeExpr* type() override
+	TypeExpr* type() const override
 	{
 		FunctionType *f = dynamic_cast<FunctionType*>(_func->type());
 		return f->returnType();
@@ -949,7 +1004,6 @@ public:
 /// of arguments the function takes), as well as if it is an operator.
 class PrototypeDecl : public Declaration
 {
-	std::string Name;
 	std::vector<std::string> Args;
 	bool IsOperator;
 	unsigned Precedence; // Precedence if a binary op.
@@ -957,10 +1011,10 @@ class PrototypeDecl : public Declaration
 
 public:
 	PrototypeDecl(SourceLocation Loc, const std::string &Name, std::vector<std::string> Args, bool IsOperator = false, unsigned Prec = 0)
-		: Declaration(), Name(Name), Args(std::move(Args)), IsOperator(IsOperator), Precedence(Prec), Line(Loc.Line)
+		: Declaration(move(Name)), Args(std::move(Args)), IsOperator(IsOperator), Precedence(Prec), Line(Loc.Line)
 	{}
 
-	const std::string &name() const { return Name; }
+	const std::string &name() const { return _name; }
 
 	bool isUnaryOp() const { return IsOperator && Args.size() == 1; }
 	bool isBinaryOp() const { return IsOperator && Args.size() == 2; }
@@ -968,7 +1022,7 @@ public:
 	char getOperatorName() const
 	{
 		assert(isUnaryOp() || isBinaryOp());
-		return Name[Name.size() - 1];
+		return _name[_name.size() - 1];
 	}
 
 	unsigned getBinaryPrecedence() const { return Precedence; }
@@ -987,7 +1041,7 @@ class FunctionDecl : public Declaration
 
 public:
 	FunctionDecl(owner<PrototypeDecl> Proto, owner<Expr> Body)
-		: Declaration(), body(nullptr, this), Proto(std::move(Proto)), Body(std::move(Body))
+		: Declaration(""), body(nullptr, this), Proto(std::move(Proto)), Body(std::move(Body))
 	{}
 
 	Scope* scope() { return &body; }

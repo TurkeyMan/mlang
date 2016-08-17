@@ -64,7 +64,8 @@ private:
 	std::unique_ptr<DIBuilder> DBuilder;
 
 	::Module *module;
-	Scope *scope = nullptr;
+
+	std::vector<Scope*> _scope;
 
 //	Function *getFunction(std::string Name);
 
@@ -88,6 +89,10 @@ public:
 
 	std::string codegen(Mode mode, std::string outFile, std::string irFile);
 
+	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
+	void pushScope(Scope *s) { _scope.push_back(s); }
+	void popScope() { _scope.pop_back(); }
+
 	void visit(Node &n) override;
 	void visit(Statement &n) override;
 	void visit(Declaration &n) override;
@@ -110,6 +115,7 @@ public:
 	void visit(ArrayLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
 	void visit(IdentifierExpr &n) override;
+	void visit(DerefExpr &n) override;
 	void visit(TypeConvertExpr &n) override;
 	void visit(UnaryExpr &n) override;
 	void visit(BinaryExpr &n) override;

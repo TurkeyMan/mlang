@@ -32,6 +32,7 @@ void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeIdentifier::accept(ASTVisitor &v) { v.visit(*this); }
+void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
@@ -41,6 +42,7 @@ void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IdentifierExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void DerefExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeConvertExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -93,7 +95,7 @@ Declaration *Scope::getDecl(const std::string& name, bool onlyLocal) const
 	auto i = _declarations.find(name);
 	if (i == _declarations.end())
 	{
-		if (!onlyLocal)
+		if (!onlyLocal && _parent)
 			return _parent->getDecl(name, false);
 		return nullptr;
 	}
@@ -120,12 +122,229 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 //** Type nodes **
 //****************
 
-bool PrimitiveType::isSame(TypeExpr *other) const
+Node *TypeExpr::getMember(const std::string &name, const Expr *expr) const
 {
-	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(other);
+	if (name == "init")
+		return init();
+	if (name == "sizeof")
+	{
+		assert(false);
+		return nullptr;
+	}
+	if (name == "alignof")
+	{
+		assert(false);
+		return nullptr;
+	}
+	if (name == "stringof")
+	{
+		assert(false);
+		return nullptr;
+	}
+	if (name == "mangleof")
+	{
+		assert(false);
+		return nullptr;
+	}
+	return nullptr;
+}
+
+TypeExpr* TypeExpr::resultType()
+{
+	FunctionType *f = asFunction();
+	if (f)
+		return f->returnType()->evalType();
+	return this;
+}
+TypeExpr* TypeExpr::evalType()
+{
+	FunctionType *f = asFunction();
+	if (f)
+		return f->returnType()->evalType();
+	PointerType *p = asPointer();
+	if (p)
+		return p->targetType()->evalType();
+	return this;
+}
+int TypeExpr::ptrDepth() const
+{
+	int depth = 0;
+	const PointerType *ptr = asPointer();
+	while (ptr)
+	{
+		++depth;
+		ptr = ptr->targetType()->asPointer();
+	}
+	return depth;
+}
+
+Expr* PrimitiveType::init() const
+{
+	return _init;
+}
+
+static int magicNumbers[][4] =
+{
+	{ 3, 6, 15, 33 },  // dig
+	{ 11, 24, 53, 113 }, // mant_dig
+	{ 4, 38, 308, 4932 }, // max_10_exp
+	{ 15, 128, 1024, 16383 }, // max_exp
+	{ -4, -37, -307, -4931 }, // min_10_exp
+	{ -14, -125, -1021, -16382 }, // min_exp
+	{ 5, 8, 11, 15 }, // exp_bits
+	{ 10, 23, 52, 112 }, // mant_bits
+};
+static uint64_t magicNumbers2[][4] =
+{
+	{ 0x7FF0000000000000ULL, 0x7FF0000000000000ULL, 0x7FF0000000000000ULL, 0x7FF0000000000000ULL }, // infinity
+	{ 0x7FF8000000000000ULL, 0x7FF8000000000000ULL, 0x7FF8000000000000ULL, 0x7FF8000000000000ULL }, // nan
+	{ 0, 0x47EFFFFFE0000000ULL, 0x7FEFFFFFFFFFFFFFULL, 0 }, // max
+	{ 0, 0x3810000000000000ULL, 0x0010000000000000ULL, 0 }, // min_normal
+	{ 0, 0x3E80000000000000ULL, 0x3CB0000000000000ULL, 0 }, // epsilon
+};
+Node *PrimitiveType::getMember(const std::string &name, const Expr *expr) const
+{
+	switch (_type)
+	{
+	case PrimType::u1:
+		break;
+	case PrimType::f16:
+	case PrimType::f32:
+	case PrimType::f64:
+	case PrimType::f128:
+		if (name == "infinity")
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[0][(int)_type - (int)PrimType::f16]);
+		if (name == "nan")
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[1][(int)_type - (int)PrimType::f16]);
+		if (name == "max")
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[2][(int)_type - (int)PrimType::f16]);
+		if (name == "min_normal")
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[3][(int)_type - (int)PrimType::f16]);
+		if (name == "epsilon")
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[4][(int)_type - (int)PrimType::f16]);
+		if (name == "dig")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[0][(int)_type - (int)PrimType::f16]);
+		if (name == "mant_dig")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[1][(int)_type - (int)PrimType::f16]);
+		if (name == "max_10_exp")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[2][(int)_type - (int)PrimType::f16]);
+		if (name == "max_exp")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[3][(int)_type - (int)PrimType::f16]);
+		if (name == "min_10_exp")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[4][(int)_type - (int)PrimType::f16]);
+		if (name == "min_exp")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[5][(int)_type - (int)PrimType::f16]);
+		if (name == "exp_bits")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[6][(int)_type - (int)PrimType::f16]);
+		if (name == "mant_bits")
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[7][(int)_type - (int)PrimType::f16]);
+		break;
+	case PrimType::u8:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFULL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		break;
+	case PrimType::u16:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFULL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		break;
+	case PrimType::u32:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFULL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		break;
+	case PrimType::u64:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFFFFFFFFFULL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		break;
+	case PrimType::u128:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		break;
+	case PrimType::i8:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FLL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80LL);
+		break;
+	case PrimType::i16:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFLL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000LL);
+		break;
+	case PrimType::i32:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFLL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80000000LL);
+		break;
+	case PrimType::i64:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFFFFFFFFFLL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000000000000000LL);
+		break;
+	case PrimType::i128:
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0LL);
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0LL);
+		break;
+	case PrimType::c8:
+	case PrimType::c16:
+	case PrimType::c32:
+		break;
+	default:
+		assert(0);
+	}
+	return TypeExpr::getMember(name, expr);
+}
+
+bool PrimitiveType::isSame(const TypeExpr *other) const
+{
+	const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(other);
 	if (!pt)
 		return false;
 	return _type == pt->_type;
+}
+ConvType PrimitiveType::convertible(const TypeExpr *target) const
+{
+	const PrimitiveType *primt = target->asPrimitive();
+	if (primt)
+	{
+		PrimType pt = primt->type();
+
+		if (isFloat(pt))
+		{
+			if (isFloat(_type) && tyWidth(_type) <= tyWidth(pt))
+				return ConvType::Convertible;
+			else if ((isInt(_type) || isChar(_type) || isBool(_type)) && tyWidth(_type) < tyWidth(pt))
+				return ConvType::Convertible;
+		}
+		else if (isSigned(pt))
+		{
+			if (isUnsigned(_type) && tyWidth(_type) < tyWidth(pt))
+				return ConvType::Convertible;
+			else if (isSigned(_type) && tyWidth(_type) <= tyWidth(pt))
+				return ConvType::Convertible;
+		}
+		else if (isUnsigned(pt))
+		{
+			if (isUnsigned(_type) && tyWidth(_type) <= tyWidth(pt))
+				return ConvType::Convertible;
+		}
+		return ConvType::LosesPrecision;
+	}
+
+	// TODO: size_t can explicitly convert to pointers... maybe?
+
+	// TODO: test if target can construct from 'this'
+
+	return ConvType::NoConversion;
+}
+Expr* PrimitiveType::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	PrimitiveType *primt = targetType->asPrimitive();
+	if (primt)
+	{
+		if (_type == primt->_type)
+			return expr;
+		return new TypeConvertExpr(expr, targetType, implicit);
+	}
+
+	// TODO: can target construct from 'this'?
+
+	assert(false);
+	return nullptr;
 }
 
 std::string PrimitiveType::stringof() const
@@ -137,51 +356,90 @@ raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 	return out << stringof() << '\n';
 }
 
-Expr* PrimitiveType::init()
+static const char *ptrTypeStrings[] = { "*", "^", "&", "#" };
+bool PointerType::isSame(const TypeExpr *other) const
 {
-	if (!_init)
-	{
-		switch (_type)
-		{
-		case PrimType::u1:
-		case PrimType::u8:
-		case PrimType::u16:
-		case PrimType::u32:
-		case PrimType::u64:
-		case PrimType::u128:
-		case PrimType::uz:
-		case PrimType::i8:
-		case PrimType::i16:
-		case PrimType::i32:
-		case PrimType::i64:
-		case PrimType::i128:
-		case PrimType::iz:
-			_init = new PrimitiveLiteralExpr(_type, (uint64_t)0); break;
-		case PrimType::c8:
-		case PrimType::c16:
-		case PrimType::c32:
-			_init = new PrimitiveLiteralExpr(_type, (char32_t)0); break;
-		case PrimType::f16:
-		case PrimType::f32:
-		case PrimType::f64:
-		case PrimType::f128:
-			_init = new PrimitiveLiteralExpr(_type, 0.0); break;
-		case PrimType::v:
-		default:
-			assert(0);
-		}
-	}
-	return _init;
-}
-
-static const char *ptrTypeStrings[] = { "*", "^", "&" };
-bool PointerType::isSame(TypeExpr *other) const
-{
-	PointerType *t = dynamic_cast<PointerType*>(other);
+	const PointerType *t = dynamic_cast<const PointerType*>(other);
 	if (!t)
 		return false;
-	return _pointerTarget->isSame(t->_pointerTarget);
+	return _type == t->_type && _pointerTarget->isSame(t->_pointerTarget);
 }
+ConvType PointerType::convertible(const TypeExpr *target) const
+{
+	const PointerType *ptrt = target->asPointer();
+	if (ptrt)
+	{
+		const TypeExpr *from = this;
+
+		const PointerType *toStack[128];
+		const PointerType *fromStack[128];
+		size_t toDepth = 0, fromDepth = 0;
+
+		// burrow down to the pointer target
+		const PointerType *ptrf;
+		do
+		{
+			ptrf = from->asPointer();
+			if (!ptrf)
+				return ConvType::NoConversion;
+			if (ptrt)
+			{
+				toStack[toDepth++] = ptrt;
+				target = ptrt->targetType();
+				ptrt = target->asPointer();
+			}
+			fromStack[fromDepth++] = ptrf;
+			from = ptrf->targetType();
+			ptrf = from->asPointer();
+		} while (ptrt || ptrf);
+
+		// compare pointer targets are the same type
+		if (!from->isSame(target))
+			return ConvType::NoConversion;
+
+		// validate each layer of pointer is convertible
+		while (fromDepth--, toDepth--)
+		{
+			if (!fromStack[fromDepth]->canPromote(toStack[toDepth]->ptrType()))
+				return ConvType::NoConversion;
+		}
+		return ConvType::Convertible;
+	}
+
+	// if target is not a pointer, we will try and convert the pointer target type
+	TypeExpr *from = _pointerTarget;
+	while (from->asPointer())
+		from = ((PointerType*)from)->_pointerTarget;
+
+	return from->convertible(target);
+}
+Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	int depth = targetType->ptrDepth();
+	if(depth > 0 && ptrDepth() <= depth)
+	{
+		assert(expr->type()->convertible(targetType) == ConvType::Convertible);
+		return expr;
+	}
+
+	Expr *targetConversion = new DerefExpr(expr);
+	return targetConversion->makeConversion(targetType);
+}
+bool PointerType::canPromote(PtrType to) const
+{
+	switch (to)
+	{
+	case PtrType::RawPtr:
+	case PtrType::BorrowedPtr:
+		return true;
+	case PtrType::UniquePtr:
+		return _type == PtrType::UniquePtr;
+	case PtrType::ImplicitPointer:
+		return false;
+	}
+	return false;
+}
+
 std::string PointerType::stringof() const
 {
 	return _pointerTarget->stringof() + "*";
@@ -197,7 +455,7 @@ raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-bool Struct::isSame(TypeExpr *other) const
+bool Struct::isSame(const TypeExpr *other) const
 {
 	assert(false);
 	return false;
@@ -214,9 +472,9 @@ raw_ostream &Struct::dump(raw_ostream &out, int ind)
 	return indent(out, ind) << "}\n";
 }
 
-bool FunctionType::isSame(TypeExpr *other) const
+bool FunctionType::isSame(const TypeExpr *other) const
 {
-	FunctionType *ft = dynamic_cast<FunctionType*>(other);
+	const FunctionType *ft = dynamic_cast<const FunctionType*>(other);
 	if (!ft)
 		return false;
 	if (!_returnType->isSame(ft->_returnType))
@@ -230,6 +488,17 @@ bool FunctionType::isSame(TypeExpr *other) const
 	}
 	return true;
 }
+ConvType FunctionType::convertible(const TypeExpr *target) const
+{
+	const FunctionType *to = target->asFunction();
+	if (to)
+	{
+		// TODO: handle argument const-promotion, arg pointer type promotion, etc
+
+		return isSame(to) ? ConvType::Convertible : ConvType::NoConversion;
+	}
+	return ConvType::NoConversion;
+}
 
 //***********************
 //** Declaration nodes **
@@ -240,7 +509,7 @@ raw_ostream &TypeDecl::dump(raw_ostream &out, int ind)
 	Declaration::dump(out << "type: " << _name, ind) << "\n";
 	++ind;
 	if (_type)
-		_type->dump(indent(out, ind) << "as: ", ind);
+		_type->dump(indent(out, ind) << "as: ", ind + 1);
 	return out;
 }
 
@@ -249,9 +518,9 @@ raw_ostream &ValDecl::dump(raw_ostream &out, int ind)
 	Declaration::dump(out << "def: #" << _name, ind) << "\n";
 	++ind;
 	if (_type)
-		_type->dump(indent(out, ind) << "type: ", ind);
+		_type->dump(indent(out, ind) << "type: ", ind + 1);
 	if (_init)
-		_init->dump(indent(out, ind) << "val: ", ind);
+		_init->dump(indent(out, ind) << "val: ", ind + 1);
 	return out;
 }
 
@@ -260,9 +529,9 @@ raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 	Declaration::dump(out << "var: #" << _name, ind) << "\n";
 	++ind;
 	if (_type)
-		_type->dump(indent(out, ind) << "type: ", ind);
+		_type->dump(indent(out, ind) << "type: ", ind + 1);
 	if (_init)
-		_init->dump(indent(out, ind) << "init: ", ind);
+		_init->dump(indent(out, ind) << "init: ", ind + 1);
 	return out;
 }
 
@@ -271,11 +540,51 @@ raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 //** Expression nodes **
 //**********************
 
-TypeExpr* PrimitiveLiteralExpr::type()
+raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 {
-	if (!_typeExpr)
-		_typeExpr = new PrimitiveType(_type);
-	return _typeExpr;
+	switch (_type)
+	{
+	case PrimType::u1:
+		return Expr::dump(out << (u ? "true" : "false"), ind) << '\n';
+	case PrimType::f16:
+	case PrimType::f32:
+	case PrimType::f64:
+	case PrimType::f128:
+		return Expr::dump(out << f, ind) << '\n';
+	case PrimType::u8:
+	case PrimType::u16:
+	case PrimType::u32:
+	case PrimType::u64:
+	case PrimType::u128:
+		return Expr::dump(out << u, ind) << '\n';
+	case PrimType::i8:
+	case PrimType::i16:
+	case PrimType::i32:
+	case PrimType::i64:
+	case PrimType::i128:
+		return Expr::dump(out << i, ind) << '\n';
+	case PrimType::c8:
+	case PrimType::c16:
+	case PrimType::c32:
+		return Expr::dump(out << "'" << c << "'", ind) << '\n';
+	default:
+		assert(0); return out;
+	}
+}
+
+raw_ostream &DerefExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "deref\n", ind);
+	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	return out;
+}
+
+raw_ostream &TypeConvertExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "cast\n", ind);
+	_newType->dump(indent(out, ind) << "target: ", ind + 1);
+	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	return out;
 }
 
 static const char *unaryOps[] =
@@ -307,6 +616,7 @@ raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 raw_ostream &CallExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "call\n", ind);
+	ind++;
 	_func->dump(indent(out, ind) << "function: ", ind + 1);
 	indent(out, ind) << "args: (\n";
 	for (auto a : _callArgs)
@@ -319,6 +629,13 @@ raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 {
 	Statement::dump(out << "if\n", ind);
 	ind++;
+	if (_initStatements.length > 0)
+	{
+		indent(out, ind) << "init: {\n";
+		for (auto s : _initStatements)
+			s->dump(indent(out, ind + 1), ind + 1);
+		indent(out, ind) << "}\n";
+	}
 	_cond->dump(indent(out, ind) << "cond: ", ind + 1);
 	indent(out, ind) << "then: {\n";
 	for (auto s : _thenStatements)

@@ -30,7 +30,7 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 }
 
 
-`void Codegen(::Module *module, Mode mode, std::string outFile, std::string irFile)
+void Codegen(::Module *module, Mode mode, std::string outFile, std::string irFile)
 {
 	InitializeNativeTarget();
 	InitializeNativeTargetAsmPrinter();
@@ -94,13 +94,12 @@ void LLVMGenerator::visit(Declaration &n)
 
 void LLVMGenerator::visit(::Module &n)
 {
-	Scope *old = scope;
-	scope = n.scope();
+	pushScope(n.scope());
 
-	for (auto &s : scope->symbols())
+	for (auto &s : scope()->symbols())
 		s.second->accept(*this);
 
-	scope = old;
+	popScope();
 }
 
 void LLVMGenerator::visit(ModuleStatement &n)
@@ -127,11 +126,9 @@ void LLVMGenerator::visit(IfStatement &n)
 {
 	Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
-	Scope *old = scope;
-
 	if (n.initScope())
 	{
-		scope = n.initScope();
+		pushScope(n.initScope());
 
 		for (auto &s : n.initStatements())
 			s->accept(*this);
@@ -146,7 +143,7 @@ void LLVMGenerator::visit(IfStatement &n)
 	Builder.CreateCondBr(cg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
 
 	// emit 'then' block
-	scope = n.thenScope();
+	pushScope(n.thenScope());
 	Builder.SetInsertPoint(thenBlock);
 
 	// emit statements...
@@ -158,10 +155,12 @@ void LLVMGenerator::visit(IfStatement &n)
 	Builder.CreateBr(afterBlock);
 	thenBlock = Builder.GetInsertBlock();
 
+	popScope();
+
 	if (elseBlock)
 	{
 		// emit 'else' block
-		scope = n.elseScope();
+		pushScope(n.elseScope());
 		TheFunction->getBasicBlockList().push_back(elseBlock);
 		Builder.SetInsertPoint(elseBlock);
 
@@ -173,10 +172,14 @@ void LLVMGenerator::visit(IfStatement &n)
 
 		Builder.CreateBr(afterBlock);
 		elseBlock = Builder.GetInsertBlock();
+
+		popScope();
 	}
 
 	// continue
-	scope = old;
+	if (n.initScope())
+		popScope();
+
 	TheFunction->getBasicBlockList().push_back(afterBlock);
 	Builder.SetInsertPoint(afterBlock);
 
@@ -192,8 +195,7 @@ void LLVMGenerator::visit(LoopStatement &n)
 	Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
 	// emit loop block
-	Scope *old = scope;
-	scope = n.bodyScope();
+	pushScope(n.bodyScope());
 
 	// emit iterators
 	for (auto i : n.iterators())
@@ -238,6 +240,8 @@ void LLVMGenerator::visit(LoopStatement &n)
 	// emit post-loop
 	TheFunction->getBasicBlockList().push_back(afterBlock);
 	Builder.SetInsertPoint(afterBlock);
+
+	popScope();
 }
 
 void LLVMGenerator::visit(TypeExpr &n)
@@ -247,7 +251,6 @@ void LLVMGenerator::visit(TypeExpr &n)
 void LLVMGenerator::visit(PrimitiveType &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	switch (n.type())
 	{
@@ -297,9 +300,12 @@ void LLVMGenerator::visit(TypeIdentifier &n)
 
 void LLVMGenerator::visit(::PointerType &n)
 {
-	n.targetType()->accept(*this);
 	LLVMData *cg = n.cgData<LLVMData>();
-	cg->type = llvm::PointerType::getUnqual(cg->type);
+
+	n.targetType()->accept(*this);
+	LLVMData *targetCg = n.targetType()->cgData<LLVMData>();
+
+	cg->type = llvm::PointerType::getUnqual(targetCg->type);
 }
 
 void LLVMGenerator::visit(TupleType &n)
@@ -314,7 +320,6 @@ void LLVMGenerator::visit(Struct &n)
 void LLVMGenerator::visit(::FunctionType &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	n.returnType()->accept(*this);
 	llvm::Type *r = n.returnType()->cgData<LLVMData>()->type;
@@ -354,7 +359,8 @@ void LLVMGenerator::visit(Generic &n)
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
+
+	n.type()->accept(*this);
 
 	switch (n.primType())
 	{
@@ -413,10 +419,9 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 void LLVMGenerator::visit(IdentifierExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	Declaration *decl = n.target();
-	cg->value = Builder.CreateLoad(decl->cgData<LLVMData>()->value, n.getName());
+	cg->value = decl->cgData<LLVMData>()->value;
 /*
 	// Look this variable up in the function.
 	Value *V = NamedValues[Name];
@@ -469,52 +474,70 @@ static llvm::Instruction::CastOps cast_types[] =
 	llvm::Instruction::CastOps::SIToFP
 };
 
+void LLVMGenerator::visit(DerefExpr &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	Expr *expr = n.expr();
+	expr->accept(*this);
+	LLVMData *exprCg = expr->cgData<LLVMData>();
+
+	cg->value = Builder.CreateLoad(exprCg->value);
+}
+
 void LLVMGenerator::visit(TypeConvertExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	Expr *expr = n.expr();
 	expr->accept(*this);
 	TypeExpr *type = n.type();
 	type->accept(*this);
 
+	TypeExpr *from_type = expr->type();
+
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 	LLVMData *typeCg = type->cgData<LLVMData>();
 
-	PrimitiveType *pt = dynamic_cast<PrimitiveType*>(type);
-	if (pt)
+	PrimitiveType *primt = dynamic_cast<PrimitiveType*>(type);
+	if (primt)
 	{
-		TypeExpr *from_type = expr->type();
-
 		PrimType src;
 		PrimitiveType *from_pt = dynamic_cast<PrimitiveType*>(from_type);
 		if (!from_pt)
 		{
-			// TODO: can from_type be wrangled into a primitive type??
+			// TODO: can 'from_type' be wrangled into a primitive type??
 			assert(false);
 		}
 		else
 			src = from_pt->type();
 
-		int castType = cast_flags[(int)src*21 + (int)pt->type()];
+		int castType = cast_flags[(int)src*21 + (int)primt->type()];
 		assert(castType >= 0);
 
 		if (castType == 0)
 			cg->value = exprCg->value;
 		else if (castType == 10)
-			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(ctx, APInt(64, 0, false)), "tobool");
+			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(from_type->cgData<LLVMData>()->type, 0), "tobool");
 		else if (castType == 11)
 			cg->value = Builder.CreateFCmpUNE(exprCg->value, ConstantFP::get(ctx, APFloat(0.0)), "tobool");
 		else
 			cg->value = Builder.CreateCast(cast_types[castType], exprCg->value, typeCg->type, "cast");
+		return;
 	}
+	::PointerType *ptrt = dynamic_cast<::PointerType*>(type);
+	if (ptrt)
+	{
+		assert(false);
+	}
+
+	assert(false);
+	// can 'type' be constructed from a 'from_type'
 }
 
 void LLVMGenerator::visit(UnaryExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	Expr *operand = n.operand();
 	operand->accept(*this);
@@ -581,7 +604,6 @@ void LLVMGenerator::visit(UnaryExpr &n)
 void LLVMGenerator::visit(BinaryExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	Expr *lhs = n.lhs();
 	n.lhs()->accept(*this);
@@ -931,7 +953,6 @@ void LLVMGenerator::visit(TypeDecl &n)
 void LLVMGenerator::visit(ValDecl &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
 
 	::FunctionType *funcType = dynamic_cast<::FunctionType*>(n.type());
 	if (funcType)
@@ -946,8 +967,7 @@ void LLVMGenerator::visit(ValDecl &n)
 		FunctionLiteralExpr *func = (FunctionLiteralExpr*)n.init();
 		if (func)
 		{
-			Scope *old = scope;
-			scope = func->scope();
+			pushScope(func->scope());
 
 			// Create a new basic block to start insertion into.
 			BasicBlock *block = BasicBlock::Create(ctx, "entry", proto);
@@ -1015,7 +1035,7 @@ void LLVMGenerator::visit(ValDecl &n)
 //			// unconditionally.
 //			KSDbgInfo.LexicalBlocks.pop_back();
 
-			scope = old;
+			popScope();
 		}
 	}
 	else
@@ -1028,7 +1048,9 @@ void LLVMGenerator::visit(ValDecl &n)
 void LLVMGenerator::visit(VarDecl &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
-	if (!cg) return;
+
+	n.type()->accept(*this);
+	llvm::Type *typeCg = n.dataType()->cgData<LLVMData>()->type;
 
 	::FunctionType *pFunc = n.type()->asFunction();
 	if (pFunc)
@@ -1038,16 +1060,13 @@ void LLVMGenerator::visit(VarDecl &n)
 	}
 	else
 	{
-		n.type()->accept(*this);
-		llvm::Type *type = n.type()->cgData<LLVMData>()->type;
-
-		if (dynamic_cast<::Module*>(scope->owner()))
+		if (dynamic_cast<::Module*>(scope()->owner()))
 		{
-			cg->value = TheModule->getOrInsertGlobal(n.name(), type);
+			cg->value = TheModule->getOrInsertGlobal(n.name(), typeCg);
 		}
 		else
 		{
-			cg->value = Builder.CreateAlloca(type, nullptr, n.name() + ".addr");
+			cg->value = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
 			if (!n.init()->type()->isVoid())
 			{
 				n.init()->accept(*this);
