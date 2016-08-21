@@ -19,9 +19,12 @@ def aa(x : long) {}
 
 def fn(x : int&)
 {
+	x = byte.max;
+	x += 20;
+
 	aa(x);
 
-	for(i = 0; i < 10; i+1)
+	for(i = 0; i < 10; i+=1)
 	{
 		var j = 20;
 		aa(i+j);

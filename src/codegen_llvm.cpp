@@ -235,7 +235,7 @@ void LLVMGenerator::visit(LoopStatement &n)
 	for (auto s : n.incrementExpressions())
 		s->accept(*this);
 
-	Builder.CreateBr(loopBlock);
+	Builder.CreateBr(cond ? condBlock : loopBlock);
 
 	// emit post-loop
 	TheFunction->getBasicBlockList().push_back(afterBlock);
@@ -276,9 +276,6 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	case PrimType::i128:
 	case PrimType::u128:
 		cg->type = Type::getInt128Ty(ctx); break;
-	case PrimType::iz:
-	case PrimType::uz:
-		cg->type = Type::getInt64Ty(ctx); break; // TODO: depends on target arch!
 	case PrimType::f16:
 		cg->type = Type::getHalfTy(ctx); break;
 	case PrimType::f32:
@@ -335,6 +332,10 @@ void LLVMGenerator::visit(::FunctionType &n)
 	cg->type = llvm::FunctionType::get(r, args, false);
 }
 
+void LLVMGenerator::visit(MemberLookupType &n)
+{
+}
+
 void LLVMGenerator::visit(Expr &n)
 {
 }
@@ -384,10 +385,8 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
 	case PrimType::c32:
 		cg->value = ConstantInt::get(ctx, APInt(32, (uint64_t)n.getChar(), false)); break;
-	case PrimType::iz: // TODO: may not be 64 bits!
 	case PrimType::i64:
 		cg->value = ConstantInt::get(ctx, APInt(64, n.getInt(), true)); break;
-	case PrimType::uz: // TODO: may not be 64 bits!
 	case PrimType::u64:
 		cg->value = ConstantInt::get(ctx, APInt(64, n.getUint(), false)); break;
 	case PrimType::i128:
@@ -435,29 +434,27 @@ void LLVMGenerator::visit(IdentifierExpr &n)
 }
 
 // none=0, trunc=1, se=2, ze=3, fup=4, fdown=5, f2u=6, f2i=7, u2f=8, i2f=9, inez=10, fnez=11, invalid=-1
-static char cast_flags[] =
-{	/* from     v  u1 b  ub c  s  us wc i  ui dc z  uz l  ul ct uc h  f  d  x */
-	/* v    */  0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-	/* u1   */ -1, 0, 3, 3,-1, 3, 3,-1, 3, 3,-1, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* i8   */ -1,10, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
-	/* u8   */ -1,10, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* c8   */ -1,10, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* i16  */ -1,10, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
-	/* u16  */ -1,10, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* c16  */ -1,10, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* i32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
-	/* u32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* c32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
-	/* iz   */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 9, 9, 9, 9,
-	/* uz   */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 3, 3, 8, 8, 8, 8,
-	/* i64  */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 9, 9, 9, 9,
-	/* u64  */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 3, 3, 8, 8, 8, 8,
-	/* i128 */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 9, 9, 9, 9,
-	/* u128 */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 8, 8, 8, 8,
-	/* f16  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 0, 4, 4, 4,
-	/* f32  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 0, 4, 4,
-	/* f64  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 5, 0, 4,
-	/* f128 */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 7, 6, 5, 5, 5, 0,
+static char cast_flags[(size_t)PrimType::__NumTypes * (size_t)PrimType::__NumTypes] =
+{	/* from     v  u1 b  ub c  s  us wc i  ui dc l  ul ct uc h  f  d  x */
+	/* v    */  0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+	/* u1   */ -1, 0, 3, 3,-1, 3, 3,-1, 3, 3,-1, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i8   */ -1,10, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u8   */ -1,10, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c8   */ -1,10, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i16  */ -1,10, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u16  */ -1,10, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c16  */ -1,10, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 2, 2, 2, 2, 9, 9, 9, 9,
+	/* u32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* c32  */ -1,10, 1, 1, 1, 1, 1, 1, 0, 0, 0, 3, 3, 3, 3, 8, 8, 8, 8,
+	/* i64  */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2, 2, 9, 9, 9, 9,
+	/* u64  */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 3, 3, 8, 8, 8, 8,
+	/* i128 */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 9, 9, 9, 9,
+	/* u128 */ -1,10, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 8, 8, 8, 8,
+	/* f16  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 0, 4, 4, 4,
+	/* f32  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 5, 0, 4, 4,
+	/* f64  */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 5, 5, 0, 4,
+	/* f128 */ -1,11, 7, 6, 6, 7, 6, 6, 7, 6, 6, 7, 6, 7, 6, 5, 5, 5, 0
 };
 
 static llvm::Instruction::CastOps cast_types[] =
@@ -485,6 +482,17 @@ void LLVMGenerator::visit(DerefExpr &n)
 	cg->value = Builder.CreateLoad(exprCg->value);
 }
 
+void LLVMGenerator::visit(MemberLookupExpr &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	Expr *expr = n.expr();
+	expr->accept(*this);
+	LLVMData *exprCg = expr->cgData<LLVMData>();
+
+	cg->value = exprCg->value;
+}
+
 void LLVMGenerator::visit(TypeConvertExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
@@ -494,7 +502,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 	TypeExpr *type = n.type();
 	type->accept(*this);
 
-	TypeExpr *from_type = expr->type();
+	TypeExpr *exprType = expr->type();
 
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 	LLVMData *typeCg = type->cgData<LLVMData>();
@@ -503,7 +511,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 	if (primt)
 	{
 		PrimType src;
-		PrimitiveType *from_pt = dynamic_cast<PrimitiveType*>(from_type);
+		PrimitiveType *from_pt = dynamic_cast<PrimitiveType*>(exprType);
 		if (!from_pt)
 		{
 			// TODO: can 'from_type' be wrangled into a primitive type??
@@ -512,13 +520,13 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 		else
 			src = from_pt->type();
 
-		int castType = cast_flags[(int)src*21 + (int)primt->type()];
+		int castType = cast_flags[(int)src*(int)PrimType::__NumTypes + (int)primt->type()];
 		assert(castType >= 0);
 
 		if (castType == 0)
 			cg->value = exprCg->value;
 		else if (castType == 10)
-			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(from_type->cgData<LLVMData>()->type, 0), "tobool");
+			cg->value = Builder.CreateICmpNE(exprCg->value, ConstantInt::get(exprType->cgData<LLVMData>()->type, 0), "tobool");
 		else if (castType == 11)
 			cg->value = Builder.CreateFCmpUNE(exprCg->value, ConstantFP::get(ctx, APFloat(0.0)), "tobool");
 		else
@@ -687,9 +695,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		case BinOp::Cat:
 			assert(false);
 			break;
-		case BinOp::ASL:
+		case BinOp::SHL:
 			assert(isBinary(primType));
-			cg->value = Builder.CreateShl(lhCg->value, rhCg->value, "asl");
+			cg->value = Builder.CreateShl(lhCg->value, rhCg->value, "shl");
 			break;
 		case BinOp::ASR:
 			assert(isBinary(primType));
@@ -725,7 +733,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			break;
 		case BinOp::Eq:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -741,7 +748,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		}
 		case BinOp::Ne:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -757,7 +763,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		}
 		case BinOp::Gt:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -775,7 +780,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		}
 		case BinOp::Ge:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -793,7 +797,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		}
 		case BinOp::Lt:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -811,7 +814,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 		}
 		case BinOp::Le:
 		{
-			assert(isBool(primType));
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
 			if (lhpt)
 			{
@@ -944,6 +946,24 @@ void LLVMGenerator::visit(CallExpr &n)
 //	}
 //
 //	return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
+}
+
+void LLVMGenerator::visit(AssignExpr &n)
+{
+	Expr *target = n.target();
+	target->accept(*this);
+	Expr *expr = n.expr();
+	expr->accept(*this);
+
+	LLVMData *targetCg = target->cgData<LLVMData>();
+	LLVMData *exprCg = expr->cgData<LLVMData>();
+
+	Builder.CreateStore(exprCg->value, targetCg->value, false);
+}
+
+void LLVMGenerator::visit(BindExpr &n)
+{
+	int x = 0;
 }
 
 void LLVMGenerator::visit(TypeDecl &n)

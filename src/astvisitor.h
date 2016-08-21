@@ -21,6 +21,7 @@ public:
 	virtual void visit(TupleType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(FunctionType &n) {}
+	virtual void visit(MemberLookupType &n) {}
 	virtual void visit(Expr &n) {}
 	virtual void visit(Generic &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
@@ -28,11 +29,14 @@ public:
 	virtual void visit(FunctionLiteralExpr &n) {}
 	virtual void visit(IdentifierExpr &n) {}
 	virtual void visit(DerefExpr &n) {}
+	virtual void visit(MemberLookupExpr &n) {}
 	virtual void visit(TypeConvertExpr &n) {}
 	virtual void visit(UnaryExpr &n) {}
 	virtual void visit(BinaryExpr &n) {}
 	virtual void visit(IndexExpr &n) {}
 	virtual void visit(CallExpr &n) {}
+	virtual void visit(AssignExpr &n) {}
+	virtual void visit(BindExpr &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}

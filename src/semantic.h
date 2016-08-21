@@ -42,6 +42,7 @@ public:
 	void visit(TupleType &n) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
+	void visit(MemberLookupType &n) override;
 	void visit(Expr &n) override;
 	void visit(Generic &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
@@ -49,11 +50,14 @@ public:
 	void visit(FunctionLiteralExpr &n) override;
 	void visit(IdentifierExpr &n) override;
 	void visit(DerefExpr &n) override;
+	void visit(MemberLookupExpr &n) override;
 	void visit(TypeConvertExpr &n) override;
 	void visit(UnaryExpr &n) override;
 	void visit(BinaryExpr &n) override;
 	void visit(IndexExpr &n) override;
 	void visit(CallExpr &n) override;
+	void visit(AssignExpr &n) override;
+	void visit(BindExpr &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;

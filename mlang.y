@@ -27,6 +27,7 @@ static StatementList parseTree = StatementList::empty();
 	int64_t ival;
 	double fval;
 	const char *sval;
+	Expr *node;
 	Expr *expr;
 	ExprList exprList;
 	TypeExpr *type;
@@ -36,6 +37,7 @@ static StatementList parseTree = StatementList::empty();
 	ValDecl *decl;
 	DeclList declList;
 	UnaryOp unaryOp;
+	BinOp binaryOp;
 }
 
 // define the constant-string tokens:
@@ -52,6 +54,8 @@ static StatementList parseTree = StatementList::empty();
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
+%type <node> ident_node postfix_expression
+
 %type <expr> literal array_literal function_literal lambda_function primary_value_expression postfix_value_expression cast_value_expression unary_value_expression pow_value_expression mul_value_expression add_value_expression shift_value_expression is_value_expression cmp_value_expression eq_value_expression bitand_value_expression bitxor_value_expression bitor_value_expression and_value_expression or_value_expression assign_value_expression value_expression
 %type <exprList> value_expression_list function_call
 
@@ -65,6 +69,7 @@ static StatementList parseTree = StatementList::empty();
 %type <declList> var_decl_list var_decl_assign_list function_arguments
 
 %type <unaryOp> unary_operator
+%type <binaryOp> assign_operator
 
 %%
 mlang:
@@ -86,11 +91,10 @@ code_statements:
 
 module:
 	MODULE IDENTIFIER ';'					{ $$ = new ModuleStatement($2); }
-	;
 /*
 	MODULE scoped_identifier ';'			{ Push(Add(Generic::Type::Module, Pop())); Print(Top()); }
-	;
 */
+	;
 
 module_statement:
 	module						{ $$ = $1; }
@@ -255,6 +259,17 @@ var_decl_assign_list:
 	| var_decl_assign_list ',' var_decl_assign		{ $$ = $1.append($3); }
 	;
 
+/**** UNKNOWN EXPRESSIONS ****/
+
+ident_node:
+	IDENTIFIER				{ $$ = Identifier(); }
+	| '(' ident_node ')'	{ $$ = $2; }
+	;
+
+postfix_expression:
+	postfix_expression '.' IDENTIFIER				{ $$ = MemberLookup(); }
+//	postfix_expression  '[' or_value_expression ']'	{ $$ = MemberIndex(); }
+	;
 
 /**** VALUE EXPRESSION ****/
 
@@ -300,7 +315,8 @@ postfix_value_expression:
 //	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
 //	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
 //	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
-//	| postfix_value_expression '.' postfix_value_expression		{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+	| postfix_value_expression '.' IDENTIFIER					{ $$ = new MemberLookupExpr($1, $3); }
+	| type_expression '.' IDENTIFIER							{ $$ = new MemberLookupExpr($1, $3); }
 	;
 
 cast_value_expression:
@@ -309,13 +325,13 @@ cast_value_expression:
 	;
 
 unary_operator:
- 	'+'		{ $$ = UnaryOp::Pos; }
- 	| '-'	{ $$ = UnaryOp::Neg; }
- 	| '~'	{ $$ = UnaryOp::BitNot; }
- 	| '!'	{ $$ = UnaryOp::LogicNot; }
-// 	| '#'	{ $$ = UnaryOp::Length; } // should we have unary length operator? ;)
-// 	| INCOP	{ $$ = UnaryOp::PreInc; }
-// 	| DECOP	{ $$ = UnaryOp::PreDec; }
+	'+'		{ $$ = UnaryOp::Pos; }
+	| '-'	{ $$ = UnaryOp::Neg; }
+	| '~'	{ $$ = UnaryOp::BitNot; }
+	| '!'	{ $$ = UnaryOp::LogicNot; }
+//	| '#'	{ $$ = UnaryOp::Length; } // should we have unary length operator? ;)
+//	| INCOP	{ $$ = UnaryOp::PreInc; }
+//	| DECOP	{ $$ = UnaryOp::PreDec; }
 	;
 unary_value_expression:
 	cast_value_expression									{ $$ = $1; }
@@ -325,7 +341,7 @@ unary_value_expression:
 pow_value_expression:
 	unary_value_expression									{ $$ = $1; }
 	| pow_value_expression POW unary_value_expression		{ $$ = new BinaryExpr(BinOp::Pow, $1, $3); }
-
+	;
 mul_value_expression:
 	pow_value_expression									{ $$ = $1; }
 	| mul_value_expression '*' pow_value_expression			{ $$ = new BinaryExpr(BinOp::Mul, $1, $3); }
@@ -339,71 +355,71 @@ add_value_expression:
 	| add_value_expression '~' mul_value_expression			{ $$ = new BinaryExpr(BinOp::Cat, $1, $3); }
 	;
 shift_value_expression:
- 	add_value_expression									{ $$ = $1; }
- 	| shift_value_expression SHL add_value_expression		{ $$ = new BinaryExpr(BinOp::ASL, $1, $3); }
- 	| shift_value_expression ASR add_value_expression		{ $$ = new BinaryExpr(BinOp::ASR, $1, $3); }
- 	| shift_value_expression LSR add_value_expression		{ $$ = new BinaryExpr(BinOp::LSR, $1, $3); }
+	add_value_expression									{ $$ = $1; }
+	| shift_value_expression SHL add_value_expression		{ $$ = new BinaryExpr(BinOp::SHL, $1, $3); }
+	| shift_value_expression ASR add_value_expression		{ $$ = new BinaryExpr(BinOp::ASR, $1, $3); }
+	| shift_value_expression LSR add_value_expression		{ $$ = new BinaryExpr(BinOp::LSR, $1, $3); }
 	;
 is_value_expression:
- 	shift_value_expression									{ $$ = $1; }
- 	| is_value_expression IS shift_value_expression			{ $$ = new BinaryExpr(BinOp::Is, $1, $3); }
- 	| is_value_expression ISNOT shift_value_expression		{ $$ = new BinaryExpr(BinOp::IsNot, $1, $3); }
+	shift_value_expression									{ $$ = $1; }
+	| is_value_expression IS shift_value_expression			{ $$ = new BinaryExpr(BinOp::Is, $1, $3); }
+	| is_value_expression ISNOT shift_value_expression		{ $$ = new BinaryExpr(BinOp::IsNot, $1, $3); }
 	;
 cmp_value_expression:
- 	is_value_expression										{ $$ = $1; }
- 	| cmp_value_expression '<' is_value_expression			{ $$ = new BinaryExpr(BinOp::Lt, $1, $3); }
- 	| cmp_value_expression '>' is_value_expression			{ $$ = new BinaryExpr(BinOp::Gt, $1, $3); }
- 	| cmp_value_expression LEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Le, $1, $3); }
- 	| cmp_value_expression GEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Ge, $1, $3); }
+	is_value_expression										{ $$ = $1; }
+	| cmp_value_expression '<' is_value_expression			{ $$ = new BinaryExpr(BinOp::Lt, $1, $3); }
+	| cmp_value_expression '>' is_value_expression			{ $$ = new BinaryExpr(BinOp::Gt, $1, $3); }
+	| cmp_value_expression LEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Le, $1, $3); }
+	| cmp_value_expression GEQ is_value_expression			{ $$ = new BinaryExpr(BinOp::Ge, $1, $3); }
 	;
 eq_value_expression:
- 	cmp_value_expression									{ $$ = $1; }
- 	| eq_value_expression EQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Eq, $1, $3); }
- 	| eq_value_expression NEQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Ne, $1, $3); }
+	cmp_value_expression									{ $$ = $1; }
+	| eq_value_expression EQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Eq, $1, $3); }
+	| eq_value_expression NEQ cmp_value_expression			{ $$ = new BinaryExpr(BinOp::Ne, $1, $3); }
 	;
 bitand_value_expression:
- 	eq_value_expression										{ $$ = $1; }
- 	| bitand_value_expression '&' eq_value_expression		{ $$ = new BinaryExpr(BinOp::BitAnd, $1, $3); }
+	eq_value_expression										{ $$ = $1; }
+	| bitand_value_expression '&' eq_value_expression		{ $$ = new BinaryExpr(BinOp::BitAnd, $1, $3); }
 	;
 bitxor_value_expression:
- 	bitand_value_expression									{ $$ = $1; }
- 	| bitxor_value_expression '^' bitand_value_expression	{ $$ = new BinaryExpr(BinOp::BitXor, $1, $3); }
+	bitand_value_expression									{ $$ = $1; }
+	| bitxor_value_expression '^' bitand_value_expression	{ $$ = new BinaryExpr(BinOp::BitXor, $1, $3); }
 	;
 bitor_value_expression:
- 	bitxor_value_expression									{ $$ = $1; }
- 	| bitor_value_expression '|' bitxor_value_expression	{ $$ = new BinaryExpr(BinOp::BitOr, $1, $3); }
+	bitxor_value_expression									{ $$ = $1; }
+	| bitor_value_expression '|' bitxor_value_expression	{ $$ = new BinaryExpr(BinOp::BitOr, $1, $3); }
 	;
 and_value_expression:
- 	bitor_value_expression									{ $$ = $1; }
- 	| and_value_expression AND bitor_value_expression		{ $$ = new BinaryExpr(BinOp::LogicAnd, $1, $3); }
+	bitor_value_expression									{ $$ = $1; }
+	| and_value_expression AND bitor_value_expression		{ $$ = new BinaryExpr(BinOp::LogicAnd, $1, $3); }
 	;
 or_value_expression:
- 	and_value_expression									{ $$ = $1; }
- 	| or_value_expression OR and_value_expression			{ $$ = new BinaryExpr(BinOp::LogicOr, $1, $3); }
+	and_value_expression									{ $$ = $1; }
+	| or_value_expression OR and_value_expression			{ $$ = new BinaryExpr(BinOp::LogicOr, $1, $3); }
 	;
 
 assign_operator:
-	'='			{ Push(Add(Generic::Type::OpAssign)); }
-//	| BIND		{ Push(Add(Generic::Type::OpBind)); }
-//	| POWEQ		{ Push(Add(Generic::Type::OpPowEq)); }
-//	| MULEQ		{ Push(Add(Generic::Type::OpMulEq)); }
-//	| DIVEQ		{ Push(Add(Generic::Type::OpDivEq)); }
-//	| MODEQ		{ Push(Add(Generic::Type::OpModEq)); }
-//	| ADDEQ		{ Push(Add(Generic::Type::OpAddEq)); }
-//	| SUBEQ		{ Push(Add(Generic::Type::OpSubEq)); }
-//	| CONCATEQ	{ Push(Add(Generic::Type::OpConcatEq)); }
-//	| BITOREQ	{ Push(Add(Generic::Type::OpBitOrEq)); }
-//	| BITANDEQ	{ Push(Add(Generic::Type::OpBitAndEq)); }
-//	| BITXOREQ	{ Push(Add(Generic::Type::OpBitXorEq)); }
-//	| OREQ		{ Push(Add(Generic::Type::OpOrEq)); }
-//	| ANDEQ		{ Push(Add(Generic::Type::OpAndEq)); }
-//	| SHLEQ		{ Push(Add(Generic::Type::OpASLEq)); }
-//	| ASREQ		{ Push(Add(Generic::Type::OpASREq)); }
-//	| LSREQ		{ Push(Add(Generic::Type::OpLSREq)); }
+	'='			{ $$ = BinOp::None; }
+	| POWEQ		{ $$ = BinOp::Pow; }
+	| MULEQ		{ $$ = BinOp::Mul; }
+	| DIVEQ		{ $$ = BinOp::Div; }
+	| MODEQ		{ $$ = BinOp::Mod; }
+	| ADDEQ		{ $$ = BinOp::Add; }
+	| SUBEQ		{ $$ = BinOp::Sub; }
+	| CONCATEQ	{ $$ = BinOp::Cat; }
+	| BITOREQ	{ $$ = BinOp::BitOr; }
+	| BITANDEQ	{ $$ = BinOp::BitAnd; }
+	| BITXOREQ	{ $$ = BinOp::BitXor; }
+	| OREQ		{ $$ = BinOp::LogicOr; }
+	| ANDEQ		{ $$ = BinOp::LogicAnd; }
+	| SHLEQ		{ $$ = BinOp::SHL; }
+	| ASREQ		{ $$ = BinOp::ASR; }
+	| LSREQ		{ $$ = BinOp::LSR; }
 	;
 assign_value_expression:
 	or_value_expression											{ $$ = $1; }
-//	| cast_value_expression assign_operator or_value_expression	{ Node *n = Pop(), *m = Pop(); Push(SetChildren((Generic*)m, Pop(), n)); }
+	| cast_value_expression assign_operator or_value_expression	{ $$ = new AssignExpr($1, $3, $2); }
+	| cast_value_expression BIND or_value_expression			{ $$ = new BindExpr($1, $3); }
 	;
 
 value_expression:
@@ -414,27 +430,27 @@ value_expression:
 /**** TYPE EXPRESSION ****/
 
 primitive_type:
-	VOID	{ $$ = new PrimitiveType(PrimType::v); }
-	| U1	{ $$ = new PrimitiveType(PrimType::u1); }
-	| I8 	{ $$ = new PrimitiveType(PrimType::i8); }
-	| U8	{ $$ = new PrimitiveType(PrimType::u8); }
-	| I16	{ $$ = new PrimitiveType(PrimType::i16); }
-	| U16	{ $$ = new PrimitiveType(PrimType::u16); }
-	| I32	{ $$ = new PrimitiveType(PrimType::i32); }
-	| U32	{ $$ = new PrimitiveType(PrimType::u32); }
-	| I64	{ $$ = new PrimitiveType(PrimType::i64); }
-	| U64	{ $$ = new PrimitiveType(PrimType::u64); }
-	| I128	{ $$ = new PrimitiveType(PrimType::i128); }
-	| U128	{ $$ = new PrimitiveType(PrimType::u128); }
-	| IZ	{ $$ = new PrimitiveType(PrimType::iz); }
-	| UZ	{ $$ = new PrimitiveType(PrimType::uz); }
-	| C8	{ $$ = new PrimitiveType(PrimType::c8); }
-	| C16	{ $$ = new PrimitiveType(PrimType::c16); }
-	| C32	{ $$ = new PrimitiveType(PrimType::c32); }
-	| F16	{ $$ = new PrimitiveType(PrimType::f16); }
-	| F32	{ $$ = new PrimitiveType(PrimType::f32); }
-	| F64	{ $$ = new PrimitiveType(PrimType::f64); }
-	| F128	{ $$ = new PrimitiveType(PrimType::f128); }
+	VOID	{ $$ = PrimitiveType::get(PrimType::v); }
+	| U1	{ $$ = PrimitiveType::get(PrimType::u1); }
+	| I8 	{ $$ = PrimitiveType::get(PrimType::i8); }
+	| U8	{ $$ = PrimitiveType::get(PrimType::u8); }
+	| I16	{ $$ = PrimitiveType::get(PrimType::i16); }
+	| U16	{ $$ = PrimitiveType::get(PrimType::u16); }
+	| I32	{ $$ = PrimitiveType::get(PrimType::i32); }
+	| U32	{ $$ = PrimitiveType::get(PrimType::u32); }
+	| I64	{ $$ = PrimitiveType::get(PrimType::i64); }
+	| U64	{ $$ = PrimitiveType::get(PrimType::u64); }
+	| I128	{ $$ = PrimitiveType::get(PrimType::i128); }
+	| U128	{ $$ = PrimitiveType::get(PrimType::u128); }
+	| IZ	{ $$ = PrimitiveType::get(SSizeT_Type); }
+	| UZ	{ $$ = PrimitiveType::get(SizeT_Type); }
+	| C8	{ $$ = PrimitiveType::get(PrimType::c8); }
+	| C16	{ $$ = PrimitiveType::get(PrimType::c16); }
+	| C32	{ $$ = PrimitiveType::get(PrimType::c32); }
+	| F16	{ $$ = PrimitiveType::get(PrimType::f16); }
+	| F32	{ $$ = PrimitiveType::get(PrimType::f32); }
+	| F64	{ $$ = PrimitiveType::get(PrimType::f64); }
+	| F128	{ $$ = PrimitiveType::get(PrimType::f128); }
 	;
 
 primary_type_expression:
@@ -452,7 +468,9 @@ postfix_type_expression:
 	| postfix_type_expression '&'							{ $$ = new PointerType(PtrType::BorrowedPtr, $1); }
 //	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
 	| postfix_type_expression function_arg_types			{ $$ = new FunctionType($1, $2); }
-//	| postfix_type_expression '.' postfix_type_expression	{ Push(Add(Generic::Type::MemberLookup, Pop(), Pop())); }
+//	| postfix_value_expression '.' IDENTIFIER				{ $$ = new MemberLookupType($1, $3); }
+//	| postfix_type_expression '.' IDENTIFIER				{ $$ = new MemberLookupType($1, $3); }
+
 //	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, $3))); }
 //	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }
 //	| IDENTIFIER '!' '(' type_expression_list ')'			{ Push(Add(Generic::Type::Instantiate, Identifier($1), Pop())); }

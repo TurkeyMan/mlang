@@ -14,6 +14,8 @@ std::string outFile;
 std::string irFile;
 std::string astFile;
 
+std::map<std::string, TypeExpr*> types;
+
 Mode mode = Mode::CompileAndLink;
 int opt = 0;
 

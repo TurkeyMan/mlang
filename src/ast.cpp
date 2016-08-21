@@ -1,22 +1,30 @@
 #include "ast.h"
 #include "astvisitor.h"
 
+std::map<std::string, TypeExpr*> typesUsed;
 
-uint8_t typeFlags[] =
+PrimType SizeT_Type = PrimType::i64;
+PrimType SSizeT_Type = PrimType::u64;
+
+uint8_t typeFlags[(size_t)PrimType::__NumTypes] =
 {
-	0, 17, 2, 1, 5, 2, 1, 5, 2, 1, 5, 2, 1, 2, 1, 2, 1, 8, 8, 8, 8
+	0, 17, 2, 1, 5, 2, 1, 5, 2, 1, 5, 2, 1, 2, 1, 8, 8, 8, 8
 };
-uint8_t typeWidth[] =
+uint8_t typeWidth[(size_t)PrimType::__NumTypes] =
 {
-	0, 1, 8, 8, 8, 16, 16, 16, 32, 32, 32, 64, 64, 64, 64, 128, 128, 16, 32, 64, 128
+	0, 1, 8, 8, 8, 16, 16, 16, 32, 32, 32, 64, 64, 128, 128, 16, 32, 64, 128
 };
-uint8_t typeBytes[] =
+uint8_t typeBytes[(size_t)PrimType::__NumTypes] =
 {
-	0, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8, 8, 16, 16, 2, 4, 8, 16
+	0, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 16, 16, 2, 4, 8, 16
 };
-const char *primTypeNames[] =
+const char *primTypeNames[(size_t)PrimType::__NumTypes] =
 {
-	"void", "u1", "i8", "u8", "c8", "i16", "u16", "c16", "i32", "u32", "c32", "iz", "uz", "i64", "u64", "i128", "u128", "f16", "f32", "f64", "f128"
+	"void", "u1", "i8", "u8", "c8", "i16", "u16", "c16", "i32", "u32", "c32", "i64", "u64", "i128", "u128", "f16", "f32", "f64", "f128"
+};
+const char *primTypeMangle[(size_t)PrimType::__NumTypes] =
+{ // unused lower case chars: aegknrz
+	"v", "b", "o", "p", "c", "s", "t", "w", "i", "j", "u", "l", "m", "x", "y", "h", "f", "d", "q"
 };
 
 
@@ -36,6 +44,7 @@ void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
+void MemberLookupType::accept(ASTVisitor &v) { v.visit(*this); }
 void Expr::accept(ASTVisitor &v) { v.visit(*this); }
 void Generic::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -43,16 +52,31 @@ void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IdentifierExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void DerefExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void MemberLookupExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeConvertExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void AssignExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
+
+
+template <typename... Args>
+PrimitiveType* MakeTypeHelper<PrimitiveType, Args...>::makeType(Scope *scope, PrimType type)
+{
+	auto t = typesUsed.find(primTypeMangle[(int)type]);
+	if (t != typesUsed.end())
+		return static_cast<PrimitiveType*>(t->second);
+	PrimitiveType *prim = new PrimitiveType(type);
+	typesUsed.insert({ primTypeMangle[(int)type], prim });
+	return prim;
+}
 
 
 Statement* makeForEach(DeclList iterators, Expr *range, StatementList body)
@@ -351,6 +375,10 @@ std::string PrimitiveType::stringof() const
 {
 	return std::string("@") + primTypeNames[(size_t)type()];
 }
+std::string PrimitiveType::mangleof() const
+{
+	return primTypeMangle[(size_t)type()];
+}
 raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 {
 	return out << stringof() << '\n';
@@ -434,7 +462,7 @@ bool PointerType::canPromote(PtrType to) const
 		return true;
 	case PtrType::UniquePtr:
 		return _type == PtrType::UniquePtr;
-	case PtrType::ImplicitPointer:
+	case PtrType::LValue:
 		return false;
 	}
 	return false;
@@ -498,6 +526,53 @@ ConvType FunctionType::convertible(const TypeExpr *target) const
 		return isSame(to) ? ConvType::Convertible : ConvType::NoConversion;
 	}
 	return ConvType::NoConversion;
+}
+
+std::string FunctionType::stringof() const
+{
+	std::string r = _returnType ? _returnType->stringof() : std::string("???");
+	r += "(";
+	for (size_t i = 0; i < _args.length; ++i)
+		r += (i > 0 ? std::string(",") : std::string()) + _args[i]->stringof();
+	r += ")";
+	return r;
+}
+std::string FunctionType::mangleof() const { assert(false); return ""; }
+
+raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
+{
+	out << "function\n";
+
+	ind++;
+	indent(out, ind) << "return: ";
+	if (_returnType)
+		_returnType->dump(out, ind + 1);
+	else
+		out << "???\n";
+	indent(out, ind) << "args: (\n";
+	for (auto a : _args)
+		a->dump(indent(out, ind + 1), ind + 1);
+	return indent(out, ind) << ")\n";
+}
+
+std::string MemberLookupType::stringof() const
+{
+	Expr *expr = dynamic_cast<Expr*>(_expr);
+	if (expr)
+		return expr->type()->stringof() + "." + _member;
+	TypeExpr *type = dynamic_cast<TypeExpr*>(_expr);
+	if (type)
+		return type->stringof() + "." + _member;
+	assert(false);
+	return "";
+}
+
+raw_ostream &MemberLookupType::dump(raw_ostream &out, int ind)
+{
+	TypeExpr::dump(out << "lookup\n", ind);
+	indent(out, ind) << "member: " << _member << "\n";
+	_expr->dump(indent(out, ind) << "type: ", ind + 1);
+	return out;
 }
 
 //***********************
@@ -579,6 +654,14 @@ raw_ostream &DerefExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+raw_ostream &MemberLookupExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "lookup\n", ind);
+	indent(out, ind) << "member: " << _member << "\n";
+	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	return out;
+}
+
 raw_ostream &TypeConvertExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "cast\n", ind);
@@ -593,13 +676,14 @@ static const char *unaryOps[] =
 };
 raw_ostream &UnaryExpr::dump(raw_ostream &out, int ind)
 {
-	Expr::dump(out << "unary" << unaryOps[(int)_op] << "\n", ind);
+	Expr::dump(out << "unary " << unaryOps[(int)_op] << "\n", ind);
 	_operand->dump(indent(out, ind) << "operand: ", ind + 1);
 	return out;
 }
 
-static const char *binOps[] =
+static const char *binOps[(int)BinOp::__NumOps] =
 {
+	"",
 	"+", "-", "*", "/", "%", "^^", "~",
 	"<<", ">>", ">>>",
 	"&", "|", "^", "&&", "||", "^^",
@@ -607,7 +691,7 @@ static const char *binOps[] =
 };
 raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 {
-	Expr::dump(out << "binary" << binOps[(int)_op] << "\n", ind);
+	Expr::dump(out << "binary " << binOps[(int)_op] << "\n", ind);
 	_lhs->dump(indent(out, ind) << "lhs: ", ind + 1);
 	_rhs->dump(indent(out, ind) << "rhs: ", ind + 1);
 	return out;
@@ -622,6 +706,24 @@ raw_ostream &CallExpr::dump(raw_ostream &out, int ind)
 	for (auto a : _callArgs)
 		a->dump(indent(out, ind + 1), ind + 1);
 	indent(out, ind) << ")\n";
+	return out;
+}
+
+raw_ostream &AssignExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "assign " << binOps[(int)_op] << "=\n", ind);
+	ind++;
+	_target->dump(indent(out, ind) << "target: ", ind + 1);
+	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	return out;
+}
+
+raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "bind\n", ind);
+	ind++;
+	_target->dump(indent(out, ind) << "target: ", ind + 1);
+	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
 	return out;
 }
 
