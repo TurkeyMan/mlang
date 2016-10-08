@@ -5,8 +5,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
-
-void Codegen(Module *pAST, Mode mode, std::string outFile, std::string irFile);
+void InitCodegen();
+void Codegen(Module *pAST, Mode mode, int opt, std::string outFile, std::string irFile);
 
 std::vector<std::string> srcFiles;
 std::string curSrcFile;
@@ -44,6 +44,8 @@ extern "C" {
 	{
 		GC_INIT();
 
+		InitCodegen();
+
 		// parse command line
 		int arg = 1;
 		while (arg < argc)
@@ -72,7 +74,7 @@ extern "C" {
 			{
 				mode = Mode::OutputBC;
 			}
-			else if (!strcmp(argv[arg], "-O"))
+			else if (!strncmp(argv[arg], "-O", 2))
 			{
 				if (argv[arg][2])
 					opt = atoi(argv[arg] + 2);
@@ -173,7 +175,7 @@ extern "C" {
 
 		// codegen
 		if(mode != Mode::Parse)
-			Codegen(semantic.getModule(), mode, outFile, irFile);
+			Codegen(semantic.getModule(), mode, opt, outFile, irFile);
 
 		return 0;
 	}

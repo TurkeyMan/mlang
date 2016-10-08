@@ -14,7 +14,7 @@ struct Loc
 extern std::string curSrcFile;
 
 class Module;
-extern Module *module;
+extern ::Module *module;
 
 inline void emitCompileError(const std::string& message, Loc loc)
 {

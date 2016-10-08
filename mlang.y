@@ -27,7 +27,7 @@ static StatementList parseTree = StatementList::empty();
 	int64_t ival;
 	double fval;
 	const char *sval;
-	Expr *node;
+	AmbiguousExpr *node;
 	Expr *expr;
 	ExprList exprList;
 	TypeExpr *type;
@@ -50,7 +50,7 @@ static StatementList parseTree = StatementList::empty();
 
 %token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
 
-%token <ival> INT CHAR BOOL
+%token <ival> INT CHAR BOOL NUL
 %token <fval> FLOAT
 %token <sval> STRING IDENTIFIER
 
@@ -262,19 +262,21 @@ var_decl_assign_list:
 /**** UNKNOWN EXPRESSIONS ****/
 
 ident_node:
-	IDENTIFIER				{ $$ = Identifier(); }
-	| '(' ident_node ')'	{ $$ = $2; }
+	IDENTIFIER						{ $$ = new Identifier($1); }
+	| '(' postfix_expression ')'	{ $$ = $2; }
 	;
 
 postfix_expression:
-	postfix_expression '.' IDENTIFIER				{ $$ = MemberLookup(); }
-//	postfix_expression  '[' or_value_expression ']'	{ $$ = MemberIndex(); }
+	ident_node											{ $$ = $1; }
+	| postfix_expression '.' IDENTIFIER					{ $$ = new MemberLookup($1, $3); }
+//	| postfix_expression  '[' or_value_expression ']'	{ $$ = MemberIndex(); }
 	;
 
 /**** VALUE EXPRESSION ****/
 
 literal:
-	INT			{ $$ = new PrimitiveLiteralExpr($1); }
+	NUL			{ $$ = new PrimitiveLiteralExpr(SizeT_Type, 0ull); }
+	| INT		{ $$ = new PrimitiveLiteralExpr($1); }
 	| FLOAT		{ $$ = new PrimitiveLiteralExpr($1); }
 	| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1); }
 	| BOOL		{ $$ = new PrimitiveLiteralExpr((bool)$1); }
@@ -303,7 +305,7 @@ primary_value_expression:
 	| array_literal					{ $$ = $1; }
 	| function_literal				{ $$ = $1; }
 	| lambda_function				{ $$ = $1; }
-	| IDENTIFIER					{ $$ = new IdentifierExpr($1); }
+	| postfix_expression			{ $$ = new AsExpr($1); }
 	| '(' value_expression ')'		{ $$ = $2; }
 	;
 
@@ -315,8 +317,8 @@ postfix_value_expression:
 //	| type_expression function_call								{ Push(Add(Generic::Type::Call, $1, Pop())); }
 //	| postfix_value_expression INCOP							{ Push(Add(Generic::Type::OpPostInc, Pop())); }
 //	| postfix_value_expression DECOP							{ Push(Add(Generic::Type::OpPostDec, Pop())); }
-	| postfix_value_expression '.' IDENTIFIER					{ $$ = new MemberLookupExpr($1, $3); }
-	| type_expression '.' IDENTIFIER							{ $$ = new MemberLookupExpr($1, $3); }
+	| postfix_value_expression '.' IDENTIFIER					{ $$ = new AsExpr(new MemberLookup($1, $3)); }
+	| postfix_type_expression '.' IDENTIFIER					{ $$ = new AsExpr(new MemberLookup($1, $3)); }
 	;
 
 cast_value_expression:
@@ -455,7 +457,7 @@ primitive_type:
 
 primary_type_expression:
 	primitive_type				{ $$ = $1; }
-	| IDENTIFIER				{ $$ = new TypeIdentifier($1); }
+	| postfix_expression		{ $$ = new AsType($1); }
 	| struct_definition			{ $$ = $1; }
 	| tuple_definition			{ $$ = $1; }
 	| '(' type_expression ')'	{ $$ = $2; }
@@ -468,8 +470,8 @@ postfix_type_expression:
 	| postfix_type_expression '&'							{ $$ = new PointerType(PtrType::BorrowedPtr, $1); }
 //	| postfix_type_expression array_index					{ Push(Add(Generic::Type::Array, Pop(), Pop())); }
 	| postfix_type_expression function_arg_types			{ $$ = new FunctionType($1, $2); }
-//	| postfix_value_expression '.' IDENTIFIER				{ $$ = new MemberLookupType($1, $3); }
-//	| postfix_type_expression '.' IDENTIFIER				{ $$ = new MemberLookupType($1, $3); }
+	| postfix_value_expression '.' IDENTIFIER				{ $$ = new AsType(new MemberLookup($1, $3)); }
+	| postfix_type_expression '.' IDENTIFIER				{ $$ = new AsType(new MemberLookup($1, $3)); }
 
 //	| IDENTIFIER '!' type_expression						{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List, $3))); }
 //	| IDENTIFIER '!' '(' ')'								{ Push(Add(Generic::Type::Instantiate, Identifier($1), Add(Generic::Type::List))); }

@@ -38,21 +38,19 @@ void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void AsType::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
-void TypeIdentifier::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
-void MemberLookupType::accept(ASTVisitor &v) { v.visit(*this); }
 void Expr::accept(ASTVisitor &v) { v.visit(*this); }
-void Generic::accept(ASTVisitor &v) { v.visit(*this); }
+void AsExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void IdentifierExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void RefExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void DerefExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void MemberLookupExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeConvertExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -60,11 +58,15 @@ void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AssignExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void Identifier::accept(ASTVisitor &v) { v.visit(*this); }
+void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
+
+void Generic::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 template <typename... Args>
@@ -88,7 +90,7 @@ Statement* makeForEach(DeclList iterators, Expr *range, StatementList body)
 
 	// assign void initialisation for counters (initialised at head of loop body)
 	for (auto &i : iterators)
-		i->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
+		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
 
 	VarDecl *r = new VarDecl("__loop_range", nullptr, range);
 	iterators.prepend(r);
@@ -555,25 +557,6 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 	return indent(out, ind) << ")\n";
 }
 
-std::string MemberLookupType::stringof() const
-{
-	Expr *expr = dynamic_cast<Expr*>(_expr);
-	if (expr)
-		return expr->type()->stringof() + "." + _member;
-	TypeExpr *type = dynamic_cast<TypeExpr*>(_expr);
-	if (type)
-		return type->stringof() + "." + _member;
-	assert(false);
-	return "";
-}
-
-raw_ostream &MemberLookupType::dump(raw_ostream &out, int ind)
-{
-	TypeExpr::dump(out << "lookup\n", ind);
-	indent(out, ind) << "member: " << _member << "\n";
-	_expr->dump(indent(out, ind) << "type: ", ind + 1);
-	return out;
-}
 
 //***********************
 //** Declaration nodes **
@@ -594,8 +577,8 @@ raw_ostream &ValDecl::dump(raw_ostream &out, int ind)
 	++ind;
 	if (_type)
 		_type->dump(indent(out, ind) << "type: ", ind + 1);
-	if (_init)
-		_init->dump(indent(out, ind) << "val: ", ind + 1);
+	if (_value)
+		_value->dump(indent(out, ind) << "val: ", ind + 1);
 	return out;
 }
 
@@ -603,8 +586,8 @@ raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 {
 	Declaration::dump(out << "var: #" << _name, ind) << "\n";
 	++ind;
-	if (_type)
-		_type->dump(indent(out, ind) << "type: ", ind + 1);
+	if (_valType)
+		_valType->dump(indent(out, ind) << "type: ", ind + 1);
 	if (_init)
 		_init->dump(indent(out, ind) << "init: ", ind + 1);
 	return out;
@@ -619,6 +602,8 @@ raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 {
 	switch (_type)
 	{
+	case PrimType::v:
+		return Expr::dump(out << "void", ind) << '\n';
 	case PrimType::u1:
 		return Expr::dump(out << (u ? "true" : "false"), ind) << '\n';
 	case PrimType::f16:
@@ -647,17 +632,20 @@ raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 	}
 }
 
-raw_ostream &DerefExpr::dump(raw_ostream &out, int ind)
+raw_ostream &RefExpr::dump(raw_ostream &out, int ind)
 {
-	Expr::dump(out << "deref\n", ind);
-	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	Expr::dump(out << "ref\n", ind);
+	_type->dump(indent(out, ind) << "type: ", ind);
+	if (_target)
+		indent(out, ind) << "target: #" << _target->name() << '\n';
+	else
+		indent(out, ind) << "target: 0x" << _absolute << '\n';
 	return out;
 }
 
-raw_ostream &MemberLookupExpr::dump(raw_ostream &out, int ind)
+raw_ostream &DerefExpr::dump(raw_ostream &out, int ind)
 {
-	Expr::dump(out << "lookup\n", ind);
-	indent(out, ind) << "member: " << _member << "\n";
+	Expr::dump(out << "deref\n", ind);
 	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
 	return out;
 }
@@ -726,6 +714,34 @@ raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
 	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
 	return out;
 }
+
+
+Expr* AmbiguousExpr::expr() const
+{
+	return dynamic_cast<Expr*>(_eval);
+}
+TypeExpr* AmbiguousExpr::type() const
+{
+	Expr *expr = dynamic_cast<Expr*>(_eval);
+	if (expr)
+		return expr->type();
+	return dynamic_cast<TypeExpr*>(_eval);
+}
+
+raw_ostream &Identifier::dump(raw_ostream &out, int ind)
+{
+	const char *ty = dynamic_cast<Expr*>(_eval) ? "#" : (dynamic_cast<TypeExpr*>(_eval) ? "@" : "");
+	return Node::dump(out << ty << _name << "\n", ind);
+}
+
+raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
+{
+	Node::dump(out << "lookup\n", ind);
+	indent(out, ind) << "member: " << _member << "\n";
+	_node->dump(indent(out, ind) << "node: ", ind + 1);
+	return out;
+}
+
 
 raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 {

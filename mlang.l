@@ -140,6 +140,8 @@ is			{ return IS; }
 \`(\\.|[^\\`])*\` { yylval.sval = _strdup(yytext); return STRING; }
 \'(\\.|[^\\'])*\' { yylval.ival = charval(yytext); return CHAR; }
 
+null			{ yylval.ival = 0; return NUL; }
+
 true			{ yylval.ival = 1; return BOOL; }
 false			{ yylval.ival = 0; return BOOL; }
 

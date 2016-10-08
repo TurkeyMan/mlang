@@ -4,6 +4,19 @@ using namespace llvm;
 using namespace llvm::orc;
 
 
+class MemStream : public llvm::raw_ostream
+{
+public:
+	std::string text;
+	void write_impl(const char *Ptr, size_t Size) override
+	{
+		text.append(Ptr, Size);
+	}
+	uint64_t current_pos() const override { return text.size(); }
+	std::string take() { return std::move(text); }
+};
+
+
 LLVMGenerator::LLVMGenerator(::Module *_module)
 	: ctx(getGlobalContext())
 	, Builder(ctx)
@@ -29,54 +42,264 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 	KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, _module->filename(), ".", "M-Lang Compiler", 0, "", 0);
 }
 
-
-void Codegen(::Module *module, Mode mode, std::string outFile, std::string irFile)
+void InitCodegen()
 {
-	InitializeNativeTarget();
-	InitializeNativeTargetAsmPrinter();
-	InitializeNativeTargetAsmParser();
+	// Initialize targets first, so that --version shows registered targets.
+	InitializeAllTargets();
+	InitializeAllTargetMCs();
+	InitializeAllAsmPrinters();
+	InitializeAllAsmParsers();
+
+	// Initialize codegen and IR passes used by llc so that the -print-after,
+	// -print-before, and -stop-after options work.
+	PassRegistry *Registry = PassRegistry::getPassRegistry();
+	initializeCore(*Registry);
+	initializeCodeGen(*Registry);
+	initializeLoopStrengthReducePass(*Registry);
+	initializeLowerIntrinsicsPass(*Registry);
+	initializeUnreachableBlockElimPass(*Registry);
+
+	// Register the target printer for --version.
+	cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+}
+
+void Codegen(::Module *module, Mode mode, int opt, std::string outFile, std::string irFile)
+{
+//	InitializeNativeTarget();
+//	InitializeNativeTargetAsmPrinter();
+//	InitializeNativeTargetAsmParser();
 
 	LLVMGenerator *generator = new LLVMGenerator(module);
 
 	module->accept(*generator);
 
-	std::string ir = generator->codegen(mode, outFile, irFile);
-
-	if (!irFile.empty())
-	{
-		FILE *file;
-		fopen_s(&file, irFile.c_str(), "w");
-		if (!file)
-		{
-			printf("Can't open file for output: %s\n", irFile.c_str());
-			return;
-		}
-		fwrite(ir.c_str(), 1, ir.size(), file);
-		fclose(file);
-	}
+	generator->codegen(mode, opt, outFile, irFile);
 }
 
-std::string LLVMGenerator::codegen(Mode mode, std::string outFile, std::string irFile)
+void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string irFile)
 {
 	// Finalize the debug info.
 	DBuilder->finalize();
 
-	// Print out all of the generated code.
-	class MemStream : public llvm::raw_ostream
+	if (!irFile.empty())
 	{
-	public:
-		std::string text;
-		void write_impl(const char *Ptr, size_t Size) override
-		{
-			text.append(Ptr, Size);
-		}
-		uint64_t current_pos() const override { return text.size(); }
-		std::string take() { return std::move(text); }
-	};
+		// Print out all of the generated code.
+		MemStream output;
+		TheModule->print(output, nullptr);
 
-	MemStream output;
-	TheModule->print(output, nullptr);
-	return output.take();
+		std::string ir = output.take();
+
+		if (!ir.empty())
+		{
+			FILE *file;
+			fopen_s(&file, irFile.c_str(), "w");
+			if (!file)
+			{
+				printf("Can't open file for output: %s\n", irFile.c_str());
+				return;
+			}
+			fwrite(ir.c_str(), 1, ir.size(), file);
+			fclose(file);
+		}
+	}
+
+	if (!outFile.empty())
+	{
+		if (mode == Mode::OutputBC)
+		{
+			// TODO:...
+			assert(false);
+			return;
+		}
+
+		TargetMachine::CodeGenFileType fileType = FileType;
+
+		if (mode == Mode::OutputAsm)
+			fileType = TargetMachine::CGFT_AssemblyFile;
+		else if (mode == Mode::Compile || mode == Mode::CompileAndLink)
+			fileType = TargetMachine::CGFT_ObjectFile;
+
+		Triple targetTriple = Triple(TheModule->getTargetTriple());
+
+		// Get the target specific parser.
+		std::string Error;
+		const Target *TheTarget = TargetRegistry::lookupTarget(MArch, targetTriple, Error);
+		if (!TheTarget)
+		{
+			printf("%s\n", Error.c_str());
+			return;
+		}
+
+		std::string CPUStr = getCPUStr(), FeaturesStr = getFeaturesStr();
+
+		CodeGenOpt::Level OLvl = CodeGenOpt::None;
+		switch (opt)
+		{
+			case 0: OLvl = CodeGenOpt::None; break;
+			case 1: OLvl = CodeGenOpt::Less; break;
+			case 2: OLvl = CodeGenOpt::Default; break;
+			case 3: OLvl = CodeGenOpt::Aggressive; break;
+			default: break;
+		}
+//		CodeGenOpt::Level OLvl = CodeGenOpt::Default;
+//		switch (OptLevel) {
+//		default:
+//			errs() << argv[0] << ": invalid optimization level.\n";
+//			return 1;
+//		case ' ': break;
+//		case '0': OLvl = CodeGenOpt::None; break;
+//		case '1': OLvl = CodeGenOpt::Less; break;
+//		case '2': OLvl = CodeGenOpt::Default; break;
+//		case '3': OLvl = CodeGenOpt::Aggressive; break;
+//		}
+
+		TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+//		Options.DisableIntegratedAS = NoIntegratedAssembler;
+//		Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
+//		Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
+//		Options.MCOptions.AsmVerbose = AsmVerbose;
+
+		std::unique_ptr<TargetMachine> Target(
+			TheTarget->createTargetMachine(targetTriple.getTriple(), CPUStr, FeaturesStr,
+				Options, RelocModel, CMModel, OLvl));
+
+		assert(Target && "Could not allocate target machine!");
+
+		if (FloatABIForCalls != FloatABI::Default)
+			Options.FloatABIType = FloatABIForCalls;
+
+		// Figure out where we are going to send the output.
+		std::error_code EC;
+		sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
+		if (fileType = TargetMachine::CGFT_AssemblyFile)
+			OpenFlags |= sys::fs::F_Text;
+		auto Out = std::make_unique<tool_output_file>(outFile, EC, OpenFlags);
+//		std::unique_ptr<tool_output_file> Out =
+//			GetOutputStream(TheTarget->getName(), targetTriple.getOS(), outFile);
+		assert(Out);
+
+		// Build up all of the passes that we want to do to the module.
+		legacy::PassManager PM;
+
+		// Add an appropriate TargetLibraryInfo pass for the module's triple.
+		TargetLibraryInfoImpl TLII(Triple(TheModule->getTargetTriple()));
+
+		// The -disable-simplify-libcalls flag actually disables all builtin optzns.
+//		if (DisableSimplifyLibCalls)
+//			TLII.disableAllFunctions();
+		PM.add(new TargetLibraryInfoWrapperPass(TLII));
+
+		// Add the target data from the target machine, if it exists, or the module.
+		TheModule->setDataLayout(Target->createDataLayout());
+
+		// Override function attributes based on CPUStr, FeaturesStr, and command line
+		// flags.
+		setFunctionAttributes(CPUStr, FeaturesStr, *TheModule);
+
+		if (RelaxAll.getNumOccurrences() > 0 && fileType != TargetMachine::CGFT_ObjectFile)
+			errs() << outFile << ": warning: ignoring -mc-relax-all because filetype != obj";
+
+		{
+			raw_pwrite_stream *OS = &Out->os();
+
+			// Manually do the buffering rather than using buffer_ostream,
+			// so we can memcmp the contents in CompileTwice mode
+			SmallVector<char, 0> Buffer;
+			std::unique_ptr<raw_svector_ostream> BOS;
+			if ((fileType != TargetMachine::CGFT_AssemblyFile &&
+				!Out->os().supportsSeeking()) ||
+//				CompileTwice) {
+				false) {
+				BOS = make_unique<raw_svector_ostream>(Buffer);
+				OS = BOS.get();
+			}
+
+			AnalysisID StartBeforeID = nullptr;
+			AnalysisID StartAfterID = nullptr;
+			AnalysisID StopAfterID = nullptr;
+			const PassRegistry *PR = PassRegistry::getPassRegistry();
+			if (!RunPass.empty()) {
+				if (!StartAfter.empty() || !StopAfter.empty()) {
+					errs() << outFile << ": start-after and/or stop-after passes are "
+						"redundant when run-pass is specified.\n";
+					assert(false);
+				}
+				const PassInfo *PI = PR->getPassInfo(RunPass);
+				if (!PI) {
+					errs() << outFile << ": run-pass pass is not registered.\n";
+					assert(false);
+				}
+				StopAfterID = StartBeforeID = PI->getTypeInfo();
+			}
+			else {
+				if (!StartAfter.empty()) {
+					const PassInfo *PI = PR->getPassInfo(StartAfter);
+					if (!PI) {
+						errs() << outFile << ": start-after pass is not registered.\n";
+						assert(false);
+					}
+					StartAfterID = PI->getTypeInfo();
+				}
+				if (!StopAfter.empty()) {
+					const PassInfo *PI = PR->getPassInfo(StopAfter);
+					if (!PI) {
+						errs() << outFile << ": stop-after pass is not registered.\n";
+						assert(false);
+					}
+					StopAfterID = PI->getTypeInfo();
+				}
+			}
+
+			// Ask the target to add backend passes as necessary.
+//			if (Target->addPassesToEmitFile(PM, *OS, fileType, NoVerify, StartBeforeID,
+//				StartAfterID, StopAfterID, MIR.get())) {
+			if (Target->addPassesToEmitFile(PM, *OS, fileType, true, StartBeforeID,
+				StartAfterID, StopAfterID, nullptr)) {
+				errs() << outFile << ": target does not support generation of this file type!\n";
+				assert(false);
+			}
+
+			// Before executing passes, print the final values of the LLVM options.
+			cl::PrintOptionValues();
+
+			// If requested, run the pass manager over the same module again,
+			// to catch any bugs due to persistent state in the passes. Note that
+			// opt has the same functionality, so it may be worth abstracting this out
+			// in the future.
+			SmallVector<char, 0> CompileTwiceBuffer;
+//			if (CompileTwice) {
+//				std::unique_ptr<::Module> M2(llvm::CloneModule(TheModule.get()));
+//				PM.run(*M2);
+//				CompileTwiceBuffer = Buffer;
+//				Buffer.clear();
+//			}
+
+			PM.run(*TheModule);
+
+			// Compare the two outputs and make sure they're the same
+//			if (CompileTwice) {
+//				if (Buffer.size() != CompileTwiceBuffer.size() ||
+//					(memcmp(Buffer.data(), CompileTwiceBuffer.data(), Buffer.size()) !=
+//						0)) {
+//					errs()
+//						<< "Running the pass manager twice changed the output.\n"
+//						"Writing the result of the second run to the specified output\n"
+//						"To generate the one-run comparison binary, just run without\n"
+//						"the compile-twice option\n";
+//					Out->os() << Buffer;
+//					Out->keep();
+//					return 1;
+//				}
+//			}
+
+			if (BOS) {
+				Out->os() << Buffer;
+			}
+		}
+
+		// Declare success.
+		Out->keep();
+	}
 }
 
 
@@ -113,13 +336,25 @@ void LLVMGenerator::visit(ExpressionStatement &n)
 
 void LLVMGenerator::visit(ReturnStatement &n)
 {
-	if (n.expression())
+	FunctionState &cur = _functionStack.back();
+
+	Expr *expr = n.expression();
+
+	// if the function returns void, we expect no return args
+	assert(cur.isVoid == (expr == nullptr));
+
+	if (expr)
+		expr->accept(*this);
+
+	if (cur.scopeDepth == _scope.size() && !cur.hasEarlyReturn)
 	{
-		n.expression()->accept(*this);
-		Builder.CreateRet(n.expression()->cgData<LLVMData>()->value);
+		if (expr)
+			Builder.CreateRet(expr->cgData<LLVMData>()->value);
+		else
+			Builder.CreateRetVoid();
 	}
 	else
-		Builder.CreateRetVoid();
+		earlyReturn(expr);
 }
 
 void LLVMGenerator::visit(IfStatement &n)
@@ -136,7 +371,7 @@ void LLVMGenerator::visit(IfStatement &n)
 
 	BasicBlock *thenBlock = BasicBlock::Create(ctx, "if.then", TheFunction);
 	BasicBlock *elseBlock = n.elseStatements().length > 0 ? BasicBlock::Create(ctx, "if.else") : nullptr;
-	BasicBlock *afterBlock = BasicBlock::Create(ctx, "if.end");
+	BasicBlock *afterBlock = !(n.thenReturned() && n.elseReturned()) ? BasicBlock::Create(ctx, "if.end") : nullptr;
 
 	n.cond()->accept(*this);
 	LLVMData *cg = n.cond()->cgData<LLVMData>();
@@ -147,12 +382,18 @@ void LLVMGenerator::visit(IfStatement &n)
 	Builder.SetInsertPoint(thenBlock);
 
 	// emit statements...
+
 	for (auto &s : n.thenStatements())
+	{
 		s->accept(*this);
+		if (s->didReturn())
+			break; // can't reach any statements after a return!
+	}
 
 //	Value *thenV = block result expression; for if statement *expressions*
 
-	Builder.CreateBr(afterBlock);
+	if (!n.thenReturned())
+		Builder.CreateBr(afterBlock);
 	thenBlock = Builder.GetInsertBlock();
 
 	popScope();
@@ -166,11 +407,16 @@ void LLVMGenerator::visit(IfStatement &n)
 
 		// emit statements...
 		for (auto &s : n.elseStatements())
+		{
 			s->accept(*this);
+			if (s->didReturn())
+				break; // can't reach any statements after a return!
+		}
 
 //		Value *elseV = block result expression; for if statement *expressions*
 
-		Builder.CreateBr(afterBlock);
+		if (!n.elseReturned())
+			Builder.CreateBr(afterBlock);
 		elseBlock = Builder.GetInsertBlock();
 
 		popScope();
@@ -180,8 +426,11 @@ void LLVMGenerator::visit(IfStatement &n)
 	if (n.initScope())
 		popScope();
 
-	TheFunction->getBasicBlockList().push_back(afterBlock);
-	Builder.SetInsertPoint(afterBlock);
+	if (afterBlock)
+	{
+		TheFunction->getBasicBlockList().push_back(afterBlock);
+		Builder.SetInsertPoint(afterBlock);
+	}
 
 	// saw we want the if statement to be an expression... then PHI node will select the 'result' from each block...
 //	PHINode *PN = Builder.CreatePHI(llvm::Type::getDoubleTy(ctx), 2, "iftmp");
@@ -228,24 +477,45 @@ void LLVMGenerator::visit(LoopStatement &n)
 		s->accept(*this);
 
 	// emit body
+	bool didReturn = false;
 	for (auto s : n.bodyStatements())
+	{
 		s->accept(*this);
 
-	// emit body
-	for (auto s : n.incrementExpressions())
-		s->accept(*this);
+		didReturn = s->didReturn();
+		if (didReturn)
+			break; // can't reach any statements after a return!
+	}
 
-	Builder.CreateBr(cond ? condBlock : loopBlock);
+	// can't iterate the loop if there was a return in the body!
+	if (!didReturn)
+	{
+		// emit increments
+		for (auto s : n.incrementExpressions())
+			s->accept(*this);
 
-	// emit post-loop
-	TheFunction->getBasicBlockList().push_back(afterBlock);
-	Builder.SetInsertPoint(afterBlock);
+		Builder.CreateBr(cond ? condBlock : loopBlock);
+	}
+
+	// we can only reach the loop.end if there was an entry condition that failed
+	if (!didReturn || cond)
+	{
+		// emit post-loop
+		TheFunction->getBasicBlockList().push_back(afterBlock);
+		Builder.SetInsertPoint(afterBlock);
+	}
 
 	popScope();
 }
 
 void LLVMGenerator::visit(TypeExpr &n)
 {
+}
+
+void LLVMGenerator::visit(AsType &n)
+{
+	n.type()->accept(*this);
+	n.cgData<LLVMData>()->type = n.type()->cgData<LLVMData>()->type;
 }
 
 void LLVMGenerator::visit(PrimitiveType &n)
@@ -291,10 +561,6 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	}
 }
 
-void LLVMGenerator::visit(TypeIdentifier &n)
-{
-}
-
 void LLVMGenerator::visit(::PointerType &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
@@ -332,12 +598,14 @@ void LLVMGenerator::visit(::FunctionType &n)
 	cg->type = llvm::FunctionType::get(r, args, false);
 }
 
-void LLVMGenerator::visit(MemberLookupType &n)
+void LLVMGenerator::visit(Expr &n)
 {
 }
 
-void LLVMGenerator::visit(Expr &n)
+void LLVMGenerator::visit(AsExpr &n)
 {
+	n.expr()->accept(*this);
+	n.cgData<LLVMData>()->value = n.expr()->cgData<LLVMData>()->value;
 }
 
 void LLVMGenerator::visit(Generic &n)
@@ -395,11 +663,16 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	case PrimType::u128:
 		// TODO: literal is not big enough...
 		cg->value = ConstantInt::get(ctx, APInt(128, n.getUint(), false)); break;
-	case PrimType::f16:
 	case PrimType::f32:
+		cg->value = ConstantFP::get(ctx, APFloat((float)n.getFloat())); break;
 	case PrimType::f64:
-	case PrimType::f128:
 		cg->value = ConstantFP::get(ctx, APFloat(n.getFloat())); break;
+	case PrimType::f16:
+	case PrimType::f128:
+	{
+		cg->value = CastInst::CreateFPCast(ConstantFP::get(ctx, APFloat(n.getFloat())), n.type()->cgData<LLVMData>()->type);
+		break;
+	}
 	case PrimType::v:
 		cg->value = nullptr; break;
 	default:
@@ -413,24 +686,105 @@ void LLVMGenerator::visit(ArrayLiteralExpr &n)
 
 void LLVMGenerator::visit(FunctionLiteralExpr &n)
 {
-}
-
-void LLVMGenerator::visit(IdentifierExpr &n)
-{
 	LLVMData *cg = n.cgData<LLVMData>();
 
-	Declaration *decl = n.target();
-	cg->value = decl->cgData<LLVMData>()->value;
-/*
-	// Look this variable up in the function.
-	Value *V = NamedValues[Name];
-	if (!V)
-		return ErrorV("Unknown variable name");
+	n.type()->accept(*this);
 
-	KSDbgInfo.emitLocation(this);
-	// Load the value.
-	return Builder.CreateLoad(V, Name.c_str());
-*/
+	::FunctionType *fn = n.type()->asFunction();
+	TypeExpr *rt = fn->returnType();
+
+	llvm::FunctionType *sig = (llvm::FunctionType*)fn->cgData<LLVMData>()->type;
+
+	Function *function = Function::Create(sig, Function::InternalLinkage, "", TheModule.get());
+	cg->value = function;
+
+	// Create a new basic block to start insertion into.
+	BasicBlock *block = BasicBlock::Create(ctx, "entry", function);
+	Builder.SetInsertPoint(block);
+
+	pushScope(n.scope());
+	pushFunction(&n);
+	FunctionState &funcState = _functionStack.back();
+
+	// create stack storage for all the args
+	DeclList args = n.args();
+	for (auto &a : args)
+		a->accept(*this);
+
+	// set names and store arg values
+	size_t i = 0;
+	for (auto &a : function->args())
+	{
+		VarDecl *arg = (VarDecl*)args[i++];
+
+		a.setName(arg->name());
+
+//		// Create a debug descriptor for the variable.
+//		DILocalVariable *D = DBuilder->createParameterVariable(
+//			SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(),
+//			true);
+//
+//		DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
+//			DebugLoc::get(LineNo, 0, SP),
+//			Builder.GetInsertBlock());
+
+		AllocaInst *alloc = (AllocaInst*)arg->cgData<LLVMData>()->value;
+		Builder.CreateStore(&a, alloc);
+	}
+
+//		KSDbgInfo.emitLocation(Body.get());
+
+	bool bDidReturn = false;
+	for (auto &s : n.statements())
+	{
+		s->accept(*this);
+
+		bDidReturn = s->didReturn();
+		if (bDidReturn)
+			break; // can't reach any statements after a return!
+	}
+
+	if (!bDidReturn)
+	{
+		if (fn->returnType()->isVoid())
+		{
+			if (funcState.hasEarlyReturn)
+				Builder.CreateBr(funcState.returnBlock);
+			else
+				Builder.CreateRetVoid();
+		}
+	}
+
+	if (funcState.hasEarlyReturn)
+		function->getBasicBlockList().push_back(funcState.returnBlock);
+
+	popFunction();
+	popScope();
+
+//	// Pop off the lexical block for the function.
+//	KSDbgInfo.LexicalBlocks.pop_back();
+//
+//	return TheFunction;
+
+	// Validate the generated code, checking for consistency.
+	MemStream os;
+	if (verifyFunction(*function, &os))
+	{
+		os.flush();
+		std::string err = os.take();
+		printf("%s\n", err.c_str());
+//		assert(false);
+	}
+
+//	// Error reading body, remove function.
+//	TheFunction->eraseFromParent();
+//
+//	if (P.isBinaryOp())
+//		BinopPrecedence.erase(Proto->getOperatorName());
+//
+//	// Pop off the lexical block for the function since we added it
+//	// unconditionally.
+//	KSDbgInfo.LexicalBlocks.pop_back();
 }
 
 // none=0, trunc=1, se=2, ze=3, fup=4, fdown=5, f2u=6, f2i=7, u2f=8, i2f=9, inez=10, fnez=11, invalid=-1
@@ -471,6 +825,40 @@ static llvm::Instruction::CastOps cast_types[] =
 	llvm::Instruction::CastOps::SIToFP
 };
 
+void LLVMGenerator::visit(RefExpr &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	TypeExpr *type = n.type();
+	type->accept(*this);
+	llvm::PointerType *typeCg = (llvm::PointerType*)type->cgData<LLVMData>()->type;
+
+	if (n.target())
+	{
+		LLVMData *targetCg = n.target()->cgData<LLVMData>();
+		assert(targetCg->value);
+		cg->value = targetCg->value;
+	}
+	else
+	{
+		size_t address = n.address();
+
+		if (address == 0)
+			cg->value = ConstantPointerNull::get(typeCg);
+		else
+		{
+			TypeDecl *szt = dynamic_cast<TypeDecl*>(module->scope()->getDecl("size_t", true));
+			szt->accept(*this);
+			PrimitiveType *prim = dynamic_cast<PrimitiveType*>(szt->type());
+			prim->accept(*this);
+			IntegerType *sztCg = (IntegerType*)prim->cgData<LLVMData>()->type;
+
+			// TODO: typeCg is a pointer type, does this function expect the poitner TARGET type? docs unclear...
+			cg->value = Builder.CreateIntToPtr(ConstantInt::get(sztCg, (uint64_t)address), typeCg);
+		}
+	}
+}
+
 void LLVMGenerator::visit(DerefExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
@@ -480,17 +868,6 @@ void LLVMGenerator::visit(DerefExpr &n)
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 
 	cg->value = Builder.CreateLoad(exprCg->value);
-}
-
-void LLVMGenerator::visit(MemberLookupExpr &n)
-{
-	LLVMData *cg = n.cgData<LLVMData>();
-
-	Expr *expr = n.expr();
-	expr->accept(*this);
-	LLVMData *exprCg = expr->cgData<LLVMData>();
-
-	cg->value = exprCg->value;
 }
 
 void LLVMGenerator::visit(TypeConvertExpr &n)
@@ -897,30 +1274,31 @@ void LLVMGenerator::visit(CallExpr &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
 
-//	n.function()->accept(*this);
-	IdentifierExpr *ident = dynamic_cast<IdentifierExpr*>(n.function());
-	if (ident)
+	Expr *func = n.function();
+	while (dynamic_cast<AsExpr*>(func))
+		func = ((AsExpr*)func)->expr();
+
+	// TODO: handle calling on function pointers?
+
+	FunctionLiteralExpr *fl = dynamic_cast<FunctionLiteralExpr*>(func);
+	if (fl)
 	{
-		ValDecl *decl = dynamic_cast<ValDecl*>(ident->target());
-		if (decl)
+		::FunctionType *fn = fl->type()->asFunction();
+		if (fn)
 		{
-			::FunctionType *fn = decl->type()->asFunction();
-			if (fn)
+			LLVMData *cgFn = fl->cgData<LLVMData>();
+			std::vector<llvm::Value*> args;
+			for (auto a : n.callArgs())
 			{
-				LLVMData *cgFn = decl->cgData<LLVMData>();
-				std::vector<llvm::Value*> args;
-				for (auto a : n.callArgs())
-				{
-					a->accept(*this);
-					LLVMData *cgArg = a->cgData<LLVMData>();
-					args.push_back(cgArg->value);
-				}
-				if (fn->returnType()->isVoid())
-					Builder.CreateCall((llvm::Function*)cgFn->value, args);
-				else
-					cg->value = Builder.CreateCall((llvm::Function*)cgFn->value, args, decl->name());
-				return;
+				a->accept(*this);
+				LLVMData *cgArg = a->cgData<LLVMData>();
+				args.push_back(cgArg->value);
 			}
+			if (fn->returnType()->isVoid())
+				Builder.CreateCall((llvm::Function*)cgFn->value, args);
+			else
+				cg->value = Builder.CreateCall((llvm::Function*)cgFn->value, args, "result");// fl->name());
+			return;
 		}
 	}
 
@@ -966,6 +1344,35 @@ void LLVMGenerator::visit(BindExpr &n)
 	int x = 0;
 }
 
+void LLVMGenerator::visit(Identifier &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	Declaration *decl = n.target();
+	cg->value = decl->cgData<LLVMData>()->value;
+	/*
+	// Look this variable up in the function.
+	Value *V = NamedValues[Name];
+	if (!V)
+	return ErrorV("Unknown variable name");
+
+	KSDbgInfo.emitLocation(this);
+	// Load the value.
+	return Builder.CreateLoad(V, Name.c_str());
+	*/
+}
+
+void LLVMGenerator::visit(MemberLookup &n)
+{
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	Expr *expr = n.expr();
+	expr->accept(*this);
+	LLVMData *exprCg = expr->cgData<LLVMData>();
+
+	cg->value = exprCg->value;
+}
+
 void LLVMGenerator::visit(TypeDecl &n)
 {
 }
@@ -974,94 +1381,19 @@ void LLVMGenerator::visit(ValDecl &n)
 {
 	LLVMData *cg = n.cgData<LLVMData>();
 
-	::FunctionType *funcType = dynamic_cast<::FunctionType*>(n.type());
-	if (funcType)
+	n.type()->accept(*this);
+	n.value()->accept(*this);
+
+	if (n.value()->type()->asFunction())
 	{
-		// function declaration
-		funcType->accept(*this);
-		llvm::FunctionType *sig = (llvm::FunctionType*)funcType->cgData<LLVMData>()->type;
-
-		Function *proto = Function::Create(sig, Function::ExternalLinkage, n.name(), TheModule.get());
-		cg->value = proto;
-
-		FunctionLiteralExpr *func = (FunctionLiteralExpr*)n.init();
-		if (func)
-		{
-			pushScope(func->scope());
-
-			// Create a new basic block to start insertion into.
-			BasicBlock *block = BasicBlock::Create(ctx, "entry", proto);
-			Builder.SetInsertPoint(block);
-
-			// Set names for all arguments.
-			DeclList args = func->args();
-			size_t i = 0;
-			for (auto &a : proto->args())
-			{
-				ValDecl *arg = args[i++];
-
-				a.setName(arg->name());
-
-				AllocaInst *alloc = Builder.CreateAlloca(a.getType(), nullptr, a.getName() + ".addr");
-				arg->cgData<LLVMData>()->value = alloc;
-
-				// Create an alloca for this variable.
-//				IRBuilder<> builder(&proto->getEntryBlock(), proto->getEntryBlock().begin());
-//				AllocaInst *Alloca = builder.CreateAlloca(a.getType(), nullptr, a.getName());
-
-//
-//				// Create a debug descriptor for the variable.
-//				DILocalVariable *D = DBuilder->createParameterVariable(
-//					SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(),
-//					true);
-//
-//				DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
-//					DebugLoc::get(LineNo, 0, SP),
-//					Builder.GetInsertBlock());
-//
-				// Store the initial value into the alloca.
-				Builder.CreateStore(&a, alloc);
-//
-//				// Add arguments to variable symbol table.
-//				NamedValues[Arg.getName()] = Alloca;
-			}
-//
-//			KSDbgInfo.emitLocation(Body.get());
-
-			for (auto &s : func->statements())
-				s->accept(*this);
-
-//			if (Value *RetVal = Body->codegen())
-//			{
-//				// Finish off the function.
-//				Builder.CreateRet(RetVal);
-//
-//				// Pop off the lexical block for the function.
-//				KSDbgInfo.LexicalBlocks.pop_back();
-//
-//				// Validate the generated code, checking for consistency.
-				verifyFunction(*proto);
-//
-//				return TheFunction;
-//			}
-//
-//			// Error reading body, remove function.
-//			TheFunction->eraseFromParent();
-//
-//			if (P.isBinaryOp())
-//				BinopPrecedence.erase(Proto->getOperatorName());
-//
-//			// Pop off the lexical block for the function since we added it
-//			// unconditionally.
-//			KSDbgInfo.LexicalBlocks.pop_back();
-
-			popScope();
-		}
+		llvm::Function *func = (llvm::Function*)n.value()->cgData<LLVMData>()->value;
+		func->setName(n.name());
+//		func->setName(n.mangledName());
+		func->setLinkage(Function::ExternalLinkage);
 	}
 	else
 	{
-		// constant value
-		assert(false);
+		// TODO: data variables
 	}
 }
 
@@ -1070,7 +1402,7 @@ void LLVMGenerator::visit(VarDecl &n)
 	LLVMData *cg = n.cgData<LLVMData>();
 
 	n.type()->accept(*this);
-	llvm::Type *typeCg = n.dataType()->cgData<LLVMData>()->type;
+	llvm::Type *typeCg = n.targetType()->cgData<LLVMData>()->type;
 
 	::FunctionType *pFunc = n.type()->asFunction();
 	if (pFunc)
@@ -1091,7 +1423,15 @@ void LLVMGenerator::visit(VarDecl &n)
 			{
 				n.init()->accept(*this);
 				llvm::Value *val = n.init()->cgData<LLVMData>()->value;
-				Builder.CreateStore(val, cg->value, false);
+
+				// HAX: if assigning SizeT_Type to Ptr
+				if (n.type()->asPointer() && n.init()->type()->asPrimitive()->type() == SizeT_Type)
+				{
+					val = Builder.CreateIntToPtr(val, typeCg);
+					Builder.CreateStore(val, cg->value, false);
+				}
+				else
+					Builder.CreateStore(val, cg->value, false);
 			}
 		}
 	}

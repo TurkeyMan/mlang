@@ -189,18 +189,23 @@ void Semantic::visit(TypeExpr &n)
 
 }
 
+void Semantic::visit(AsType &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._node->accept(*this);
+
+	n._type = n._node->type();
+
+	assert(n._type);
+}
+
 void Semantic::visit(PrimitiveType &n)
 {
 	if (n.doneSemantic()) return;
 
 	n._init = new PrimitiveLiteralExpr(n._type, (uint64_t)0);
 	n._init->accept(*this);
-}
-
-void Semantic::visit(TypeIdentifier &n)
-{
-	if (n.doneSemantic()) return;
-
 }
 
 void Semantic::visit(PointerType &n)
@@ -258,14 +263,20 @@ void Semantic::visit(FunctionType &n)
 	if (n.doneSemantic()) return;
 }
 
-void Semantic::visit(MemberLookupType &n)
+void Semantic::visit(Expr &n)
 {
 	if (n.doneSemantic()) return;
 }
 
-void Semantic::visit(Expr &n)
+void Semantic::visit(AsExpr &n)
 {
 	if (n.doneSemantic()) return;
+
+	n._node->accept(*this);
+
+	n._expr = n._node->expr();
+
+	assert(n._expr);
 }
 
 void Semantic::visit(Generic &n)
@@ -318,15 +329,28 @@ void Semantic::visit(FunctionLiteralExpr &n)
 
 	for (auto a : n.args())
 	{
-		a->accept(*this);
-
 		VarDecl *decl = dynamic_cast<VarDecl*>(a);
 		assert(decl);
-		n.argTypes.append(decl->dataType());
+
+		decl->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
+		decl->accept(*this);
+
+		n.argTypes.append(decl->targetType());
 	}
 
+	bool bDidReturn = false;
 	for (auto s : n.statements())
+	{
+		if (bDidReturn)
+		{
+			// statement unreachable warning!
+		}
+
 		s->accept(*this);
+
+		if (s->didReturn())
+			bDidReturn = true;
+	}
 
 	popFunction();
 	popScope();
@@ -335,15 +359,29 @@ void Semantic::visit(FunctionLiteralExpr &n)
 		n.returnType = PrimitiveType::get(PrimType::v);
 
 	n._type = new FunctionType(n.returnType, n.argTypes);
+	n._type->accept(*this);
+
+	if (!bDidReturn && !n.type()->returnType()->isVoid())
+	{
+		// function did not return a value!
+		assert(false);
+	}
 }
 
-void Semantic::visit(IdentifierExpr &n)
+void Semantic::visit(RefExpr &n)
 {
 	if (n.doneSemantic()) return;
 
-	n._target = scope()->getDecl(n.getName());
+	if (n._target)
+		n._target->accept(*this);
 
-//	n._expr // TODO: we should resolve the identifier to a RefExpr...
+	if (!n._type)
+	{
+		n._type = n._target->type()->asPointer();
+		assert(n._type);
+	}
+	else
+		n._type->accept(*this);
 }
 
 void Semantic::visit(DerefExpr &n)
@@ -351,38 +389,6 @@ void Semantic::visit(DerefExpr &n)
 	if (n.doneSemantic()) return;
 
 	n._expr->accept(*this);
-}
-
-void Semantic::visit(MemberLookupExpr &n)
-{
-	if (n.doneSemantic()) return;
-
-	n._expr->accept(*this);
-
-	// lookup member...
-	Expr *expr = dynamic_cast<Expr*>(n._expr);
-	if (expr)
-	{
-		n._eval = dynamic_cast<Expr*>(expr->getMember(n._member));
-	}
-	else
-	{
-		TypeExpr *type = dynamic_cast<TypeExpr*>(n._expr);
-		if (type)
-		{
-			n._eval = dynamic_cast<Expr*>(type->getMember(n._member, nullptr));
-		}
-	}
-
-	if (!n._eval)
-	{
-		// UFCS lookup
-		// find _member(typeof(_expr) arg, ...) function.
-	}
-
-	assert(n._eval);
-
-	n._eval->accept(*this);
 }
 
 void Semantic::visit(TypeConvertExpr &n)
@@ -495,17 +501,19 @@ void Semantic::visit(CallExpr &n)
 
 	n._func->accept(*this);
 
-	// get function type...
-	FunctionType *funcType = nullptr;
-	IdentifierExpr *ident = dynamic_cast<IdentifierExpr*>(n._func);
-	if (ident)
+	FunctionType *funcType = n._func->type()->asFunction();
+	while (!funcType)
 	{
-		ValDecl *decl = dynamic_cast<ValDecl*>(ident->target());
-		if (decl)
-			funcType = decl->type()->asFunction();
-	}
+		::PointerType *ptr = n._func->type()->asPointer();
 
-	assert(funcType);
+		if (!ptr)
+			assert(false); // not call-able!
+
+		n._func = new DerefExpr(n._func);
+		n._func->accept(*this);
+
+		funcType = n._func->type()->asFunction();
+	}
 
 	TypeExprList args = funcType->argTypes();
 
@@ -562,6 +570,58 @@ void Semantic::visit(BindExpr &n)
 	assert(false);
 }
 
+void Semantic::visit(Identifier &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._target = scope()->getDecl(n.getName());
+
+	ValDecl *pVal = dynamic_cast<ValDecl*>(n._target);
+	if (pVal)
+	{
+		n._eval = pVal->value();
+	}
+	else
+	{
+		TypeDecl *pType = dynamic_cast<TypeDecl*>(n._target);
+		if (pType)
+			n._eval = pType->type();
+		else
+			assert(false);
+	}
+}
+
+void Semantic::visit(MemberLookup &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._node->accept(*this);
+
+	// lookup member...
+	Expr *expr = dynamic_cast<Expr*>(n._node);
+	if (expr)
+	{
+		n._eval = dynamic_cast<Expr*>(expr->getMember(n._member));
+
+		if (!n._eval)
+		{
+			// UFCS lookup
+			// find _member(typeof(_expr) arg, ...) function.
+		}
+	}
+	else
+	{
+		TypeExpr *type = dynamic_cast<TypeExpr*>(n._node);
+		if (type)
+			n._eval = dynamic_cast<Expr*>(type->getMember(n._member, nullptr));
+	}
+
+	assert(n._eval);
+
+	n._eval->accept(*this);
+}
+
+
 void Semantic::visit(IfStatement &n)
 {
 	if (n.doneSemantic()) return;
@@ -586,12 +646,32 @@ void Semantic::visit(IfStatement &n)
 
 	pushScope(n._then);
 	for (auto s : n._thenStatements)
+	{
+		if (n._thenReturned)
+		{
+			// statement unreachable warning!
+		}
+
 		s->accept(*this);
+
+		if (s->didReturn())
+			n._thenReturned = true;
+	}
 	popScope();
 
 	pushScope(n._else);
 	for (auto s : n._elseStatements)
+	{
+		if (n._elseReturned)
+		{
+			// statement unreachable warning!
+		}
+
 		s->accept(*this);
+
+		if (s->didReturn())
+			n._elseReturned = true;
+	}
 	popScope();
 
 	if (n._initStatements.length > 0)
@@ -618,7 +698,15 @@ void Semantic::visit(LoopStatement &n)
 		s->accept(*this);
 
 	for (auto s : n._bodyStatements)
+	{
 		s->accept(*this);
+
+		if (s->didReturn())
+		{
+			// warn: unreachable statements!
+			// returning from loop should happen in an if/else??
+		}
+	}
 
 	for (auto i : n._increments)
 		i->accept(*this);
@@ -653,15 +741,18 @@ void Semantic::visit(ValDecl &n)
 		return;
 	}
 
-	n._init->accept(*this);
+	if (!n._value)
+		assert(false);// , "def statement needs a value!");
+
+	n._value->accept(*this);
 
 	if (!n._type)
-		n._type = n._init->type();
+		n._type = n._value->type();
 	else
 	{
 		n._type->accept(*this);
 
-		// TODO: assert init.type -> type
+		n._value = n._value->makeConversion(n._type);
 	}
 
 	scope()->addDecl(n._name, &n);
@@ -671,7 +762,7 @@ void Semantic::visit(VarDecl &n)
 {
 	if (n.doneSemantic()) return;
 
-	if (!n._type && !n._init)
+	if (!n._valType && !n._init)
 		assert(false);// , "var statement needs either type or init value!");
 
 	Declaration *decl = scope()->getDecl(n._name, true);
@@ -683,20 +774,28 @@ void Semantic::visit(VarDecl &n)
 
 	if (n._init)
 		n._init->accept(*this);
-
-	if (!n._type)
-		n._type = new PointerType(PtrType::LValue, n._init->type());
-	else
+	if (n._valType)
 	{
-		n._type->accept(*this);
+		n._valType->accept(*this);
 
-		if (!n.init())
-			n._init = n._type->init();
-		else
-			n._init = n._init->makeConversion(n._type);
-
-		n._type = new PointerType(PtrType::LValue, n._type);
+		if (n._init)
+		{
+			PrimitiveType *pt = n._init->type()->asPrimitive();
+			if(!pt || pt->type() != PrimType::v)
+				n._init = n._init->makeConversion(n._valType);
+		}
 	}
+
+	if (!n._init)
+		n._init = n._valType->init();
+	if (!n._valType)
+		n._valType = n._init->type();
+
+	n._type = new PointerType(PtrType::LValue, n._valType);
+	n._type->accept(*this);
+
+	n._value = new RefExpr(&n);
+	n._value->accept(*this);
 
 	scope()->addDecl(n._name, &n);
 }
