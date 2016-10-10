@@ -47,6 +47,7 @@ void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
 void Expr::accept(ASTVisitor &v) { v.visit(*this); }
 void AsExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void AggregateLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void RefExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -139,8 +140,13 @@ raw_ostream &ExpressionStatement::dump(raw_ostream &out, int ind)
 
 raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 {
-	Statement::dump(out << "return: ", ind);
-	return _expression->dump(out, ind + 1);
+	if (_expression)
+	{
+		Statement::dump(out << "return: ", ind);
+		return _expression->dump(out, ind + 1);
+	}
+	else
+		return Statement::dump(out << "return\n", ind);
 }
 
 
@@ -153,22 +159,18 @@ Node *TypeExpr::getMember(const std::string &name, const Expr *expr) const
 	if (name == "init")
 		return init();
 	if (name == "sizeof")
-	{
-		assert(false);
-		return nullptr;
-	}
+		return new PrimitiveLiteralExpr(SizeT_Type, _sizeof);
 	if (name == "alignof")
-	{
-		assert(false);
-		return nullptr;
-	}
+		return new PrimitiveLiteralExpr(SizeT_Type, _alignment);
 	if (name == "stringof")
 	{
+		// TODO: need slice + string literals
 		assert(false);
 		return nullptr;
 	}
 	if (name == "mangleof")
 	{
+		// TODO: need slice + string literals
 		assert(false);
 		return nullptr;
 	}
@@ -386,6 +388,18 @@ raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 	return out << stringof() << '\n';
 }
 
+Node *PointerType::getMember(const std::string &name, const Expr *expr) const
+{
+	Node *r = TypeExpr::getMember(name, expr);
+	if (r)
+		return r;
+
+	// TODO: do pointers have any properties?
+	//       - address property?
+
+	return _pointerTarget->getMember(name, expr);
+}
+
 static const char *ptrTypeStrings[] = { "*", "^", "&", "#" };
 bool PointerType::isSame(const TypeExpr *other) const
 {
@@ -485,6 +499,40 @@ raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+size_t Struct::memberIndex(const std::string &name)
+{
+	size_t i = 0;
+	for (; i < _dataMembers.size(); ++i)
+	{
+		if (_dataMembers[i].decl->name().compare(name) == 0)
+			break;
+	}
+	return i;
+}
+
+Node *Struct::getMember(const std::string &name, const Expr *expr) const
+{
+	Node *r = TypeExpr::getMember(name, expr);
+	if (r)
+		return r;
+
+	// TODO: implicit members?
+	//       - all members as tuple?
+
+	Declaration *decl = body.getDecl(name, true);
+	if (dynamic_cast<VarDecl*>(decl))
+	{
+		assert(dynamic_cast<const RefExpr*>(expr)); // expr must be an instance ref!
+		return new RefExpr((VarDecl*)decl, (RefExpr*)expr);
+	}
+	else if (dynamic_cast<ValDecl*>(decl))
+		return ((ValDecl*)decl)->value();
+	else if (dynamic_cast<TypeDecl*>(decl))
+		return ((TypeDecl*)decl)->type();
+	else
+		assert(false);
+}
+
 bool Struct::isSame(const TypeExpr *other) const
 {
 	assert(false);
@@ -492,13 +540,23 @@ bool Struct::isSame(const TypeExpr *other) const
 }
 std::string Struct::stringof() const
 {
-	return "struct{ ... }";
+	std::string s = "{ ";
+	bool first = true;
+	for (auto &m : _dataMembers)
+	{
+		if (!first)
+			s.append(", ");
+		first = false;
+		s.append(m.decl->targetType()->stringof());
+	}
+	s.append(" }");
+	return std::move(s);
 }
 raw_ostream &Struct::dump(raw_ostream &out, int ind)
 {
 	out << "struct: {\n";
 	for (auto m : _members)
-		m->dump(out, ind + 1);
+		m->dump(indent(out, ind + 1), ind + 1);
 	return indent(out, ind) << "}\n";
 }
 
@@ -630,6 +688,17 @@ raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 	default:
 		assert(0); return out;
 	}
+}
+
+raw_ostream &AggregateLiteralExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "aggregate\n", ind);
+	indent(out, ind) << "type: " << _type->stringof() << '\n';
+	indent(out, ind) << "values: {\n";
+	for (auto i : _items)
+		i->dump(indent(out, ind + 1), ind + 1);
+	indent(out, ind) << "}\n";
+	return out;
 }
 
 raw_ostream &RefExpr::dump(raw_ostream &out, int ind)

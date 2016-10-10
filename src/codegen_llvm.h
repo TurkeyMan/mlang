@@ -168,6 +168,7 @@ public:
 	void visit(Expr &n) override;
 	void visit(AsExpr &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
+	void visit(AggregateLiteralExpr &n) override;
 	void visit(ArrayLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
 	void visit(RefExpr &n) override;

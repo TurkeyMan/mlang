@@ -25,6 +25,7 @@ public:
 	virtual void visit(AsExpr &n) {}
 	virtual void visit(Generic &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
+	virtual void visit(AggregateLiteralExpr &n) {}
 	virtual void visit(ArrayLiteralExpr &n) {}
 	virtual void visit(FunctionLiteralExpr &n) {}
 	virtual void visit(RefExpr &n) {}
