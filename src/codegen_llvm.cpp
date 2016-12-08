@@ -4,6 +4,9 @@ using namespace llvm;
 using namespace llvm::orc;
 
 
+// TODO: READ THIS AND DO! http://llvm.org/docs/Frontend/PerformanceTips.html#id7
+
+
 class MemStream : public llvm::raw_ostream
 {
 public:
@@ -44,6 +47,10 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 
 void InitCodegen()
 {
+//	InitializeNativeTarget();
+//	InitializeNativeTargetAsmPrinter();
+//	InitializeNativeTargetAsmParser();
+
 	// Initialize targets first, so that --version shows registered targets.
 	InitializeAllTargets();
 	InitializeAllTargetMCs();
@@ -65,10 +72,6 @@ void InitCodegen()
 
 void Codegen(::Module *module, Mode mode, int opt, std::string outFile, std::string irFile)
 {
-//	InitializeNativeTarget();
-//	InitializeNativeTargetAsmPrinter();
-//	InitializeNativeTargetAsmParser();
-
 	LLVMGenerator *generator = new LLVMGenerator(module);
 
 	module->accept(*generator);
@@ -207,9 +210,8 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 			SmallVector<char, 0> Buffer;
 			std::unique_ptr<raw_svector_ostream> BOS;
 			if ((fileType != TargetMachine::CGFT_AssemblyFile &&
-				!Out->os().supportsSeeking()) ||
-//				CompileTwice) {
-				false) {
+				!Out->os().supportsSeeking()))
+			{
 				BOS = make_unique<raw_svector_ostream>(Buffer);
 				OS = BOS.get();
 			}
@@ -262,35 +264,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 			// Before executing passes, print the final values of the LLVM options.
 			cl::PrintOptionValues();
 
-			// If requested, run the pass manager over the same module again,
-			// to catch any bugs due to persistent state in the passes. Note that
-			// opt has the same functionality, so it may be worth abstracting this out
-			// in the future.
-			SmallVector<char, 0> CompileTwiceBuffer;
-//			if (CompileTwice) {
-//				std::unique_ptr<::Module> M2(llvm::CloneModule(TheModule.get()));
-//				PM.run(*M2);
-//				CompileTwiceBuffer = Buffer;
-//				Buffer.clear();
-//			}
-
 			PM.run(*TheModule);
-
-			// Compare the two outputs and make sure they're the same
-//			if (CompileTwice) {
-//				if (Buffer.size() != CompileTwiceBuffer.size() ||
-//					(memcmp(Buffer.data(), CompileTwiceBuffer.data(), Buffer.size()) !=
-//						0)) {
-//					errs()
-//						<< "Running the pass manager twice changed the output.\n"
-//						"Writing the result of the second run to the specified output\n"
-//						"To generate the one-run comparison binary, just run without\n"
-//						"the compile-twice option\n";
-//					Out->os() << Buffer;
-//					Out->keep();
-//					return 1;
-//				}
-//			}
 
 			if (BOS) {
 				Out->os() << Buffer;
@@ -577,7 +551,23 @@ void LLVMGenerator::visit(TupleType &n)
 
 void LLVMGenerator::visit(Struct &n)
 {
-	// find variable declarations, populate _dataMembers
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	pushScope(n.scope());
+
+	// gather member types
+	std::vector<Type*> elements;
+	for (auto &m : n.dataMembers())
+	{
+		m.decl->accept(*this);
+		Type *t = m.decl->targetType()->cgData<LLVMData>()->type;
+		elements.push_back(t);
+	}
+
+	// make LLVM struct
+	cg->type = StructType::get(ctx, elements);
+
+	popScope();
 }
 
 void LLVMGenerator::visit(::FunctionType &n)
@@ -678,6 +668,11 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	default:
 		assert(0);
 	}
+}
+
+void LLVMGenerator::visit(AggregateLiteralExpr &n)
+{
+	assert(false);
 }
 
 void LLVMGenerator::visit(ArrayLiteralExpr &n)
@@ -833,14 +828,34 @@ void LLVMGenerator::visit(RefExpr &n)
 	type->accept(*this);
 	llvm::PointerType *typeCg = (llvm::PointerType*)type->cgData<LLVMData>()->type;
 
+	// if the ref holds a relative target
 	if (n.target())
 	{
-		LLVMData *targetCg = n.target()->cgData<LLVMData>();
-		assert(targetCg->value);
-		cg->value = targetCg->value;
+		// if the target has an 'owner' (that is, it is a member)
+		if(n.owner())
+		{
+			n.owner()->accept(*this);
+
+			// assert that 'owner' is a struct (for now?)
+			Struct *s = dynamic_cast<Struct*>(n.owner()->targetType());
+			assert(s);
+
+			Type *t = n.owner()->targetType()->cgData<LLVMData>()->type;
+			Value *v = n.owner()->cgData<LLVMData>()->value;
+			size_t i = s->memberIndex(n.target()->name());
+
+			cg->value = Builder.CreateStructGEP(t, v, i);
+		}
+		else
+		{
+			LLVMData *targetCg = n.target()->cgData<LLVMData>();
+			assert(targetCg->value);
+			cg->value = targetCg->value;
+		}
 	}
 	else
 	{
+		// ref is absolute (ie, 'null')
 		size_t address = n.address();
 
 		if (address == 0)
@@ -1416,7 +1431,7 @@ void LLVMGenerator::visit(VarDecl &n)
 		{
 			cg->value = TheModule->getOrInsertGlobal(n.name(), typeCg);
 		}
-		else
+		else if (dynamic_cast<::FunctionLiteralExpr*>(scope()->owner()))
 		{
 			cg->value = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
 			if (!n.init()->type()->isVoid())
@@ -1434,6 +1449,8 @@ void LLVMGenerator::visit(VarDecl &n)
 					Builder.CreateStore(val, cg->value, false);
 			}
 		}
+		else
+			assert(dynamic_cast<Struct*>(scope()->owner()));
 	}
 }
 

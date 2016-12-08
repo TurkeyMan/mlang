@@ -165,10 +165,17 @@ void Semantic::visit(ReturnStatement &n)
 	if (expr)
 		expr->accept(*this);
 
+	// if we're infering the function return type, we should take note now
 	if (function()->inferReturnType)
 	{
+		// if this is the first return statement we've encountered, take this as the return type
 		if (!function()->returnType)
-			function()->returnType = expr->type();
+		{
+			if (expr)
+				function()->returnType = expr->type();
+			else
+				function()->returnType = PrimitiveType::get(PrimType::v);
+		}
 		else
 		{
 			// TODO: validate expr->type() == function->returnType or error
@@ -177,10 +184,7 @@ void Semantic::visit(ReturnStatement &n)
 		}
 	}
 	else
-	{
-		// TODO: only do conversion if we need to!
 		n._expression = expr->makeConversion(function()->returnType);
-	}
 }
 
 void Semantic::visit(TypeExpr &n)
@@ -196,6 +200,8 @@ void Semantic::visit(AsType &n)
 	n._node->accept(*this);
 
 	n._type = n._node->type();
+	n._sizeof = n._type->_sizeof;
+	n._alignment = n._type->_alignment;
 
 	assert(n._type);
 }
@@ -235,27 +241,51 @@ void Semantic::visit(Struct &n)
 	if (n.doneSemantic()) return;
 
 	n.scope()->_parent = scope();
+	n.scope()->_owner = &n;
 	pushScope(n.scope());
 
+#define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
+
+	// conpose the struct
+	size_t offset = 0;
+	size_t structAlign = 0;
 	for (auto m : n._members)
 	{
 		m->accept(*this);
 
 		// TODO: static if...
 
+		// any declarations should appear in the scope
 		Declaration *decl = dynamic_cast<Declaration*>(m);
 		scope()->addDecl(decl->name(), decl);
 
+		// data members need to be arranged
 		VarDecl *var = dynamic_cast<VarDecl*>(decl);
 		if (var)
 		{
-			n._dataMembers.append(var);
-
-			// TODO: accumulate sizeof...
+			size_t size = var->targetType()->size();
+			size_t align = var->targetType()->alignment();
+			offset = alignto(offset, align);
+			n._dataMembers.push_back({ offset, var });
+			offset += size;
+			structAlign = align > structAlign ? align : structAlign;
 		}
 	}
 
 	popScope();
+
+	n._sizeof = alignto(offset, structAlign);
+	n._alignment = structAlign;
+
+	// create init node
+	ExprList members = ExprList::empty();
+	for (auto &m : n._dataMembers)
+	{
+		Expr *expr = m.decl->init();
+		members = members.append(expr);
+	}
+
+	n._init = new AggregateLiteralExpr(members, &n);
 }
 
 void Semantic::visit(FunctionType &n)
@@ -307,6 +337,13 @@ void Semantic::visit(PrimitiveLiteralExpr &n)
 	// todo: validate that 'value' is within 'type's precision limits
 }
 
+void Semantic::visit(AggregateLiteralExpr &n)
+{
+	if (n.doneSemantic()) return;
+
+	assert(false);
+}
+
 void Semantic::visit(ArrayLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
@@ -316,6 +353,9 @@ void Semantic::visit(ArrayLiteralExpr &n)
 void Semantic::visit(FunctionLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
+
+	n.scope()->_parent = scope();
+	n.scope()->_owner = &n;
 
 	pushScope(n.scope());
 	pushFunction(&n);
@@ -374,6 +414,8 @@ void Semantic::visit(RefExpr &n)
 
 	if (n._target)
 		n._target->accept(*this);
+	if (n._owner)
+		n._owner->accept(*this);
 
 	if (!n._type)
 	{
@@ -597,8 +639,26 @@ void Semantic::visit(MemberLookup &n)
 
 	n._node->accept(*this);
 
+	Expr *expr = nullptr;
+	TypeExpr *type = nullptr;
+
+	// try and work out what we're pointing at...
+	AmbiguousExpr *unknown = dynamic_cast<AmbiguousExpr*>(n._node);
+	if (unknown)
+	{
+		if (unknown->isExpr())
+			expr = unknown->expr();
+		else
+			type = unknown->type();
+	}
+	if (!expr && !type)
+	{
+		Expr *expr = dynamic_cast<Expr*>(n._node);
+		if(!expr)
+			type = dynamic_cast<TypeExpr*>(n._node);
+	}
+
 	// lookup member...
-	Expr *expr = dynamic_cast<Expr*>(n._node);
 	if (expr)
 	{
 		n._eval = dynamic_cast<Expr*>(expr->getMember(n._member));
@@ -609,11 +669,9 @@ void Semantic::visit(MemberLookup &n)
 			// find _member(typeof(_expr) arg, ...) function.
 		}
 	}
-	else
+	else if(type)
 	{
-		TypeExpr *type = dynamic_cast<TypeExpr*>(n._node);
-		if (type)
-			n._eval = dynamic_cast<Expr*>(type->getMember(n._member, nullptr));
+		n._eval = dynamic_cast<Expr*>(type->getMember(n._member, nullptr));
 	}
 
 	assert(n._eval);
@@ -626,9 +684,11 @@ void Semantic::visit(IfStatement &n)
 {
 	if (n.doneSemantic()) return;
 
+	Scope *s = scope();
+
 	if (n._initStatements.length > 0)
 	{
-		n._init = new Scope(scope(), &n);
+		n._init = new Scope(s, s->owner());
 		pushScope(n._init);
 
 		for (auto s : n._initStatements)
@@ -639,10 +699,10 @@ void Semantic::visit(IfStatement &n)
 	n._cond = n._cond->makeConversion(PrimitiveType::get(PrimType::u1));
 
 	if (n._thenStatements.length > 0)
-		n._then = new Scope(scope(), &n);
+		n._then = new Scope(scope(), s->owner());
 
 	if (n._elseStatements.length > 0)
-		n._else = new Scope(scope(), &n);
+		n._else = new Scope(scope(), s->owner());
 
 	pushScope(n._then);
 	for (auto s : n._thenStatements)
@@ -682,7 +742,8 @@ void Semantic::visit(LoopStatement &n)
 {
 	if (n.doneSemantic()) return;
 
-	n._body = new Scope(scope(), &n);
+	Scope *s = scope();
+	n._body = new Scope(s, s->owner());
 	pushScope(n._body);
 
 	for (auto i : n._iterators)
@@ -794,8 +855,12 @@ void Semantic::visit(VarDecl &n)
 	n._type = new PointerType(PtrType::LValue, n._valType);
 	n._type->accept(*this);
 
-	n._value = new RefExpr(&n);
-	n._value->accept(*this);
+	Node *owner = scope()->owner();
+	if (dynamic_cast<Module*>(owner) || dynamic_cast<FunctionLiteralExpr*>(owner))
+	{
+		n._value = new RefExpr(&n);
+		n._value->accept(*this);
+	}
 
 	scope()->addDecl(n._name, &n);
 }

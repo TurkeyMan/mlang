@@ -121,6 +121,7 @@ class TypeExpr;
 class AmbiguousExpr;
 class Statement;
 class ValDecl;
+class VarDecl;
 using ExprList = List<Expr*>;
 using TypeExprList = List<TypeExpr*>;
 using StatementList = List<Statement*>;
@@ -433,7 +434,7 @@ class TypeExpr : public Node
 {
 	friend class Semantic;
 public:
-	TypeExpr(SourceLocation Loc = CurLoc) : Node(Loc) {}
+	TypeExpr(size_t size, size_t align, SourceLocation Loc = CurLoc) : Node(Loc), _sizeof(size), _alignment(align) {}
 	virtual ~TypeExpr() {}
 
 	virtual std::string stringof() const = 0;
@@ -441,9 +442,10 @@ public:
 
 	virtual Expr* init() const = 0;
 
-//	size_t size() { return _sizeof; }
+	size_t size() { return _sizeof; }
+	size_t alignment() { return _alignment; }
 
-	virtual Node *getMember(const std::string &name, const Expr *expr = nullptr) const = 0;
+	virtual Node *getMember(const std::string &name, const Expr *expr = nullptr) const;
 
 	virtual bool isSame(const TypeExpr *other) const = 0;
 	virtual ConvType convertible(const TypeExpr *target) const = 0;
@@ -471,7 +473,8 @@ public:
 //	virtual raw_ostream &dump(raw_ostream &out, int ind) { return out << ':' << getLine() << ':' << getCol() << '\n'; }
 
 protected:
-//	size_t _sizeof = 0;
+	size_t _sizeof = 0;
+	size_t _alignment = 0;
 };
 
 class AsType : public TypeExpr
@@ -482,7 +485,7 @@ class AsType : public TypeExpr
 	TypeExpr *_type = nullptr;
 
 public:
-	AsType(AmbiguousExpr *node) : TypeExpr(), _node(node) {}
+	AsType(AmbiguousExpr *node) : TypeExpr(0, 0), _node(node) {}
 	~AsType() {}
 
 	TypeExpr *type() const { return _type; }
@@ -513,7 +516,7 @@ class PrimitiveType : public TypeExpr
 public:
 	static PrimitiveType* get(PrimType type) { return makeType<PrimitiveType>(nullptr, type); }
 
-	PrimitiveType(PrimType type) : TypeExpr(), _type(type) {}
+	PrimitiveType(PrimType type) : TypeExpr(typeBytes[(int)type], typeBytes[(int)type]), _type(type) {}
 	~PrimitiveType() {}
 
 	PrimType type() const { return _type; }
@@ -549,14 +552,15 @@ class PointerType : public TypeExpr
 	Expr *_init = nullptr;
 
 public:
-	PointerType(PtrType type, TypeExpr *targetType) : TypeExpr(), _type(type), _pointerTarget(targetType) {}
+	PointerType(PtrType type, TypeExpr *targetType)
+		: TypeExpr(typeBytes[(int)SizeT_Type], typeBytes[(int)SizeT_Type]), _type(type), _pointerTarget(targetType) {}
 	~PointerType() {}
 
 	PtrType ptrType() const { return _type; }
 	TypeExpr *targetType() const { return _pointerTarget; }
 	Expr* init() const override { return _init; }
 
-	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override;
 
 	bool isSame(const TypeExpr *other) const override;
 	ConvType convertible(const TypeExpr *target) const override;
@@ -579,7 +583,7 @@ class TupleType : public TypeExpr
 
 public:
 	TupleType(TypeExprList types = TypeExprList::empty())
-		: TypeExpr(), _types(types)
+		: TypeExpr(0, 0), _types(types)
 	{}
 
 	TypeExprList types() { return _types; }
@@ -616,22 +620,31 @@ class Struct : public TypeExpr
 {
 	friend class Semantic;
 
+	struct DataMember
+	{
+		size_t offset;
+		VarDecl *decl;
+	};
+
 	Scope body;
 
 	StatementList _members;
-	DeclList _dataMembers = DeclList::empty();
+	std::vector<DataMember> _dataMembers;
+
+	Expr *_init = nullptr;
 
 public:
 	Struct(StatementList members)
-		: TypeExpr(), body(nullptr, this), _members(members)
+		: TypeExpr(0, 0), body(nullptr, this), _members(members)
 	{}
 
 	Scope* scope() { return &body; }
-	DeclList dataMembers() { return _dataMembers; }
+	std::vector<DataMember>& dataMembers() { return _dataMembers; }
+	size_t memberIndex(const std::string &name);
 
-	Expr* init() const override { assert(false); return nullptr; }
+	Expr* init() const override { return _init; }
 
-	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override { assert(false); return nullptr; }
+	Node *getMember(const std::string &name, const Expr *expr = nullptr) const override;
 
 	bool isSame(const TypeExpr *other) const override;
 	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
@@ -654,7 +667,7 @@ class FunctionType : public TypeExpr
 
 public:
 	FunctionType(TypeExpr *returnType, TypeExprList args)
-		: TypeExpr(), _returnType(returnType), _args(args) {}
+		: TypeExpr(0, 0), _returnType(returnType), _args(args) {}
 	~FunctionType() {}
 
 	Expr* init() const override { assert(false); return nullptr; }
@@ -830,6 +843,24 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+class AggregateLiteralExpr : public Expr
+{
+	friend class Semantic;
+
+	TypeExpr *_type;
+	ExprList _items;
+
+public:
+	AggregateLiteralExpr(ExprList items, TypeExpr *type = nullptr)
+		: Expr(), _type(type), _items(move(items)) {}
+
+	TypeExpr* type() const override { return _type; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 class ArrayLiteralExpr: public Expr
 {
 	friend class Semantic;
@@ -906,20 +937,22 @@ class RefExpr : public Expr
 
 	::PointerType *_type;
 
-	ValDecl *_target;
+	VarDecl *_target;
 	size_t _absolute;
+	RefExpr *_owner;
 
 public:
-	RefExpr(ValDecl *target)
-		: Expr(), _type(nullptr), _target(target), _absolute(0) {}
+	RefExpr(VarDecl *target, RefExpr *owner = nullptr)
+		: Expr(), _type(nullptr), _target(target), _absolute(0), _owner(owner) {}
 	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType)
-		: Expr(), _type(new ::PointerType(ptrType, targetType)), _target(nullptr), _absolute(target) {}
+		: Expr(), _type(new ::PointerType(ptrType, targetType)), _target(nullptr), _absolute(target), _owner(nullptr) {}
 
 	::PointerType* type() const override { return _type; }
 	TypeExpr* targetType() const { return _type->targetType(); }
 
-	ValDecl *target() { return _target; }
+	VarDecl *target() { return _target; }
 	size_t address() { return _absolute; }
+	RefExpr *owner() { return _owner; }
 
 	void accept(ASTVisitor &v) override;
 

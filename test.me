@@ -13,9 +13,15 @@
 module test;
 //module x.y.z;
 
+var S : {
+	var x : int;
+	var y : float = 2;
+	def z = 100;
+};
+
 var x : long = 2;
 
-def aa(x : long) {}
+def aa(x : long) { return S.y+2; }
 
 def fn(x : int&)
 {
