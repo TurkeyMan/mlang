@@ -13,41 +13,44 @@
 module test;
 //module x.y.z;
 
-var S : {
+struct SS {
 	var x : int;
 	var y : float = 2;
 	def z = 100;
 };
+var S : SS;
 
 var x : long = 2;
 
-def aa(x : long) { return S.y+2; }
+fn con() { return int*&*.sizeof; }
 
-def fn(x : int&)
+fn aa(x : SS) { return x.y+2; }
+
+fn f(x : int&)
 {
 	x = byte.max;
 	x += 20;
 
-	aa(x);
+	aa(S);
 
 	for(i = 0; i < 10; i+=1)
 	{
 		var j = 20;
-		aa(i+j);
+		aa(S);
 	}
 
 	return x*5;
 }
 
-def main(argc : long, poo : float) -> int
+fn main(argc : long, poo : float) : int
 {
 	if(t : int = 1; t) return cast(double)t+2;
 	var s : int = 10;
-	argc/fn(s);
+	argc/f(s);
 	return (~argc + argc*argc << 2) >= argc%2;
 }
 
-def f = a : long => a^2;
+def f = fn a : long => a^2;
 
 /+
 // definitions

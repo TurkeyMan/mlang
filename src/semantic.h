@@ -26,24 +26,19 @@ public:
 	void pushFunction(FunctionLiteralExpr *f) { _function.push_back(f); }
 	void popFunction() { _function.pop_back(); }
 
-	void visit(Node &n) override;
-	void visit(Statement &n) override;
 	void visit(Declaration &n) override;
 	void visit(Module &n) override;
 	void visit(ModuleStatement &n) override;
 	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
+	void visit(ScopeStatement &n) override;
 	void visit(IfStatement &n) override;
 	void visit(LoopStatement &n) override;
-	void visit(TypeExpr &n) override;
-	void visit(AsType &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(PointerType &v) override;
 	void visit(TupleType &n) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
-	void visit(Expr &n) override;
-	void visit(AsExpr &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(AggregateLiteralExpr &n) override;
 	void visit(ArrayLiteralExpr &n) override;

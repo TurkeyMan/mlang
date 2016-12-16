@@ -5,24 +5,19 @@
 class ASTVisitor : public gc_cleanup
 {
 public:
-	virtual void visit(Node &n) {}
-	virtual void visit(Statement &n) {}
 	virtual void visit(Declaration &n) {}
 	virtual void visit(::Module &n) {}
 	virtual void visit(ModuleStatement &n) {}
 	virtual void visit(ExpressionStatement &n) {}
 	virtual void visit(ReturnStatement &n) {}
+	virtual void visit(ScopeStatement &n) {}
 	virtual void visit(IfStatement &n) {}
 	virtual void visit(LoopStatement &n) {}
-	virtual void visit(TypeExpr &n) {}
-	virtual void visit(AsType &n) {}
 	virtual void visit(PrimitiveType &n) {}
 	virtual void visit(::PointerType &n) {}
 	virtual void visit(TupleType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(::FunctionType &n) {}
-	virtual void visit(Expr &n) {}
-	virtual void visit(AsExpr &n) {}
 	virtual void visit(Generic &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
 	virtual void visit(AggregateLiteralExpr &n) {}

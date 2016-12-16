@@ -28,24 +28,19 @@ const char *primTypeMangle[(size_t)PrimType::__NumTypes] =
 };
 
 
-void Node::accept(ASTVisitor &v) { v.visit(*this); }
-void Statement::accept(ASTVisitor &v) { v.visit(*this); }
 void Declaration::accept(ASTVisitor &v) { v.visit(*this); }
 void ModuleStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ExpressionStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ReturnStatement::accept(ASTVisitor &v) { v.visit(*this); }
+void ScopeStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
-void TypeExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void AsType::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
-void Expr::accept(ASTVisitor &v) { v.visit(*this); }
-void AsExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AggregateLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -82,7 +77,7 @@ PrimitiveType* MakeTypeHelper<PrimitiveType, Args...>::makeType(Scope *scope, Pr
 }
 
 
-Statement* makeForEach(DeclList iterators, Expr *range, StatementList body)
+Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body)
 {
 	assert(false); // TODO!!
 
@@ -96,41 +91,49 @@ Statement* makeForEach(DeclList iterators, Expr *range, StatementList body)
 	VarDecl *r = new VarDecl("__loop_range", nullptr, range);
 	iterators.prepend(r);
 
+	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
+
 	StatementList entry = StatementList::empty();
 	if (iterators.length)
 	{
 		if (iterators.length == 3)
 		{
 			// iterators[1] = __loop_range.front.key;
-			// entry.append(assignment);
+			// entry = entry.append(assignment);
 		}
 
 		// iterators[iterators.length-1] = __loop_range.front.value;
-		// entry.append(assignment);
+		// entry = entry.append(assignment);
 	}
-
-	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
+	body->_statements = entry.append(body->_statements);
 
 	Expr *increment = nullptr; // __loop_range = __loop_range.popFront();
 
-	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body, entry);
+	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body);
 }
 
 
-Declaration *Scope::getDecl(const std::string& name, bool onlyLocal) const
+Declaration *Scope::getDecl(const std::string& name, bool onlyLocal)
 {
-	auto i = _declarations.find(name);
-	if (i == _declarations.end())
+	auto i = _symbols.find(name);
+	if (i != _symbols.end())
+		return i->second;
+	if (!onlyLocal)
 	{
-		if (!onlyLocal && _parent)
-			return _parent->getDecl(name, false);
-		return nullptr;
+		for (auto import : _imports)
+		{
+			Declaration *decl = import.second->getDecl(name);
+			if (decl)
+				return decl;
+		}
+		if (!onlyLocal && _parentScope)
+			return _parentScope->getDecl(name, false);
 	}
-	return i->second;
+	return nullptr;
 }
 void Scope::addDecl(const std::string& name, Declaration *decl)
 {
-	_declarations.insert({ name, decl });
+	_symbols.insert({ name, decl });
 }
 
 raw_ostream &ExpressionStatement::dump(raw_ostream &out, int ind)
@@ -150,18 +153,8 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 }
 
 
-//****************
-//** Type nodes **
-//****************
-
-Node *TypeExpr::getMember(const std::string &name, const Expr *expr) const
+Node *Node::getMember(const std::string &name)
 {
-	if (name == "init")
-		return init();
-	if (name == "sizeof")
-		return new PrimitiveLiteralExpr(SizeT_Type, _sizeof);
-	if (name == "alignof")
-		return new PrimitiveLiteralExpr(SizeT_Type, _alignment);
 	if (name == "stringof")
 	{
 		// TODO: need slice + string literals
@@ -177,23 +170,15 @@ Node *TypeExpr::getMember(const std::string &name, const Expr *expr) const
 	return nullptr;
 }
 
-TypeExpr* TypeExpr::resultType()
+Node *Expr::getMember(const std::string &name)
 {
-	FunctionType *f = asFunction();
-	if (f)
-		return f->returnType()->evalType();
-	return this;
+	if (name == "sizeof")
+		return new PrimitiveLiteralExpr(SizeT_Type, type()->size());
+	if (name == "alignof")
+		return new PrimitiveLiteralExpr(SizeT_Type, type()->alignment());
+	return Node::getMember(name);
 }
-TypeExpr* TypeExpr::evalType()
-{
-	FunctionType *f = asFunction();
-	if (f)
-		return f->returnType()->evalType();
-	PointerType *p = asPointer();
-	if (p)
-		return p->targetType()->evalType();
-	return this;
-}
+
 int TypeExpr::ptrDepth() const
 {
 	int depth = 0;
@@ -205,6 +190,24 @@ int TypeExpr::ptrDepth() const
 	}
 	return depth;
 }
+
+Node *TypeExpr::getMember(const std::string &name)
+{
+	if (name == "init")
+		return init();
+	if (name == "sizeof")
+		return new PrimitiveLiteralExpr(SizeT_Type, size());
+	if (name == "alignof")
+		return new PrimitiveLiteralExpr(SizeT_Type, alignment());
+	return Node::getMember(name);
+}
+
+
+
+
+//****************
+//** Type nodes **
+//****************
 
 Expr* PrimitiveType::init() const
 {
@@ -230,7 +233,7 @@ static uint64_t magicNumbers2[][4] =
 	{ 0, 0x3810000000000000ULL, 0x0010000000000000ULL, 0 }, // min_normal
 	{ 0, 0x3E80000000000000ULL, 0x3CB0000000000000ULL, 0 }, // epsilon
 };
-Node *PrimitiveType::getMember(const std::string &name, const Expr *expr) const
+Node *PrimitiveType::getMember(const std::string &name)
 {
 	switch (_type)
 	{
@@ -314,7 +317,7 @@ Node *PrimitiveType::getMember(const std::string &name, const Expr *expr) const
 	default:
 		assert(0);
 	}
-	return TypeExpr::getMember(name, expr);
+	return TypeExpr::getMember(name);
 }
 
 bool PrimitiveType::isSame(const TypeExpr *other) const
@@ -388,16 +391,16 @@ raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 	return out << stringof() << '\n';
 }
 
-Node *PointerType::getMember(const std::string &name, const Expr *expr) const
+Node *PointerType::getMember(const std::string &name)
 {
-	Node *r = TypeExpr::getMember(name, expr);
+	Node *r = TypeExpr::getMember(name);
 	if (r)
 		return r;
 
 	// TODO: do pointers have any properties?
 	//       - address property?
 
-	return _pointerTarget->getMember(name, expr);
+	return _pointerTarget->getMember(name);
 }
 
 static const char *ptrTypeStrings[] = { "*", "^", "&", "#" };
@@ -459,6 +462,9 @@ ConvType PointerType::convertible(const TypeExpr *target) const
 }
 Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
 {
+//	expr = expr->resolveExpr();
+//	targetType = targetType->resolveType();
+
 	int depth = targetType->ptrDepth();
 	if(depth > 0 && ptrDepth() <= depth)
 	{
@@ -510,27 +516,21 @@ size_t Struct::memberIndex(const std::string &name)
 	return i;
 }
 
-Node *Struct::getMember(const std::string &name, const Expr *expr) const
+Node *Struct::getMember(const std::string &name)
 {
-	Node *r = TypeExpr::getMember(name, expr);
+	Node *r = TypeExpr::getMember(name);
 	if (r)
 		return r;
 
 	// TODO: implicit members?
 	//       - all members as tuple?
 
-	Declaration *decl = body.getDecl(name, true);
-	if (dynamic_cast<VarDecl*>(decl))
-	{
-		assert(dynamic_cast<const RefExpr*>(expr)); // expr must be an instance ref!
-		return new RefExpr((VarDecl*)decl, (RefExpr*)expr);
-	}
-	else if (dynamic_cast<ValDecl*>(decl))
+	Declaration *decl = getDecl(name, true);
+	if (dynamic_cast<ValDecl*>(decl))
 		return ((ValDecl*)decl)->value();
 	else if (dynamic_cast<TypeDecl*>(decl))
 		return ((TypeDecl*)decl)->type();
-	else
-		assert(false);
+	return nullptr;
 }
 
 bool Struct::isSame(const TypeExpr *other) const
@@ -538,6 +538,24 @@ bool Struct::isSame(const TypeExpr *other) const
 	assert(false);
 	return false;
 }
+
+ConvType Struct::convertible(const TypeExpr *target) const
+{
+	return ConvType::NoConversion;
+}
+
+Expr* Struct::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	TypeExpr *type = expr->type();
+	TypeExpr *from = type->resolveType();
+	TypeExpr *to = targetType->resolveType();
+	if (from == to)
+		return expr;
+	assert(false); // can't convert struct type...
+	return nullptr;
+}
+
+
 std::string Struct::stringof() const
 {
 	std::string s = "{ ";
@@ -701,6 +719,42 @@ raw_ostream &AggregateLiteralExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+Node *RefExpr::getMember(const std::string &name)
+{
+	// base class member?
+	Node *r = Expr::getMember(name);
+	if (r)
+		return r;
+
+	// type member?
+	r = type()->getMember(name);
+	if (r)
+		return r;
+
+	TypeExpr *target = targetType()->resolveType();
+
+	// KINDA HAX: if the target is a struct, look-up member
+	Struct *s = dynamic_cast<Struct*>(target);
+	if (s)
+	{
+		Declaration *decl = s->getDecl(name, true);
+		if (dynamic_cast<VarDecl*>(decl))
+			return new RefExpr((VarDecl*)decl, this);
+	}
+
+	r = target->getMember(name);
+	if (r)
+		return r;
+
+	DerefExpr *deref = new DerefExpr(this);
+	r = deref->getMember(name);
+	if (r)
+		return r;
+
+	deref->~DerefExpr();
+	return nullptr;
+}
+
 raw_ostream &RefExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "ref\n", ind);
@@ -754,6 +808,15 @@ raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+Node *CallExpr::getMember(const std::string &name)
+{
+	// base class member?
+	Node *r = Expr::getMember(name);
+	if (r)
+		return r;
+	return nullptr;
+}
+
 raw_ostream &CallExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "call\n", ind);
@@ -784,23 +847,30 @@ raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+Node *Identifier::getMember(const std::string &name)
+{
+	// base class member?
+	Node *r = AmbiguousExpr::getMember(name);
+	if (r)
+		return r;
 
-Expr* AmbiguousExpr::expr() const
-{
-	return dynamic_cast<Expr*>(_eval);
-}
-TypeExpr* AmbiguousExpr::type() const
-{
-	Expr *expr = dynamic_cast<Expr*>(_eval);
-	if (expr)
-		return expr->type();
-	return dynamic_cast<TypeExpr*>(_eval);
+	return resolve()->getMember(name);
 }
 
 raw_ostream &Identifier::dump(raw_ostream &out, int ind)
 {
-	const char *ty = dynamic_cast<Expr*>(_eval) ? "#" : (dynamic_cast<TypeExpr*>(_eval) ? "@" : "");
+	const char *ty = _var ? "#" : (_type ? "@" : "");
 	return Node::dump(out << ty << _name << "\n", ind);
+}
+
+Node *MemberLookup::getMember(const std::string &name)
+{
+	// base class member?
+	Node *r = AmbiguousExpr::getMember(name);
+	if (r)
+		return r;
+
+	return resolve()->getMember(name);
 }
 
 raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
@@ -811,6 +881,12 @@ raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+raw_ostream &ScopeStatement::dump(raw_ostream &out, int ind)
+{
+	for (auto s : _statements)
+		s->dump(out, ind);
+	return out;
+}
 
 raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 {
@@ -825,14 +901,12 @@ raw_ostream &IfStatement::dump(raw_ostream &out, int ind)
 	}
 	_cond->dump(indent(out, ind) << "cond: ", ind + 1);
 	indent(out, ind) << "then: {\n";
-	for (auto s : _thenStatements)
-		s->dump(indent(out, ind + 1), ind + 1);
+	_then->dump(indent(out, ind + 1), ind + 1);
 	indent(out, ind) << "}\n";
-	if (_elseStatements.length > 0)
+	if (_else)
 	{
 		indent(out, ind) << "else: {\n";
-		for (auto s : _elseStatements)
-			s->dump(indent(out, ind + 1), ind + 1);
+		_else->dump(indent(out, ind + 1), ind + 1);
 		indent(out, ind) << "}\n";
 	}
 	return out;
@@ -859,8 +933,7 @@ raw_ostream &LoopStatement::dump(raw_ostream &out, int ind)
 		indent(out, ind) << "}\n";
 	}
 	indent(out, ind) << "body: {\n";
-	for (auto s : _bodyStatements)
-		s->dump(indent(out, ind + 1), ind + 1);
+	_body->dump(indent(out, ind + 1), ind + 1);
 	indent(out, ind) << "}\n";
 	return out;
 }

@@ -53,6 +53,9 @@ static		{ return STATIC; }
 def			{ return DEF; }
 var			{ return VAR; }
 
+fn			{ return FN; }
+struct		{ return STRUCT; }
+
 const		{ return CONST; }
 
 if			{ return IF; }

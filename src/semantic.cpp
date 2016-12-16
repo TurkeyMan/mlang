@@ -116,16 +116,6 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *
 	return nullptr; // dunno?!
 }
 
-void Semantic::visit(Node &n)
-{
-	if (n.doneSemantic()) return;
-}
-
-void Semantic::visit(Statement &n)
-{
-	if (n.doneSemantic()) return;
-}
-
 void Semantic::visit(Declaration &n)
 {
 	if (n.doneSemantic()) return;
@@ -135,7 +125,7 @@ void Semantic::visit(Module &n)
 {
 	if (n.doneSemantic()) return;
 
-	pushScope(n.scope());
+	pushScope(&n);
 
 	for (auto s : n.statements())
 		s->accept(*this);
@@ -187,25 +177,6 @@ void Semantic::visit(ReturnStatement &n)
 		n._expression = expr->makeConversion(function()->returnType);
 }
 
-void Semantic::visit(TypeExpr &n)
-{
-	if (n.doneSemantic()) return;
-
-}
-
-void Semantic::visit(AsType &n)
-{
-	if (n.doneSemantic()) return;
-
-	n._node->accept(*this);
-
-	n._type = n._node->type();
-	n._sizeof = n._type->_sizeof;
-	n._alignment = n._type->_alignment;
-
-	assert(n._type);
-}
-
 void Semantic::visit(PrimitiveType &n)
 {
 	if (n.doneSemantic()) return;
@@ -240,9 +211,8 @@ void Semantic::visit(Struct &n)
 {
 	if (n.doneSemantic()) return;
 
-	n.scope()->_parent = scope();
-	n.scope()->_owner = &n;
-	pushScope(n.scope());
+	n._parentScope = scope();
+	pushScope(&n);
 
 #define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
 
@@ -293,22 +263,6 @@ void Semantic::visit(FunctionType &n)
 	if (n.doneSemantic()) return;
 }
 
-void Semantic::visit(Expr &n)
-{
-	if (n.doneSemantic()) return;
-}
-
-void Semantic::visit(AsExpr &n)
-{
-	if (n.doneSemantic()) return;
-
-	n._node->accept(*this);
-
-	n._expr = n._node->expr();
-
-	assert(n._expr);
-}
-
 void Semantic::visit(Generic &n)
 {
 	if (n.doneSemantic()) return;
@@ -354,18 +308,19 @@ void Semantic::visit(FunctionLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
 
-	n.scope()->_parent = scope();
-	n.scope()->_owner = &n;
+	n._parentScope = scope();
 
-	pushScope(n.scope());
+	pushScope(&n);
 	pushFunction(&n);
 
 	// resolve parent scope...
 
 	// if is pure, no parent scope
 	// if is method, parent is struct
+	// if is static method, parent is struct static members
+	// if is local function, parent is parent function
 	// else parent is module scope
-	scope()->_parent = module->scope();
+	scope()->_parentScope = module;
 
 	for (auto a : n.args())
 	{
@@ -375,7 +330,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 		decl->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
 		decl->accept(*this);
 
-		n.argTypes.append(decl->targetType());
+		n.argTypes = n.argTypes.append(decl->targetType());
 	}
 
 	bool bDidReturn = false;
@@ -616,21 +571,12 @@ void Semantic::visit(Identifier &n)
 {
 	if (n.doneSemantic()) return;
 
-	n._target = scope()->getDecl(n.getName());
+	Declaration *_target = scope()->getDecl(n.getName());
 
-	ValDecl *pVal = dynamic_cast<ValDecl*>(n._target);
-	if (pVal)
-	{
-		n._eval = pVal->value();
-	}
-	else
-	{
-		TypeDecl *pType = dynamic_cast<TypeDecl*>(n._target);
-		if (pType)
-			n._eval = pType->type();
-		else
-			assert(false);
-	}
+	_target->accept(*this);
+
+	n._var = dynamic_cast<ValDecl*>(_target);
+	n._type = dynamic_cast<TypeDecl*>(_target);
 }
 
 void Semantic::visit(MemberLookup &n)
@@ -639,46 +585,52 @@ void Semantic::visit(MemberLookup &n)
 
 	n._node->accept(*this);
 
-	Expr *expr = nullptr;
-	TypeExpr *type = nullptr;
-
-	// try and work out what we're pointing at...
-	AmbiguousExpr *unknown = dynamic_cast<AmbiguousExpr*>(n._node);
-	if (unknown)
+	n._result = n._node->getMember(n._member);
+	if (!n._result)
 	{
-		if (unknown->isExpr())
-			expr = unknown->expr();
-		else
-			type = unknown->type();
-	}
-	if (!expr && !type)
-	{
-		Expr *expr = dynamic_cast<Expr*>(n._node);
-		if(!expr)
-			type = dynamic_cast<TypeExpr*>(n._node);
+		// UFCS lookup
+		// find _member(typeof(_expr) arg, ...) function.
 	}
 
-	// lookup member...
-	if (expr)
-	{
-		n._eval = dynamic_cast<Expr*>(expr->getMember(n._member));
+	assert(n._result);
 
-		if (!n._eval)
-		{
-			// UFCS lookup
-			// find _member(typeof(_expr) arg, ...) function.
-		}
-	}
-	else if(type)
-	{
-		n._eval = dynamic_cast<Expr*>(type->getMember(n._member, nullptr));
-	}
-
-	assert(n._eval);
-
-	n._eval->accept(*this);
+	n._result->accept(*this);
 }
 
+void Semantic::visit(ScopeStatement &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._parentScope = scope();
+
+	std::vector<VarDecl*> varStack;
+
+	pushScope(&n);
+	for (auto s : n._statements)
+	{
+		if (n._didReturn)
+		{
+			// statement unreachable warning!
+		}
+
+		s->accept(*this);
+
+		if (s->didReturn())
+			n._didReturn = true;
+
+		VarDecl *decl = dynamic_cast<VarDecl*>(s);
+		if (decl)
+			varStack.push_back(decl);
+	}
+
+	// destruct all locals
+	for (auto v : varStack)
+	{
+		// TODO: destruct v
+	}
+
+	popScope();
+}
 
 void Semantic::visit(IfStatement &n)
 {
@@ -688,8 +640,8 @@ void Semantic::visit(IfStatement &n)
 
 	if (n._initStatements.length > 0)
 	{
-		n._init = new Scope(s, s->owner());
-		pushScope(n._init);
+		n._parentScope = s;
+		pushScope(&n);
 
 		for (auto s : n._initStatements)
 			s->accept(*this);
@@ -698,44 +650,17 @@ void Semantic::visit(IfStatement &n)
 	n._cond->accept(*this);
 	n._cond = n._cond->makeConversion(PrimitiveType::get(PrimType::u1));
 
-	if (n._thenStatements.length > 0)
-		n._then = new Scope(scope(), s->owner());
-
-	if (n._elseStatements.length > 0)
-		n._else = new Scope(scope(), s->owner());
-
-	pushScope(n._then);
-	for (auto s : n._thenStatements)
-	{
-		if (n._thenReturned)
-		{
-			// statement unreachable warning!
-		}
-
-		s->accept(*this);
-
-		if (s->didReturn())
-			n._thenReturned = true;
-	}
-	popScope();
-
-	pushScope(n._else);
-	for (auto s : n._elseStatements)
-	{
-		if (n._elseReturned)
-		{
-			// statement unreachable warning!
-		}
-
-		s->accept(*this);
-
-		if (s->didReturn())
-			n._elseReturned = true;
-	}
-	popScope();
+	if (n._then)
+		n._then->accept(*this);
+	if (n._else)
+		n._else->accept(*this);
 
 	if (n._initStatements.length > 0)
+	{
+		// TODO: destruct init block locals
+
 		popScope();
+	}
 }
 
 void Semantic::visit(LoopStatement &n)
@@ -743,11 +668,15 @@ void Semantic::visit(LoopStatement &n)
 	if (n.doneSemantic()) return;
 
 	Scope *s = scope();
-	n._body = new Scope(s, s->owner());
-	pushScope(n._body);
 
-	for (auto i : n._iterators)
-		i->accept(*this);
+	if (n._iterators.length > 0)
+	{
+		n._parentScope = s;
+		pushScope(&n);
+
+		for (auto i : n._iterators)
+			i->accept(*this);
+	}
 
 	if (n._cond)
 	{
@@ -755,24 +684,23 @@ void Semantic::visit(LoopStatement &n)
 		n._cond = n._cond->makeConversion(PrimitiveType::get(PrimType::u1));
 	}
 
-	for (auto s : n._loopEntry)
-		s->accept(*this);
-
-	for (auto s : n._bodyStatements)
+	n._body->accept(*this);
+	if (n._body->didReturn())
 	{
-		s->accept(*this);
-
-		if (s->didReturn())
-		{
-			// warn: unreachable statements!
-			// returning from loop should happen in an if/else??
-		}
+		// warn: unreachable statements!
+		// returning from loop should happen in an if/else??
 	}
 
 	for (auto i : n._increments)
 		i->accept(*this);
 
-	popScope();
+	if (n._iterators.length > 0)
+	{
+		// TODO: destruct init block locals
+		//...
+
+		popScope();
+	}
 }
 
 void Semantic::visit(TypeDecl &n)
@@ -855,8 +783,8 @@ void Semantic::visit(VarDecl &n)
 	n._type = new PointerType(PtrType::LValue, n._valType);
 	n._type->accept(*this);
 
-	Node *owner = scope()->owner();
-	if (dynamic_cast<Module*>(owner) || dynamic_cast<FunctionLiteralExpr*>(owner))
+	Node *owner = scope();
+	if (!dynamic_cast<Struct*>(owner))
 	{
 		n._value = new RefExpr(&n);
 		n._value->accept(*this);
