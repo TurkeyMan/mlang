@@ -76,7 +76,8 @@ struct List
 		new(&l.ptr[l.length - 1]) T(std::move(v));
 		return l;
 	}
-	List append(const List<T> &list) const
+	template <typename U>
+	List append(const List<U> &list) const
 	{
 		List<T> l = { ptr, length };
 		for (auto &i : list)
@@ -136,6 +137,7 @@ class Declaration;
 class ValDecl;
 class VarDecl;
 
+class Node;
 class Expr;
 class TypeExpr;
 class AmbiguousExpr;
@@ -144,6 +146,7 @@ class PrimitiveType;
 class FunctionType;
 class PointerType;
 
+using NodeList = List<Node*>;
 using ExprList = List<Expr*>;
 using TypeExprList = List<TypeExpr*>;
 using StatementList = List<Statement*>;
@@ -338,7 +341,7 @@ public:
 	}
 
 	virtual bool isType() const = 0;
-	bool isExpr() const { return !isType(); }
+	virtual bool isExpr() const { return !isType(); }
 
 	Node* resolve()
 	{
@@ -676,50 +679,6 @@ public:
 	std::string mangleof() const override { assert(false); return std::string(); }
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
-};
-
-class TupleType : public TypeExpr
-{
-	friend class Semantic;
-
-	TypeExprList _types = TypeExprList::empty();
-
-public:
-	TupleType(TypeExprList types = TypeExprList::empty(), SourceLocation loc = CurLoc)
-		: TypeExpr(loc), _types(types)
-	{}
-
-	TypeExprList types() { return _types; }
-	Expr* init() const override { assert(false); return nullptr; }
-
-	size_t size() const override { return 0; }
-	size_t alignment() const override { return 0; }
-
-	Node *getMember(const std::string &name) override { assert(false); return nullptr; }
-
-	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
-	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
-	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
-
-	void accept(ASTVisitor &v) override;
-
-	std::string stringof() const override
-	{
-		std::string r = "[ ";
-		for (size_t i = 0; i < _types.length; ++i)
-			r += (i > 0 ? std::string(",") : std::string()) + _types[i]->stringof();
-		r += " ]";
-		return r;
-	}
-	std::string mangleof() const override { assert(false); return std::string(); }
-
-	raw_ostream &dump(raw_ostream &out, int ind) override
-	{
-		out << "tuple: [\n";
-		for (auto t : _types)
-			t->dump(out, ind + 1);
-		return indent(out, ind) << "]\n";
-	}
 };
 
 class Struct : public TypeExpr, public Scope
@@ -1155,32 +1114,6 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
-/// CallExpr - Expression class for function calls.
-class IndexExpr : public Expr
-{
-	friend class Semantic;
-
-	owner<Expr> Source;
-	std::vector<owner<Expr>> Args;
-
-public:
-	IndexExpr(SourceLocation Loc, owner<Expr> Source,
-		std::vector<owner<Expr>> Args)
-		: Expr(Loc), Source(move(Source)), Args(std::move(Args)) {}
-
-	TypeExpr* type() override;
-
-	std::string stringof() const override { assert(false); return std::string(); }
-	std::string mangleof() const override { assert(false); return std::string(); }
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		assert("!");
-		return out;
-	}
-};
-
 class CallExpr : public Expr
 {
 	friend class Semantic;
@@ -1376,6 +1309,161 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+class Tuple : public AmbiguousExpr
+{
+	friend class Semantic;
+
+	NodeList _elements = NodeList::empty();
+	std::vector<size_t> _offsets;
+
+	bool allExpr = false, allTypes = false;
+	size_t _size = 0, _alignment = 0;
+
+	Tuple *_type = nullptr;
+	Tuple *_init = nullptr;
+
+public:
+	Tuple(NodeList elements = NodeList::empty(), SourceLocation loc = CurLoc)
+		: AmbiguousExpr(loc), _elements(elements)
+	{}
+
+	NodeList elements() const { return _elements; }
+
+	bool isType() const override { return allTypes; }
+	bool isExpr() const override { return allExpr; }
+
+	// expr overrides
+	TypeExpr* type() override;
+	Expr* constEval() override { assert(false); return nullptr; };
+
+	Expr* resolveExpr() override { return this; }
+	TypeExpr* resolveType() override { return this; }
+
+	// type overrides
+	std::string stringof() const override;
+	std::string mangleof() const override
+	{
+//		if (isType())
+//			return _result->mangleof();
+		assert(false);
+		return std::string();
+	}
+
+	Expr* init() const override;
+
+	size_t size() const override { return _size; }
+	size_t alignment() const override { return _alignment; }
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override;
+
+	Node *getMember(const std::string &name) override; // length, etc
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+
+//	TypeExprList types() { return _types; }
+//	Expr* init() const override { assert(false); return nullptr; }
+//
+//	size_t size() const override { return 0; }
+//	size_t alignment() const override { return 0; }
+//
+//	Node *getMember(const std::string &name) override { assert(false); return nullptr; }
+//
+//	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
+//	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
+//	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
+//
+//	void accept(ASTVisitor &v) override;
+//
+//	std::string stringof() const override
+//	{
+//		std::string r = "[ ";
+//		for (size_t i = 0; i < _types.length; ++i)
+//			r += (i > 0 ? std::string(",") : std::string()) + _types[i]->stringof();
+//		r += " ]";
+//		return r;
+//	}
+//	std::string mangleof() const override { assert(false); return std::string(); }
+//
+//	raw_ostream &dump(raw_ostream &out, int ind) override
+//	{
+//		out << "tuple: [\n";
+//		for (auto t : _types)
+//			t->dump(out, ind + 1);
+//		return indent(out, ind) << "]\n";
+//	}
+
+private:
+	void analyse();
+};
+
+class UnknownIndex : public AmbiguousExpr
+{
+	friend class Semantic;
+
+	Node *_node;
+	Node *_result;
+
+	ExprList _indices;
+
+public:
+	UnknownIndex(Node *node, ExprList indices)
+		: AmbiguousExpr(), _node(node), _indices(indices) {}
+
+	Node* expr() const { return _result; }
+
+	bool isType() const override { return dynamic_cast<TypeExpr*>(_result) != nullptr; }
+
+	// expr overrides
+	TypeExpr* type() override { return resolveExpr()->type(); }
+	Expr* constEval() override { return resolveExpr()->constEval(); };
+
+	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
+	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
+
+	// type overrides
+	std::string stringof() const override
+	{
+		if (isType())
+			return _result->stringof();
+		std::string t = _node->stringof() + "[";
+		bool first = true;
+		for (auto &i : _indices)
+		{
+			if (first)
+				first = false;
+			else
+				t += ", ";
+			t += i->stringof();
+		}
+		return t + "]";
+	}
+	std::string mangleof() const override
+	{
+		if (isType())
+			return _result->mangleof();
+		assert(false);
+		return std::string();
+	}
+
+	Expr* init() const override { return dynamic_cast<TypeExpr*>(_result)->init(); }
+
+	size_t size() const override { return dynamic_cast<TypeExpr*>(_result)->size(); }
+	size_t alignment() const override { return dynamic_cast<TypeExpr*>(_result)->alignment(); }
+
+	bool isSame(const TypeExpr *other) const override { return dynamic_cast<TypeExpr*>(_result)->isSame(other); }
+	ConvType convertible(const TypeExpr *target) const override { return dynamic_cast<TypeExpr*>(_result)->convertible(target); }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { return dynamic_cast<TypeExpr*>(_result)->makeConversion(expr, targetType, implicit); }
+
+	Node *getMember(const std::string &name) override;
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
 
 
 /// Prototype - This class represents the "prototype" for a function,
@@ -1502,132 +1590,3 @@ inline bool TypeExpr::isVoid() const { const PrimitiveType *pt = dynamic_cast<co
 inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isBool(pt->type()); }
 inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }
 inline bool TypeExpr::isFloatingPoint() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isFloat(pt->type()); }
-
-
-
-
-class Generic : public Node
-{
-public:
-	enum class Type
-	{
-		String,
-
-		List,
-
-		TempalteId,
-		Type,
-		Instantiate,
-
-		Const,
-		Pointer,
-		Ref,
-
-		TypedId,
-
-		Struct,
-		Tuple,
-
-		Array,
-
-		ArrayLiteral,
-
-		Module,
-		DefType,
-		DefConst,
-		Var,
-
-		Elipsis,
-
-		MemberLookup,
-		Call,
-		OpIndex,
-		OpPostInc,
-		OpPostDec,
-		OpAssign,
-		OpBind,
-		OpMulEq,
-		OpDivEq,
-		OpModEq,
-		OpAddEq,
-		OpSubEq,
-		OpConcatEq,
-		OpBitAndEq,
-		OpBitXorEq,
-		OpBitOrEq,
-		OpAndEq,
-		OpXorEq,
-		OpOrEq,
-		OpASLEq,
-		OpASREq,
-		OpLSREq,
-
-		Return,
-		Break,
-	};
-
-	Generic(Type type, Node *l = nullptr, Node *r = nullptr)
-		: Node(), type(type), l(l), r(r) {}
-
-	template <typename T>
-	List<T> asList() const
-	{
-		assert(type == Type::List);
-
-		List<T> l = List<T>::empty();
-		asListImpl(l, this);
-		return l;
-	}
-
-	std::string stringof() const override { assert(false); return std::string(); }
-	std::string mangleof() const override { assert(false); return std::string(); }
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override;
-	raw_ostream &dumpList(raw_ostream &out, int ind);
-
-	//private:
-	Type type;
-	union
-	{
-		double f;
-		__int64 i;
-		unsigned __int64 u;
-		const char *s;
-	};
-	Node *l;
-	Node *r;
-
-private:
-	template <typename T>
-	static void asListImpl(List<T> &l, const Generic *pList)
-	{
-		if (pList->l)
-		{
-			Generic *gl = dynamic_cast<Generic*>(pList->l);
-			if (gl && gl->type == Generic::Type::List)
-				asListImpl(l, gl);
-			else
-				l.append(dynamic_cast<T>(pList->l));
-		}
-		if (pList->r)
-		{
-			Generic *gr = dynamic_cast<Generic*>(pList->r);
-			if (gr && gr->type == Generic::Type::List)
-				asListImpl(l, gr);
-			else
-				l.append(dynamic_cast<T>(pList->r));
-		}
-	}
-};
-
-Node* Push(Node *n);
-Node* Pop();
-Node* Top();
-
-Generic* String(const char* s);
-Generic* TypeId(const char* i);
-
-Generic* Add(Generic::Type type, Node *l = nullptr, Node *r = nullptr);
-Generic* SetChildren(Generic *node, Node *l = nullptr, Node *r = nullptr);

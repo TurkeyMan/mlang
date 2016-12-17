@@ -201,12 +201,6 @@ void Semantic::visit(PointerType &n)
 	n._init->accept(*this);
 }
 
-void Semantic::visit(TupleType &n)
-{
-	if (n.doneSemantic()) return;
-}
-
-
 void Semantic::visit(Struct &n)
 {
 	if (n.doneSemantic()) return;
@@ -216,7 +210,7 @@ void Semantic::visit(Struct &n)
 
 #define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
 
-	// conpose the struct
+	// compose the struct
 	size_t offset = 0;
 	size_t structAlign = 0;
 	for (auto m : n._members)
@@ -261,25 +255,6 @@ void Semantic::visit(Struct &n)
 void Semantic::visit(FunctionType &n)
 {
 	if (n.doneSemantic()) return;
-}
-
-void Semantic::visit(Generic &n)
-{
-	if (n.doneSemantic()) return;
-
-	switch (n.type)
-	{
-	case Generic::Type::List:
-		n.l->accept(*this);
-		if (n.r)
-			n.r->accept(*this);
-		break;
-	case Generic::Type::Module:
-		module->name() = ((Generic*)n.l)->s;
-		break;
-	default:
-		break;
-	}
 }
 
 void Semantic::visit(PrimitiveLiteralExpr &n)
@@ -486,12 +461,6 @@ void Semantic::visit(BinaryExpr &n)
 	n._rhs = n._rhs->makeConversion(type);
 }
 
-void Semantic::visit(IndexExpr &n)
-{
-	if (n.doneSemantic()) return;
-
-}
-
 void Semantic::visit(CallExpr &n)
 {
 	if (n.doneSemantic()) return;
@@ -595,6 +564,27 @@ void Semantic::visit(MemberLookup &n)
 	assert(n._result);
 
 	n._result->accept(*this);
+}
+
+void Semantic::visit(Tuple &n)
+{
+	if (n.doneSemantic()) return;
+
+	for (auto e : n._elements)
+		e->accept(*this);
+
+	n.analyse();
+
+	if (n.isExpr())
+		n.type()->accept(*this);
+	if (n.isType())
+		n.init()->accept(*this);
+}
+
+void Semantic::visit(UnknownIndex &n)
+{
+	if (n.doneSemantic()) return;
+
 }
 
 void Semantic::visit(ScopeStatement &n)

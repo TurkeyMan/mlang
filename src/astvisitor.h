@@ -15,10 +15,8 @@ public:
 	virtual void visit(LoopStatement &n) {}
 	virtual void visit(PrimitiveType &n) {}
 	virtual void visit(::PointerType &n) {}
-	virtual void visit(TupleType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(::FunctionType &n) {}
-	virtual void visit(Generic &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
 	virtual void visit(AggregateLiteralExpr &n) {}
 	virtual void visit(ArrayLiteralExpr &n) {}
@@ -28,12 +26,13 @@ public:
 	virtual void visit(TypeConvertExpr &n) {}
 	virtual void visit(UnaryExpr &n) {}
 	virtual void visit(BinaryExpr &n) {}
-	virtual void visit(IndexExpr &n) {}
 	virtual void visit(CallExpr &n) {}
 	virtual void visit(AssignExpr &n) {}
 	virtual void visit(BindExpr &n) {}
 	virtual void visit(Identifier &n) {}
 	virtual void visit(MemberLookup &n) {}
+	virtual void visit(Tuple &n) {}
+	virtual void visit(UnknownIndex &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}

@@ -38,7 +38,6 @@ void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
-void TupleType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -50,19 +49,18 @@ void DerefExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeConvertExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void UnaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void IndexExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AssignExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void Identifier::accept(ASTVisitor &v) { v.visit(*this); }
 void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
+void Tuple::accept(ASTVisitor &v) { v.visit(*this); }
+void UnknownIndex::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
-
-void Generic::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 template <typename... Args>
@@ -572,7 +570,7 @@ std::string Struct::stringof() const
 }
 raw_ostream &Struct::dump(raw_ostream &out, int ind)
 {
-	out << "struct: {\n";
+	out << "struct {\n";
 	for (auto m : _members)
 		m->dump(indent(out, ind + 1), ind + 1);
 	return indent(out, ind) << "}\n";
@@ -881,6 +879,161 @@ raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+void Tuple::analyse()
+{
+#define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
+
+	// compose the struct
+	_size = 0;
+	_alignment = 0;
+
+	allExpr = true, allTypes = _elements.length > 0;
+	for (auto e : _elements)
+	{
+		size_t size = 0;
+		size_t align = 0;
+
+		Expr *expr = dynamic_cast<Expr*>(e);
+		if (expr)
+		{
+			size = expr->type()->size();
+			align = expr->type()->alignment();
+
+			allTypes = false;
+		}
+		else
+		{
+			TypeExpr *type = dynamic_cast<TypeExpr*>(e);
+			if (type)
+			{
+				size = type->size();
+				align = type->alignment();
+
+				allExpr = false;
+			}
+			else
+			{
+				allExpr = false;
+				allTypes = false;
+
+				// accept other nodes in tuples?
+				assert(false);
+			}
+		}
+
+		_size = alignto(_size, align);
+		_offsets.push_back(_size);
+		_size += size;
+		_alignment = align > _alignment ? align : _alignment;
+	}
+
+	_size = alignto(_size, _alignment);
+}
+
+TypeExpr* Tuple::type()
+{
+	if (!_type)
+	{
+		assert(allExpr);
+		if (!allExpr)
+			return nullptr; // error?
+
+		NodeList types = NodeList::empty();
+		for (auto e : _elements)
+		{
+			Expr *expr = dynamic_cast<Expr*>(e);
+			types = types.append(expr->type());
+		}
+
+		Tuple *r = new Tuple(types);
+		r->analyse();
+		_type = r;
+	}
+	return _type;
+}
+
+Expr* Tuple::init() const
+{
+	if (!_init)
+	{
+		assert(allTypes);
+		if (!allTypes)
+			return nullptr; // error?
+
+		NodeList init = NodeList::empty();
+		for (auto e : _elements)
+		{
+			TypeExpr *t = dynamic_cast<TypeExpr*>(e);
+			init = init.append(t->init());
+		}
+
+		Tuple *r = new Tuple(init);
+		r->_type = (Tuple*)this;
+		r->analyse();
+		((Tuple*)this)->_init = r;
+	}
+	return _init;
+}
+
+bool Tuple::isSame(const TypeExpr *other) const
+{
+	assert(false);
+	return false;
+}
+
+ConvType Tuple::convertible(const TypeExpr *target) const
+{
+	// test element-wise conversions to tuple and arrays
+	assert(false);
+	return ConvType::NoConversion;
+}
+
+Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	assert(false);
+	return nullptr;
+}
+
+Node *Tuple::getMember(const std::string &name)
+{
+	assert(false);
+	return nullptr;
+}
+
+std::string Tuple::stringof() const
+{
+	std::string s = "[ ";
+	bool first = true;
+	for (auto &e : _elements)
+	{
+		if (!first)
+			s.append(", ");
+		first = false;
+		s.append(e->stringof());
+	}
+	s.append(" ]");
+	return std::move(s);
+}
+raw_ostream &Tuple::dump(raw_ostream &out, int ind)
+{
+	out << "[\n";
+	for (auto e : _elements)
+		e->dump(indent(out, ind + 1), ind + 1);
+	return indent(out, ind) << "]\n";
+}
+
+Node *UnknownIndex::getMember(const std::string &name)
+{
+	assert(false);
+	return nullptr;
+}
+
+raw_ostream &UnknownIndex::dump(raw_ostream &out, int ind)
+{
+	assert(false);
+	return out;
+}
+
 raw_ostream &ScopeStatement::dump(raw_ostream &out, int ind)
 {
 	for (auto s : _statements)
@@ -936,146 +1089,4 @@ raw_ostream &LoopStatement::dump(raw_ostream &out, int ind)
 	_body->dump(indent(out, ind + 1), ind + 1);
 	indent(out, ind) << "}\n";
 	return out;
-}
-
-
-/////////////////////////////////////////////
-
-const char * types[] =
-{
-	"String",
-	"List",
-	"TempalteId",
-	"Type",
-	"Instantiate",
-	"Const",
-	"Pointer",
-	"Ref",
-	"TypedId",
-	"Struct",
-	"Tuple",
-	"Array",
-	"ArrayLiteral",
-	"Module",
-	"DefType",
-	"DefConst",
-	"Var",
-	"Elipsis",
-	"MemberLookup",
-	"Call",
-	"OpIndex",
-	"OpPostInc",
-	"OpPostDec",
-	"OpAssign",
-	"OpBind",
-	"OpMulEq",
-	"OpDivEq",
-	"OpModEq",
-	"OpAddEq",
-	"OpSubEq",
-	"OpConcatEq",
-	"OpBitAndEq",
-	"OpBitXorEq",
-	"OpBitOrEq",
-	"OpAndEq",
-	"OpXorEq",
-	"OpOrEq",
-	"OpASLEq",
-	"OpASREq",
-	"OpLSREq",
-	"Return",
-	"Break"
-};
-
-raw_ostream &Generic::dumpList(raw_ostream &out, int ind)
-{
-	if (l)
-	{
-		Generic *gl = dynamic_cast<Generic*>(l);
-		if (gl && gl->type == Type::List)
-			gl->dumpList(out, ind);
-		else
-			l->dump(indent(out, ind), ind);
-	}
-	if (r)
-	{
-		Generic *gr = dynamic_cast<Generic*>(r);
-		if (gr && gr->type == Type::List)
-			gr->dumpList(out, ind);
-		else
-			r->dump(indent(out, ind), ind);
-	}
-	return out;
-}
-
-raw_ostream &Generic::dump(raw_ostream &out, int ind)
-{
-	switch (type)
-	{
-	case Type::List:
-	{
-		out << "generic(List): [\n";
-		dumpList(out, ind + 1);
-		return indent(out, ind) << "]\n";
-	}
-	case Type::String:
-		return out << "generic(String): \"" << s << "\"\n";
-	case Type::Module:
-		return l->dump(out << "generic(Module): ", ind);
-	default:
-		Node::dump(out << "generic(" << types[(size_t)type] << ")", ind) << ":\n";
-		++ind;
-		if (l)
-			l->dump(indent(out, ind) << "l: ", ind);
-		if (r)
-			r->dump(indent(out, ind) << "r: ", ind);
-	}
-	return out;
-}
-
-
-Node* stack[2048];
-size_t depth = 0;
-
-
-Node* Push(Node *n)
-{
-	stack[depth] = n;
-	return stack[depth++];
-}
-Node* Pop()
-{
-	assert(depth > 0);
-	return stack[--depth];
-}
-Node* Top()
-{
-	assert(depth > 0);
-	return stack[depth - 1];
-}
-
-Generic* String(const char* s)
-{
-	Generic *pN = new Generic(Generic::Type::String);
-	pN->s = s;
-	return pN;
-}
-Generic* TypeId(const char* i)
-{
-	Generic *pN = new Generic(Generic::Type::TypedId);
-	pN->s = i;
-	return pN;
-}
-
-Generic* Add(Generic::Type _type, Node *_l, Node *_r)
-{
-	return new Generic(_type, _l, _r);
-}
-Generic* SetChildren(Generic *node, Node *_l, Node *_r)
-{
-	if (_l)
-		node->l = _l;
-	if (_r)
-		node->r = _r;
-	return node;
 }

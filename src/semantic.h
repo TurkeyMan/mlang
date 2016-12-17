@@ -36,7 +36,6 @@ public:
 	void visit(LoopStatement &n) override;
 	void visit(PrimitiveType &n) override;
 	void visit(PointerType &v) override;
-	void visit(TupleType &n) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
@@ -48,17 +47,16 @@ public:
 	void visit(TypeConvertExpr &n) override;
 	void visit(UnaryExpr &n) override;
 	void visit(BinaryExpr &n) override;
-	void visit(IndexExpr &n) override;
 	void visit(CallExpr &n) override;
 	void visit(AssignExpr &n) override;
 	void visit(BindExpr &n) override;
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;
+	void visit(Tuple &n) override;
+	void visit(UnknownIndex &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
 	void visit(PrototypeDecl &n) override;
 	void visit(FunctionDecl &n) override;
-
-	void visit(Generic &n) override;
 };

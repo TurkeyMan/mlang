@@ -23,6 +23,7 @@ static StatementList parseTree = StatementList::empty();
 	double fval;
 	const char *sval;
 	Node *node;
+	NodeList nodeList;
 	AmbiguousExpr *ambiguous;
 	Expr *expr;
 	ExprList exprList;
@@ -53,16 +54,18 @@ static StatementList parseTree = StatementList::empty();
 
 %type <node> any_postfix
 
+%type <nodeList> unknown_list
+
 %type <ambiguous> member
 %type <ambiguous> unknown unknown_primary unknown_postfix unknown_prefix unknown_infix1 unknown_infix2 unknown_infix3 unknown_infix4 unknown_infix5 unknown_infix6 unknown_infix7 unknown_infix8 unknown_infix9 unknown_infix10 unknown_infix11 unknown_infix12
 
 %type <expr> literal function_literal_inner function_literal lambda call unary
 %type <expr> known_value value known_value_primary known_value_postfix value_postfix known_value_prefix value_prefix known_value_infix1 value_infix1 known_value_infix2 value_infix2 known_value_infix3 value_infix3 known_value_infix4 value_infix4 known_value_infix5 value_infix5 known_value_infix6 value_infix6 known_value_infix7 value_infix7 known_value_infix8 value_infix8 known_value_infix9 value_infix9 known_value_infix10 value_infix10 known_value_infix11 value_infix11 known_value_infix12 value_infix12 value_assign
-%type <exprList> value_list assign_value_list parameters
+%type <exprList> value_list known_value_list assign_value_list parameters array
 
 %type <type> primitive struct struct_def ref
 %type <type> known_type type known_type_primary known_type_postfix type_postfix known_type_prefix known_type_infix1 known_type_infix2 known_type_infix3 known_type_infix4 known_type_infix5 known_type_infix6 known_type_infix7 known_type_infix8 known_type_infix9 known_type_infix10 known_type_infix11 known_type_infix12
-//%type <typeExprList>
+%type <typeExprList> known_type_list  // type_list
 
 %type <statement> module_stmnt struct_stmnt code_stmnt module_statement def_statement var_statement expression_statement empty_statement control_statement
 %type <statementList> module_statemtnts struct_statements code_statements body
@@ -112,14 +115,24 @@ var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 var_decl_assign_list: var_decl_assign							{ $$ = DeclList::empty().append($1); }
 					| var_decl_assign_list ',' var_decl_assign	{ $$ = $1.append($3); }
 
+unknown_list		: unknown									{ $$ = NodeList::empty().append($1); }
+					| unknown_list ',' unknown					{ $$ = $1.append($3); }
+//type_list			: type										{ $$ = TypeExprList::empty().append($1); }
+//					| type_list ',' type						{ $$ = $1.append($3); }
 value_list			: value										{ $$ = ExprList::empty().append($1); }
 					| value_list ',' value						{ $$ = $1.append($3); }
+known_type_list		: known_type								{ $$ = TypeExprList::empty().append($1); }
+					| known_type_list ',' known_type			{ $$ = $1.append($3); }
+known_value_list	: known_value								{ $$ = ExprList::empty().append($1); }
+					| known_value_list ',' known_value			{ $$ = $1.append($3); }
 assign_value_list	: value_assign								{ $$ = ExprList::empty().append($1); }
 					| assign_value_list ',' value_assign		{ $$ = $1.append($3); }
 parameters			: '(' ')'									{ $$ = ExprList::empty(); }
 					| '(' value_list ')'						{ $$ = $2; }
 function_arguments	: '(' ')'									{ $$ = DeclList::empty(); }
 					| '(' var_decl_assign_list ')'				{ $$ = $2; }
+array				: '[' ']'									{ $$ = ExprList::empty(); }
+					| '[' value_list ']'						{ $$ = $2; }
 body				: code_stmnt								{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| '{' '}'									{ $$ = StatementList::empty(); }
 					| '{' code_statements '}'					{ $$ = $2; }
@@ -244,58 +257,64 @@ function_literal_inner	: function_arguments '{' '}'							{ $$ = new FunctionLit
 						| function_arguments ':' type '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3); }
 function_literal		: FN function_literal_inner								{ $$ = $2; }
 
-lambda	: FN IMPLY value					{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($3)), DeclList::empty(), nullptr); }
-		| FN var_decl_list IMPLY value		{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($4)), $2, nullptr); }
+lambda	: FN IMPLY value						{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($3)), DeclList::empty(), nullptr); }
+		| FN var_decl_list IMPLY value			{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($4)), $2, nullptr); }
 
-member	: any_postfix '.' IDENTIFIER		{ $$ = new MemberLookup($1, $3); }
+member	: any_postfix '.' IDENTIFIER			{ $$ = new MemberLookup($1, $3); }
 
-call	: value_postfix parameters			{ $$ = new CallExpr($1, $2); }
+call	: value_postfix parameters				{ $$ = new CallExpr($1, $2); }
 
-ref		: type_postfix ptr_type				{ $$ = new PointerType($2, $1); }
+ref		: type_postfix ptr_type					{ $$ = new PointerType($2, $1); }
 
-unary	: unary_op value_prefix				{ $$ = new UnaryExpr($1, $2); }
-		| CAST '(' type ')' value_prefix	{ $$ = new TypeConvertExpr($5, $3, false); }
+unary	: unary_op value_prefix					{ $$ = new UnaryExpr($1, $2); }
+		| CAST '(' type ')' value_prefix		{ $$ = new TypeConvertExpr($5, $3, false); }
 
 
 /*** primaries ***/
 
-unknown_primary		: IDENTIFIER			{ $$ = new Identifier($1); }
-					| '(' unknown ')'		{ $$ = $2; }
-known_value_primary	: literal				{ $$ = $1; }
-					| function_literal		{ $$ = $1; }
-					| '(' known_value ')'	{ $$ = $2; }
-known_type_primary	: primitive				{ $$ = $1; }
-					| struct				{ $$ = $1; }
-					| '(' known_type ')'	{ $$ = $2; }
+unknown_primary		: IDENTIFIER				{ $$ = new Identifier($1); }
+					| '[' unknown_list ']'		{ $$ = new Tuple($2); }
+					| '(' unknown ')'			{ $$ = $2; }
+known_value_primary	: literal					{ $$ = $1; }
+					| function_literal			{ $$ = $1; }
+					| '[' known_value_list ']'	{ $$ = new Tuple(NodeList::empty().append($2)); }
+					| '(' known_value ')'		{ $$ = $2; }
+known_type_primary	: primitive					{ $$ = $1; }
+					| struct					{ $$ = $1; }
+					| '[' known_type_list ']'	{ $$ = new Tuple(NodeList::empty().append($2)); }
+					| '(' known_type ')'		{ $$ = $2; }
 
 
 /*** postfix ***/
 
-unknown_postfix		: unknown_primary		{ $$ = $1; }
-					| member				{ $$ = $1; }
-known_value_postfix	: known_value_primary	{ $$ = $1; }
-					| call					{ $$ = $1; }
-known_type_postfix	: known_type_primary	{ $$ = $1; }
-					| ref					{ $$ = $1; }
+unknown_postfix		: unknown_primary			{ $$ = $1; }
+					| member					{ $$ = $1; }
+					| unknown_postfix array		{ $$ = new UnknownIndex($1, $2); }
+known_value_postfix	: known_value_primary		{ $$ = $1; }
+					| call						{ $$ = $1; }
+					| known_value_postfix array	{ $$ = new UnknownIndex($1, $2); }
+known_type_postfix	: known_type_primary		{ $$ = $1; }
+					| ref						{ $$ = $1; }
+					| known_type_postfix array	{ $$ = new UnknownIndex($1, $2); }
 
-value_postfix		: known_value_postfix	{ $$ = $1; }
-					| unknown_postfix		{ $$ = $1; /* Check/fix category */ }
-type_postfix		: known_type_postfix	{ $$ = $1; }
-					| unknown_postfix		{ $$ = $1; /* Check/fix category */ }
-any_postfix			: known_value_postfix	{ $$ = $1; }
-					| known_type_postfix	{ $$ = $1; }
-					| unknown_postfix		{ $$ = $1; }
+value_postfix		: known_value_postfix		{ $$ = $1; }
+					| unknown_postfix			{ $$ = $1; /* Check/fix category */ }
+type_postfix		: known_type_postfix		{ $$ = $1; }
+					| unknown_postfix			{ $$ = $1; /* Check/fix category */ }
+any_postfix			: known_value_postfix		{ $$ = $1; }
+					| known_type_postfix		{ $$ = $1; }
+					| unknown_postfix			{ $$ = $1; }
 
 
 /*** prefix ***/
 
-unknown_prefix		: unknown_postfix		{ $$ = $1; }
-known_value_prefix	: known_value_postfix	{ $$ = $1; }
-					| unary					{ $$ = $1; }
-known_type_prefix	: known_type_postfix	{ $$ = $1; }
+unknown_prefix		: unknown_postfix			{ $$ = $1; }
+known_value_prefix	: known_value_postfix		{ $$ = $1; }
+					| unary						{ $$ = $1; }
+known_type_prefix	: known_type_postfix		{ $$ = $1; }
 
-value_prefix		: known_value_prefix	{ $$ = $1; }
-					| unknown_prefix		{ $$ = $1; /* Check/fix category */ }
+value_prefix		: known_value_prefix		{ $$ = $1; }
+					| unknown_prefix			{ $$ = $1; /* Check/fix category */ }
 
 
 /*** infix1 ***/

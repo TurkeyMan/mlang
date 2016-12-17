@@ -534,12 +534,6 @@ void LLVMGenerator::visit(::PointerType &n)
 	cg->type = llvm::PointerType::getUnqual(targetCg->type);
 }
 
-void LLVMGenerator::visit(TupleType &n)
-{
-	if (n.doneCodegen()) return;
-
-}
-
 void LLVMGenerator::visit(Struct &n)
 {
 	if (n.doneCodegen()) return;
@@ -581,25 +575,6 @@ void LLVMGenerator::visit(::FunctionType &n)
 	}
 
 	cg->type = llvm::FunctionType::get(r, args, false);
-}
-
-void LLVMGenerator::visit(Generic &n)
-{
-	if (n.doneCodegen()) return;
-
-	switch (n.type)
-	{
-	case Generic::Type::List:
-		n.l->accept(*this);
-		if (n.r)
-			n.r->accept(*this);
-		break;
-	case Generic::Type::Module:
-		TheModule->setModuleIdentifier(((Generic*)n.l)->s);
-		break;
-	default:
-		break;
-	}
 }
 
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
@@ -1290,12 +1265,6 @@ void LLVMGenerator::visit(BinaryExpr &n)
 //	return Builder.CreateCall(F, Ops, "binop");
 }
 
-void LLVMGenerator::visit(IndexExpr &n)
-{
-	if (n.doneCodegen()) return;
-
-}
-
 void LLVMGenerator::visit(CallExpr &n)
 {
 	if (n.doneCodegen()) return;
@@ -1412,6 +1381,64 @@ void LLVMGenerator::visit(MemberLookup &n)
 		cg->value = exprCg->value;
 	else
 		cg->type = exprCg->type;
+}
+
+void LLVMGenerator::visit(Tuple &n)
+{
+	if (n.doneCodegen()) return;
+
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	if (n.isType())
+	{
+		// gather member types
+		std::vector<Type*> elements;
+		for (auto e : n.elements())
+		{
+			TypeExpr *t = dynamic_cast<TypeExpr*>(e);
+			assert(t);
+			t->accept(*this);
+			t = t->resolveType();
+
+			Type *ty = t->cgData<LLVMData>()->type;
+			elements.push_back(ty);
+		}
+
+		// make LLVM struct
+		cg->type = StructType::get(ctx, elements);
+	}
+	else if (n.isExpr())
+	{
+		for (auto e : n.elements())
+		{
+			Expr *expr = dynamic_cast<Expr*>(e);
+			assert(expr);
+			expr->accept(*this);
+		}
+
+		TypeExpr *type = n.type();
+		type->accept(*this);
+
+		::Type *ty = type->cgData<LLVMData>()->type;
+		cg->value = Builder.CreateAlloca(ty);
+
+		auto elements = n.elements();
+		for (size_t i = 0; i < elements.length; ++i)
+		{
+			Value *member = Builder.CreateStructGEP(ty, cg->value, i);
+
+			Expr *expr = dynamic_cast<Expr*>(elements[i]);
+			Value *val = expr->cgData<LLVMData>()->value;
+
+			Builder.CreateStore(val, member);
+		}
+	}
+}
+
+void LLVMGenerator::visit(UnknownIndex &n)
+{
+	if (n.doneCodegen()) return;
+
 }
 
 void LLVMGenerator::visit(TypeDecl &n)
