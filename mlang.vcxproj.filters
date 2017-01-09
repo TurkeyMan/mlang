@@ -35,6 +35,9 @@
     <ClCompile Include="src\semantic.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="link.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mlang.tab.h">

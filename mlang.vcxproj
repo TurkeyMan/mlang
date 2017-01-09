@@ -27,6 +27,7 @@
     <Bison Include="mlang.y" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="link.cpp" />
     <ClCompile Include="mlang.flex.cpp" />
     <ClCompile Include="mlang.tab.cpp" />
     <ClCompile Include="src\ast.cpp" />

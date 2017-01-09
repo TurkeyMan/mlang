@@ -45,6 +45,53 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 	KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, _module->filename(), ".", "M-Lang Compiler", 0, "", 0);
 }
 
+void LLVMGenerator::pushFunction(FunctionLiteralExpr *f)
+{
+	TypeExpr *rt = f->type()->returnType();
+	_functionStack.push_back(FunctionState{ f, rt->isVoid(), false, _scope.size(), nullptr });
+	FunctionState &cur = _functionStack.back();
+	if (!cur.isVoid)
+	{
+		cur.retval = Builder.CreateAlloca(rt->cgData<LLVMData>()->type, nullptr, "retval");
+		cur.retval->setAlignment(rt->alignment());
+	}
+}
+
+void LLVMGenerator::earlyReturn(Expr *expr)
+{
+	FunctionState &cur = _functionStack.back();
+
+	if (!cur.hasEarlyReturn)
+	{
+		// make a return block
+		cur.returnBlock = BasicBlock::Create(ctx, "return", nullptr);
+
+		BasicBlock *oldBlock = Builder.GetInsertBlock();
+		Builder.SetInsertPoint(cur.returnBlock);
+
+		if (expr)
+		{
+			LoadInst *load = Builder.CreateLoad(cur.retval);
+			load->setAlignment(cur.retval->getAlignment());
+			Builder.CreateRet(load);
+		}
+		else
+			Builder.CreateRetVoid();
+
+		Builder.SetInsertPoint(oldBlock);
+
+		cur.hasEarlyReturn = true;
+	}
+
+	if (expr)
+	{
+		StoreInst *store = Builder.CreateStore(expr->cgData<LLVMData>()->value, cur.retval);
+		store->setAlignment(cur.retval->getAlignment());
+	}
+
+	Builder.CreateBr(cur.returnBlock);
+}
+
 void InitCodegen()
 {
 //	InitializeNativeTarget();
@@ -70,19 +117,63 @@ void InitCodegen()
 	cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 }
 
-void Codegen(::Module *module, Mode mode, int opt, std::string outFile, std::string irFile)
+void Codegen(::Module *module, Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime)
 {
 	LLVMGenerator *generator = new LLVMGenerator(module);
 
 	module->accept(*generator);
 
-	generator->codegen(mode, opt, outFile, irFile);
+	generator->codegen(mode, opt, outFile, irFile, runtime);
 }
 
-void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string irFile)
+void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime)
 {
 	// Finalize the debug info.
 	DBuilder->finalize();
+
+	std::vector<std::string> linkOptions;
+
+	if (runtime.compare("MT") == 0)
+	{
+		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MT_StaticRelease");
+		linkOptions.push_back("/DEFAULTLIB:LIBCMT");
+		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
+	}
+	else if (runtime.compare("MTd") == 0)
+	{
+		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MTd_StaticDebug");
+		linkOptions.push_back("/DEFAULTLIB:LIBCMTD");
+		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
+	}
+	else if (runtime.compare("MD") == 0)
+	{
+		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MD_DynamicRelease");
+		linkOptions.push_back("/DEFAULTLIB:MSVCRT");
+		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
+	}
+	else if (runtime.compare("MDd") == 0)
+	{
+		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug");
+		linkOptions.push_back("/DEFAULTLIB:MSVCRTD");
+		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
+	}
+	else if (runtime.compare("none") != 0)
+	{
+		// bad runtime!
+		assert(false);
+	}
+
+	std::vector<Metadata*> linkOpts;
+	for (auto &opt : linkOptions)
+	{
+		// TODO: if option has spaces, it should be split into multiple MDString's..
+
+		std::vector<Metadata*> linkFlag;
+		linkFlag.push_back(MDString::get(ctx, opt));
+		linkOpts.push_back(MDNode::get(ctx, linkFlag));
+	}
+
+	TheModule->addModuleFlag(llvm::Module::ModFlagBehavior::AppendUnique, "Linker Options", MDNode::get(ctx, linkOpts));
 
 	if (!irFile.empty())
 	{
@@ -174,7 +265,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		// Figure out where we are going to send the output.
 		std::error_code EC;
 		sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
-		if (fileType = TargetMachine::CGFT_AssemblyFile)
+		if (fileType == TargetMachine::CGFT_AssemblyFile)
 			OpenFlags |= sys::fs::F_Text;
 		auto Out = std::make_unique<tool_output_file>(outFile, EC, OpenFlags);
 //		std::unique_ptr<tool_output_file> Out =
@@ -661,6 +752,9 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 	llvm::FunctionType *sig = (llvm::FunctionType*)fn->cgData<LLVMData>()->type;
 
 	Function *function = Function::Create(sig, Function::InternalLinkage, "", TheModule.get());
+//	function->setCallingConv(CallingConv::X86_VectorCall)
+	function->addFnAttr(Attribute::AttrKind::NoUnwind);
+//	function->addFnAttr(Attribute::AttrKind::UWTable);
 	cg->value = function;
 
 	// Create a new basic block to start insertion into.
@@ -694,7 +788,8 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 //			Builder.GetInsertBlock());
 
 		AllocaInst *alloc = (AllocaInst*)arg->cgData<LLVMData>()->value;
-		Builder.CreateStore(&a, alloc);
+		StoreInst *store = Builder.CreateStore(&a, alloc);
+		store->setAlignment(arg->targetType()->alignment());
 	}
 
 //		KSDbgInfo.emitLocation(Body.get());
@@ -860,7 +955,9 @@ void LLVMGenerator::visit(DerefExpr &n)
 	expr->accept(*this);
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 
-	cg->value = Builder.CreateLoad(exprCg->value);
+	LoadInst *load = Builder.CreateLoad(exprCg->value);
+	load->setAlignment(expr->type()->asPointer()->targetType()->alignment());
+	cg->value = load;
 }
 
 void LLVMGenerator::visit(TypeConvertExpr &n)
@@ -1331,7 +1428,8 @@ void LLVMGenerator::visit(AssignExpr &n)
 	LLVMData *targetCg = target->cgData<LLVMData>();
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 
-	Builder.CreateStore(exprCg->value, targetCg->value, false);
+	StoreInst *store = Builder.CreateStore(exprCg->value, targetCg->value, false);
+	store->setAlignment(target->type()->asPointer()->targetType()->alignment());
 }
 
 void LLVMGenerator::visit(BindExpr &n)
@@ -1431,6 +1529,7 @@ void LLVMGenerator::visit(Tuple &n)
 			Value *val = expr->cgData<LLVMData>()->value;
 
 			Builder.CreateStore(val, member);
+			// TODO: set alignment...
 		}
 	}
 }
@@ -1497,7 +1596,25 @@ void LLVMGenerator::visit(VarDecl &n)
 
 		if (dynamic_cast<::Module*>(s))
 		{
+			GlobalVariable *global = TheModule->getGlobalVariable(n.name());
+			if (global != nullptr)
+			{
+				// already exists!!
+				assert(false);
+			}
 			cg->value = TheModule->getOrInsertGlobal(n.name(), typeCg);
+			global = TheModule->getGlobalVariable(n.name());
+			global->setAlignment(n.targetType()->alignment());
+			global->setLinkage(GlobalValue::LinkageTypes::InternalLinkage);
+
+			if (!n.init()->type()->isVoid())
+			{
+				n.init()->accept(*this);
+				llvm::Value *val = n.init()->cgData<LLVMData>()->value;
+				llvm::Constant *constant = llvm::dyn_cast<llvm::Constant>(val);
+
+				global->setInitializer(constant);
+			}
 
 			Expr *expr = n.value();
 			expr->accept(*this);
@@ -1508,7 +1625,11 @@ void LLVMGenerator::visit(VarDecl &n)
 		}
 		else
 		{
-			cg->value = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
+
+			AllocaInst *alloc = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
+			alloc->setAlignment(n.targetType()->alignment());
+
+			cg->value = alloc;
 			if (!n.init()->type()->isVoid())
 			{
 				n.init()->accept(*this);
@@ -1518,10 +1639,14 @@ void LLVMGenerator::visit(VarDecl &n)
 				if (n.type()->asPointer() && n.init()->type()->asPrimitive()->type() == SizeT_Type)
 				{
 					val = Builder.CreateIntToPtr(val, typeCg);
-					Builder.CreateStore(val, cg->value, false);
+					StoreInst *store = Builder.CreateStore(val, cg->value, false);
+					store->setAlignment(alloc->getAlignment());
 				}
 				else
-					Builder.CreateStore(val, cg->value, false);
+				{
+					StoreInst *store = Builder.CreateStore(val, cg->value, false);
+					store->setAlignment(alloc->getAlignment());
+				}
 			}
 
 			Expr *expr = n.value();

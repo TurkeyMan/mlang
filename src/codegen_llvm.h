@@ -18,6 +18,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/Support/Casting.h"
 
 #include "../KaleidoscopeJIT.h"
 
@@ -103,51 +104,15 @@ private:
 public:
 	LLVMGenerator(::Module *module);
 
-	void codegen(Mode mode, int opt, std::string outFile, std::string irFile);
+	void codegen(Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime);
 
 	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
 	void pushScope(Scope *s) { _scope.push_back(s); }
 	void popScope() { _scope.pop_back(); }
 
-	void pushFunction(FunctionLiteralExpr *f)
-	{
-		TypeExpr *rt = f->type()->returnType();
-		_functionStack.push_back(FunctionState{ f, rt->isVoid(), false, _scope.size(), nullptr });
-		FunctionState &cur = _functionStack.back();
-		if (!cur.isVoid)
-			cur.retval = Builder.CreateAlloca(rt->cgData<LLVMData>()->type, nullptr, "retval");
-	}
+	void pushFunction(FunctionLiteralExpr *f);
 	void popFunction() { _functionStack.pop_back(); }
-	void earlyReturn(Expr *expr)
-	{
-		FunctionState &cur = _functionStack.back();
-
-		if (!cur.hasEarlyReturn)
-		{
-			// make a return block
-			cur.returnBlock = BasicBlock::Create(ctx, "return", nullptr);
-
-			BasicBlock *oldBlock = Builder.GetInsertBlock();
-			Builder.SetInsertPoint(cur.returnBlock);
-
-			if (expr)
-			{
-				LoadInst *load = Builder.CreateLoad(cur.retval);
-				Builder.CreateRet(load);
-			}
-			else
-				Builder.CreateRetVoid();
-
-			Builder.SetInsertPoint(oldBlock);
-
-			cur.hasEarlyReturn = true;
-		}
-
-		if (expr)
-			Builder.CreateStore(expr->cgData<LLVMData>()->value, cur.retval);
-
-		Builder.CreateBr(cur.returnBlock);
-	}
+	void earlyReturn(Expr *expr);
 
 	void visit(Declaration &n) override;
 	void visit(::Module &n) override;

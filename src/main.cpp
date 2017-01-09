@@ -6,13 +6,18 @@
 #include <Windows.h>
 
 void InitCodegen();
-void Codegen(Module *pAST, Mode mode, int opt, std::string outFile, std::string irFile);
+void Codegen(Module *pAST, Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime);
+void Link(std::string outFile, std::vector<std::string> objFiles, std::vector<std::string> libPaths, std::vector<std::string> libs);
 
 std::vector<std::string> srcFiles;
 std::string curSrcFile;
 std::string outFile;
 std::string irFile;
 std::string astFile;
+std::vector<std::string> objFiles;
+std::vector<std::string> libPaths;
+std::vector<std::string> libs;
+std::string runtime = "MD"; // multi-threaded dll - release
 
 std::map<std::string, TypeExpr*> types;
 
@@ -36,6 +41,11 @@ std::unique_ptr<PrototypeDecl> ErrorP(const char *Str)
 	return nullptr;
 }
 
+inline bool ends_with(std::string const & value, std::string const & ending)
+{
+	if (ending.size() > value.size()) return false;
+	return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
 
 StatementList parse(FILE *file);
 
@@ -81,6 +91,21 @@ extern "C" {
 				else
 					opt = 2;
 			}
+			else if (!strncmp(argv[arg], "-L", 2))
+			{
+				if (argv[arg][2])
+					libPaths.push_back(argv[arg] + 2);
+			}
+			else if (!strncmp(argv[arg], "-l", 2))
+			{
+				if (argv[arg][2])
+					libs.push_back(argv[arg] + 2);
+			}
+			else if (!strncmp(argv[arg], "-runtime=", 9))
+			{
+				if (argv[arg][9])
+					runtime = argv[arg] + 9;
+			}
 			else
 				srcFiles.push_back(argv[arg]);
 
@@ -110,6 +135,16 @@ extern "C" {
 			else if (mode == Mode::OutputBC)
 				outFile = "out.bc";
 		}
+
+		if (mode == Mode::CompileAndLink)
+		{
+			if (ends_with(outFile, ".exe") || ends_with(outFile, ".lib") || ends_with(outFile, ".dll"))
+				objFiles.push_back(outFile.substr(0, outFile.size() - 4) + ".obj");
+			else
+				objFiles.push_back(outFile + ".obj");
+		}
+		else
+			objFiles.push_back(outFile);
 
 		bool bFirst = true;
 		for (auto &file : srcFiles)
@@ -175,7 +210,11 @@ extern "C" {
 
 		// codegen
 		if(mode != Mode::Parse)
-			Codegen(semantic.getModule(), mode, opt, outFile, irFile);
+			Codegen(semantic.getModule(), mode, opt, objFiles[0], irFile, runtime);
+
+		// link
+		if (mode == Mode::CompileAndLink)
+			Link(outFile, objFiles, libPaths, libs);
 
 		return 0;
 	}

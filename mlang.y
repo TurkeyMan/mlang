@@ -70,7 +70,7 @@ static StatementList parseTree = StatementList::empty();
 %type <statement> module_stmnt struct_stmnt code_stmnt module_statement def_statement var_statement expression_statement empty_statement control_statement
 %type <statementList> module_statemtnts struct_statements code_statements body
 
-%type <decl> var_decl var_decl_assign
+%type <decl> var_decl var_decl_assign var_decl_assign_void
 %type <declList> var_decl_list var_decl_assign_list function_arguments
 
 %type <unaryOp> unary_op
@@ -109,6 +109,9 @@ var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr); }
 var_decl_assign		: var_decl									{ $$ = $1; }
 					| IDENTIFIER ':' type '=' value				{ $$ = new VarDecl($1, $3, $5); }
 					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3); }
+var_decl_assign_void: var_decl_assign							{ $$ = $1; }
+					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull)); }
+					| IDENTIFIER '=' VOID						{ $$ = new VarDecl($1, nullptr, new PrimitiveLiteralExpr(PrimType::v, 0ull)); }
 
 var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 					| var_decl_list ',' var_decl				{ $$ = $1.append($3); }
@@ -147,7 +150,7 @@ def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, 
 						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4); }
 						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3); }
 						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3); }
-var_statement			: VAR var_decl_assign ';'												{ $$ = $2; }
+var_statement			: VAR var_decl_assign_void ';'											{ $$ = $2; }
 expression_statement	: value_assign ';'														{ $$ = new ExpressionStatement($1); }
 control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr); }
 						| RETURN value ';'														{ $$ = new ReturnStatement($2); }
