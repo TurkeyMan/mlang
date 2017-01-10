@@ -142,6 +142,7 @@ class PrimitiveType;
 class FunctionType;
 class PointerType;
 class Struct;
+class Tuple;
 
 using NodeList = List<Node*>;
 using ExprList = List<Expr*>;
@@ -315,6 +316,8 @@ public:
 	const ::PointerType* asPointer() const;
 	Struct* asStruct();
 	const Struct* asStruct() const;
+	Tuple* asTuple();
+	const Tuple* asTuple() const;
 
 	bool isVoid() const;
 	bool isBoolean() const;
@@ -870,6 +873,7 @@ public:
 	char32_t getChar() const { return c; }
 
 	PrimitiveType* type() override { return _typeExpr; }
+	PrimitiveLiteralExpr* constEval() override { return this; };
 
 	std::string stringof() const override { assert(false); return std::string(); }
 	std::string mangleof() const override { assert(false); return std::string(); }
@@ -891,6 +895,7 @@ public:
 		: Node(loc), Expr(loc), _type(type), _items(move(items)) {}
 
 	TypeExpr* type() override { return _type; }
+
 	ExprList items() { return _items; }
 
 	std::string stringof() const override { assert(false); return std::string(); }
@@ -978,24 +983,41 @@ public:
 class RefExpr : public Expr
 {
 	friend class Semantic;
+public:
+	enum Type
+	{
+		Direct,
+		Member,
+		Index,
+		Absolute
+	};
 
+private:
 	::PointerType *_type;
 
+	RefExpr *_owner;
 	VarDecl *_target;
 	size_t _absolute;
-	RefExpr *_owner;
+	size_t _element;
+
+	Type _refType;
 
 public:
+
 	RefExpr(VarDecl *target, RefExpr *owner, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(nullptr), _target(target), _absolute(0), _owner(owner) {}
+		: Node(loc), Expr(loc), _type(nullptr), _owner(owner), _target(target), _absolute(0), _element(0), _refType(owner ? Type::Member : Type::Direct) {}
+	RefExpr(RefExpr *owner, size_t element, SourceLocation loc)
+		: Node(loc), Expr(loc), _type(nullptr), _owner(owner), _target(nullptr), _absolute(0), _element(element), _refType(Type::Index) {}
 	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _target(nullptr), _absolute(target), _owner(nullptr) {}
+		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _owner(nullptr), _target(nullptr), _absolute(target), _element(0), _refType(Type::Absolute) {}
 
 	::PointerType* type() override { return _type; }
 	TypeExpr* targetType() const { return _type->targetType(); }
+	Type refType() const { return _refType; }
 
 	VarDecl *target() { return _target; }
 	size_t address() { return _absolute; }
+	size_t element() { return _element; }
 	RefExpr *owner() { return _owner; }
 
 	Node *getMember(const std::string &name) override;
@@ -1386,6 +1408,9 @@ public:
 	UnknownIndex(Node *node, ExprList indices, SourceLocation loc)
 		: Node(loc), AmbiguousExpr(loc), _node(node), _indices(indices) {}
 
+	Node* source() { return _node; }
+	ExprList indices() { return _indices; }
+
 	Node* expr() const { return _result; }
 
 	bool isType() const override { return dynamic_cast<TypeExpr*>(_result) != nullptr; }
@@ -1563,6 +1588,8 @@ inline ::PointerType* TypeExpr::asPointer() { return dynamic_cast<::PointerType*
 inline const ::PointerType* TypeExpr::asPointer() const { return dynamic_cast<const ::PointerType*>(this); }
 inline Struct* TypeExpr::asStruct() { return dynamic_cast<Struct*>(this); }
 inline const Struct* TypeExpr::asStruct() const { return dynamic_cast<const Struct*>(this); }
+inline Tuple* TypeExpr::asTuple() { return dynamic_cast<Tuple*>(this); }
+inline const Tuple* TypeExpr::asTuple() const { return dynamic_cast<const Tuple*>(this); }
 inline bool TypeExpr::isVoid() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && pt->type() == PrimType::v; }
 inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isBool(pt->type()); }
 inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }

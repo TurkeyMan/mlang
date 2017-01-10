@@ -1101,14 +1101,16 @@ raw_ostream &Tuple::dump(raw_ostream &out, int ind)
 
 Node *UnknownIndex::getMember(const std::string &name)
 {
-	assert(false);
-	return nullptr;
+	return dynamic_cast<AmbiguousExpr*>(_result)->resolve()->getMember(name);
 }
 
 raw_ostream &UnknownIndex::dump(raw_ostream &out, int ind)
 {
-	assert(false);
-	return out;
+	out << "index: " << _node->stringof() << "\n";
+	indent(out, ind) << "indices: [\n";
+	for (auto &i : _indices)
+		i->dump(indent(out, ind + 1), ind + 1);
+	return indent(out, ind) << "]\n";
 }
 
 raw_ostream &ScopeStatement::dump(raw_ostream &out, int ind)

@@ -911,6 +911,10 @@ void LLVMGenerator::visit(RefExpr &n)
 	type->accept(*this);
 	llvm::PointerType *typeCg = (llvm::PointerType*)type->cgData<LLVMData>()->type;
 
+	RefExpr *owner = n.owner();
+	if (owner)
+		owner->accept(*this);
+
 	// if the ref holds a relative target
 	VarDecl *target = n.target();
 	if (target)
@@ -918,11 +922,8 @@ void LLVMGenerator::visit(RefExpr &n)
 		target->accept(*this);
 
 		// if the target has an 'owner' (that is, it is a member)
-		RefExpr *owner = n.owner();
-		if(owner)
+		if (n.refType() == RefExpr::Type::Member)
 		{
-			owner->accept(*this);
-
 			// assert that 'owner' is a struct (for now?)
 			Struct *targetType = dynamic_cast<Struct*>(owner->targetType()->resolveType());
 			assert(targetType);
@@ -942,21 +943,34 @@ void LLVMGenerator::visit(RefExpr &n)
 	}
 	else
 	{
-		// ref is absolute (ie, 'null')
-		size_t address = n.address();
-
-		if (address == 0)
-			cg->value = ConstantPointerNull::get(typeCg);
-		else
+		if (n.refType() == RefExpr::Type::Absolute)
 		{
-			TypeDecl *szt = dynamic_cast<TypeDecl*>(module->getDecl("size_t", true));
-			szt->accept(*this);
-			PrimitiveType *prim = dynamic_cast<PrimitiveType*>(szt->type());
-			prim->accept(*this);
-			IntegerType *sztCg = (IntegerType*)prim->cgData<LLVMData>()->type;
+			size_t address = n.address();
 
-			// TODO: typeCg is a pointer type, does this function expect the poitner TARGET type? docs unclear...
-			cg->value = Builder.CreateIntToPtr(ConstantInt::get(sztCg, (uint64_t)address), typeCg);
+			if (address == 0)
+				cg->value = ConstantPointerNull::get(typeCg);
+			else
+			{
+				TypeDecl *szt = dynamic_cast<TypeDecl*>(module->getDecl("size_t", true));
+				szt->accept(*this);
+				PrimitiveType *prim = dynamic_cast<PrimitiveType*>(szt->type());
+				prim->accept(*this);
+				IntegerType *sztCg = (IntegerType*)prim->cgData<LLVMData>()->type;
+
+				// TODO: typeCg is a pointer type, does this function expect the poitner TARGET type? docs unclear...
+				cg->value = Builder.CreateIntToPtr(ConstantInt::get(sztCg, (uint64_t)address), typeCg);
+			}
+		}
+		else if (n.refType() == RefExpr::Type::Index)
+		{
+			// assert that 'owner' is a tuple (for now?)
+			Tuple *targetType = dynamic_cast<Tuple*>(owner->targetType()->resolveType());
+			assert(targetType);
+
+			Type *t = targetType->cgData<LLVMData>()->type;
+			Value *v = owner->cgData<LLVMData>()->value;
+
+			cg->value = Builder.CreateStructGEP(t, v, n.element());
 		}
 	}
 }
@@ -1545,6 +1559,17 @@ void LLVMGenerator::visit(UnknownIndex &n)
 {
 	if (n.doneCodegen()) return;
 
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	n.source()->accept(*this);
+
+	for (auto i : n.indices())
+		i->accept(*this);
+
+	n.expr()->accept(*this);
+
+	cg->value = n.expr()->cgData<LLVMData>()->value;
+	cg->type = n.expr()->cgData<LLVMData>()->type;
 }
 
 void LLVMGenerator::visit(TypeDecl &n)

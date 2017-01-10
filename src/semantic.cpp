@@ -353,8 +353,20 @@ void Semantic::visit(RefExpr &n)
 
 	if (!n._type)
 	{
-		n._type = n._target->type()->asPointer();
-		assert(n._type);
+		if (n._refType == RefExpr::Type::Index)
+		{
+			Tuple *tup = dynamic_cast<Tuple*>(n._owner->targetType());
+			TypeExpr *ty = dynamic_cast<TypeExpr*>(tup->elements()[n._element]);
+			n._type = new PointerType(PtrType::LValue, ty, n.getLoc()); // TODO: is LValue correct? should it be the same as the owner?
+			n._type->accept(*this);
+		}
+		else
+		{
+			n._type = n._target->type()->asPointer();
+		}
+
+		if (!n._type)
+			error("file", n.getLine(), "Couldn't deduce type for expression %s.", n.stringof().c_str());
 	}
 	else
 		n._type->accept(*this);
@@ -597,6 +609,82 @@ void Semantic::visit(UnknownIndex &n)
 {
 	if (n.doneSemantic()) return;
 
+	n._node->accept(*this);
+
+	for (auto i : n._indices)
+		i->accept(*this);
+
+	Node *val = nullptr;
+	AmbiguousExpr *ambig = dynamic_cast<AmbiguousExpr*>(n._node);
+	if (ambig)
+		val = ambig->resolve();
+	else
+	{
+		val = dynamic_cast<Expr*>(n._node);
+		if (!val)
+			val = dynamic_cast<TypeExpr*>(n._node);
+	}
+	if (!val)
+		error("file", n.getLine(), "Can't index expression %s.", n._node->stringof().c_str());
+
+	Tuple *tup = dynamic_cast<Tuple*>(val);
+	if (tup)
+	{
+		// validate index
+		if (n._indices.length != 1)
+			error("file", n.getLine(), "Invalid tuple index.");
+		if (!n._indices[0]->type()->isIntegral())
+			error("file", n.getLine(), "Tuple index must be integral type.");
+
+		PrimitiveLiteralExpr *idx = dynamic_cast<PrimitiveLiteralExpr*>(n._indices[0]->constEval());
+		int64_t i = idx->getInt();
+		if (i < 0 || (size_t)i >= tup->elements().length)
+			error("file", n.getLine(), "Tuple index out of bounds.");
+
+		// get tuple element
+		n._result = tup->elements()[i];
+
+		return;
+	}
+
+	RefExpr *ref = dynamic_cast<RefExpr*>(val);
+	if (ref)
+	{
+		// make appropriate deref...
+		TypeExpr *ty = ref->targetType();
+
+		if (ty->asStruct())
+		{
+			error("file", n.getLine(), "TODO: struct can provide index operator...");
+		}
+		else if (ty->asTuple())
+		{
+			Tuple *tup = ty->asTuple();
+
+			// validate index
+			if (n._indices.length != 1)
+				error("file", n.getLine(), "Invalid tuple index.");
+			if (!n._indices[0]->type()->isIntegral())
+				error("file", n.getLine(), "Tuple index must be integral type.");
+
+			PrimitiveLiteralExpr *idx = dynamic_cast<PrimitiveLiteralExpr*>(n._indices[0]->constEval());
+			int64_t i = idx->getInt();
+			if (i < 0 || (size_t)i >= tup->elements().length)
+				error("file", n.getLine(), "Tuple index out of bounds.");
+
+			// create tuple ref...
+			n._result = new RefExpr(ref, i, n.getLoc());
+			n._result->accept(*this);
+		}
+		else
+		{
+			error("file", n.getLine(), "Can't index expression of type %s.", ty->stringof().c_str());
+		}
+
+		return;
+	}
+
+	error("file", n.getLine(), "Invalid index...");
 }
 
 void Semantic::visit(ScopeStatement &n)
