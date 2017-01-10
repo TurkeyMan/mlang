@@ -1,4 +1,5 @@
 #include "codegen_llvm.h"
+#include "error.h"
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -729,7 +730,22 @@ void LLVMGenerator::visit(AggregateLiteralExpr &n)
 {
 	if (n.doneCodegen()) return;
 
-	assert(false);
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	n.type()->accept(*this);
+
+	::Struct *s = n.type()->asStruct();
+	llvm::StructType *ty = dyn_cast<StructType>(s->cgData<LLVMData>()->type);
+
+	cg->value = UndefValue::get(ty);
+	unsigned int i = 0;
+	for (auto &e : n.items())
+	{
+		e->accept(*this);
+
+		unsigned int idx[1] = { i++ };
+		cg->value = Builder.CreateInsertValue(cg->value, e->cgData<LLVMData>()->value, idx);
+	}
 }
 
 void LLVMGenerator::visit(ArrayLiteralExpr &n)
@@ -1494,7 +1510,6 @@ void LLVMGenerator::visit(Tuple &n)
 		for (auto e : n.elements())
 		{
 			TypeExpr *t = dynamic_cast<TypeExpr*>(e);
-			assert(t);
 			t->accept(*this);
 			t = t->resolveType();
 
@@ -1507,29 +1522,21 @@ void LLVMGenerator::visit(Tuple &n)
 	}
 	else if (n.isExpr())
 	{
-		for (auto e : n.elements())
-		{
-			Expr *expr = dynamic_cast<Expr*>(e);
-			assert(expr);
-			expr->accept(*this);
-		}
-
 		TypeExpr *type = n.type();
 		type->accept(*this);
 
-		::Type *ty = type->cgData<LLVMData>()->type;
-		cg->value = Builder.CreateAlloca(ty);
+		cg->value = UndefValue::get(type->cgData<LLVMData>()->type);
 
 		auto elements = n.elements();
 		for (size_t i = 0; i < elements.length; ++i)
 		{
-			Value *member = Builder.CreateStructGEP(ty, cg->value, i);
-
 			Expr *expr = dynamic_cast<Expr*>(elements[i]);
+			expr->accept(*this);
+
 			Value *val = expr->cgData<LLVMData>()->value;
 
-			Builder.CreateStore(val, member);
-			// TODO: set alignment...
+			unsigned int idx[1] = { (unsigned int)i };
+			cg->value = Builder.CreateInsertValue(cg->value, val, idx);
 		}
 	}
 }
@@ -1602,19 +1609,36 @@ void LLVMGenerator::visit(VarDecl &n)
 				// already exists!!
 				assert(false);
 			}
+
+			TypeExpr *targetTy = n.targetType();
+
 			cg->value = TheModule->getOrInsertGlobal(n.name(), typeCg);
 			global = TheModule->getGlobalVariable(n.name());
-			global->setAlignment(n.targetType()->alignment());
+			global->setAlignment(targetTy->alignment());
 			global->setLinkage(GlobalValue::LinkageTypes::InternalLinkage);
 
+			llvm::Constant *constant = nullptr;
 			if (!n.init()->type()->isVoid())
 			{
 				n.init()->accept(*this);
 				llvm::Value *val = n.init()->cgData<LLVMData>()->value;
-				llvm::Constant *constant = llvm::dyn_cast<llvm::Constant>(val);
-
-				global->setInitializer(constant);
+				constant = llvm::dyn_cast<llvm::Constant>(val);
 			}
+			else
+			{
+				Type *ty = targetTy->cgData<LLVMData>()->type;
+				if (ty->isPointerTy())
+					constant = ConstantPointerNull::get(dyn_cast<llvm::PointerType>(ty));
+				else if (ty->isAggregateType())
+					constant = ConstantAggregateZero::get(ty);
+				else if (ty->isFloatingPointTy())
+					constant = ConstantFP::get(ty, 0.0);
+				else if (ty->isIntegerTy())
+					constant = ConstantInt::get(ty, 0);
+				else
+					assert(false);
+			}
+			global->setInitializer(constant);
 
 			Expr *expr = n.value();
 			expr->accept(*this);
@@ -1625,7 +1649,6 @@ void LLVMGenerator::visit(VarDecl &n)
 		}
 		else
 		{
-
 			AllocaInst *alloc = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
 			alloc->setAlignment(n.targetType()->alignment());
 
@@ -1636,17 +1659,11 @@ void LLVMGenerator::visit(VarDecl &n)
 				llvm::Value *val = n.init()->cgData<LLVMData>()->value;
 
 				// HAX: if assigning SizeT_Type to Ptr
-				if (n.type()->asPointer() && n.init()->type()->asPrimitive()->type() == SizeT_Type)
-				{
+				if (n.targetType()->asPointer() && n.init()->type()->asPrimitive() && n.init()->type()->asPrimitive()->type() == SizeT_Type)
 					val = Builder.CreateIntToPtr(val, typeCg);
-					StoreInst *store = Builder.CreateStore(val, cg->value, false);
-					store->setAlignment(alloc->getAlignment());
-				}
-				else
-				{
-					StoreInst *store = Builder.CreateStore(val, cg->value, false);
-					store->setAlignment(alloc->getAlignment());
-				}
+
+				StoreInst *store = Builder.CreateStore(val, cg->value, false);
+				store->setAlignment(alloc->getAlignment());
 			}
 
 			Expr *expr = n.value();
@@ -1655,6 +1672,7 @@ void LLVMGenerator::visit(VarDecl &n)
 	}
 }
 
+/*
 void LLVMGenerator::visit(PrototypeDecl &n)
 {
 	if (n.doneCodegen()) return;
@@ -1706,7 +1724,9 @@ void LLVMGenerator::visit(FunctionDecl &n)
 //	DISubprogram *SP = DBuilder->createFunction(
 //		FContext, P.getName(), StringRef(), Unit, LineNo,
 //		createFunctionType(TheFunction->arg_size(), Unit),
-//		false /* internal linkage */, true /* definition */, ScopeLine,
+//		false, // internal linkage
+//		true, // definition
+//		ScopeLine,
 //		DINode::FlagPrototyped, false);
 //	TheFunction->setSubprogram(SP);
 //
@@ -1770,18 +1790,12 @@ void LLVMGenerator::visit(FunctionDecl &n)
 //
 //	return nullptr;
 }
-
+*/
 
 
 //===----------------------------------------------------------------------===//
 // Code Generation
 //===----------------------------------------------------------------------===//
-
-Value *ErrorV(const char *Str)
-{
-	Error(Str);
-	return nullptr;
-}
 
 //Function *LLVMGenerator::getFunction(std::string Name)
 //{

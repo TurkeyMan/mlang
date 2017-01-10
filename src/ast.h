@@ -17,12 +17,8 @@ class ASTVisitor;
 
 using llvm::raw_ostream;
 
-template <typename T>
-using owner = std::unique_ptr<T>;
 using std::move;
 
-class Expr;
-owner<Expr> Error(const char *Str);
 
 //using string = std::basic_string<char, std::char_traits<char>, gc_allocator<char>>;
 //template <class K, class T, class P = std::less<K>>
@@ -145,6 +141,7 @@ class AmbiguousExpr;
 class PrimitiveType;
 class FunctionType;
 class PointerType;
+class Struct;
 
 using NodeList = List<Node*>;
 using ExprList = List<Expr*>;
@@ -171,7 +168,7 @@ class Node : public gc_cleanup
 	friend class Semantic;
 	friend class LLVMGenerator;
 public:
-	Node(SourceLocation loc = CurLoc) : loc(loc) {}
+	Node(SourceLocation loc) : loc(loc) {}
 	virtual ~Node()
 	{
 		if (destroyCodegen)
@@ -184,8 +181,9 @@ public:
 	// all nodes may have properties
 	virtual Node* getMember(const std::string &name);
 
-	int getLine() const { return loc.Line; }
-	int getCol() const { return loc.Col; }
+	SourceLocation getLoc() const { return loc; }
+	int getLine() const { return loc.line; }
+	int getCol() const { return loc.col; }
 
 	template <typename T>
 	T* cgData()
@@ -242,8 +240,8 @@ class Scope : public virtual Node
 	std::string mangleof() const override { assert(false); return std::string(); }
 
 public:
-	Scope(Scope *parent)
-		: Node(), _parentScope(parent)
+	Scope(Scope *parent, SourceLocation loc)
+		: Node(loc), _parentScope(parent)
 	{}
 
 	Scope *parentScope() const { return _parentScope; }
@@ -268,7 +266,7 @@ TypeNode* makeType(Scope *scope, Args&&... args)
 class Expr : public virtual Node
 {
 public:
-	Expr(SourceLocation loc = CurLoc) : Node(loc) {}
+	Expr(SourceLocation loc) : Node(loc) {}
 
 	virtual TypeExpr* type() = 0;
 
@@ -289,7 +287,7 @@ public:
 class TypeExpr : public virtual Node
 {
 public:
-	TypeExpr(SourceLocation loc = CurLoc) : Node(loc) {}
+	TypeExpr(SourceLocation loc) : Node(loc) {}
 
 	virtual Expr* init() const = 0;
 
@@ -301,6 +299,7 @@ public:
 	virtual Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const = 0;
 
 	virtual TypeExpr* resolveType() { return this; }
+	virtual const TypeExpr* resolveType() const { return this; }
 
 	//helpers
 	TypeExpr* resultType();
@@ -314,6 +313,8 @@ public:
 	const ::FunctionType* asFunction() const;
 	::PointerType* asPointer();
 	const ::PointerType* asPointer() const;
+	Struct* asStruct();
+	const Struct* asStruct() const;
 
 	bool isVoid() const;
 	bool isBoolean() const;
@@ -330,7 +331,7 @@ class AmbiguousExpr : public Expr, public TypeExpr
 	friend class Semantic;
 
 public:
-	AmbiguousExpr(SourceLocation loc = CurLoc)
+	AmbiguousExpr(SourceLocation loc)
 		: Expr(loc), TypeExpr(loc) {}
 
 	std::string mangleof() const override
@@ -365,8 +366,8 @@ class Statement : public virtual Node
 	friend class Semantic;
 public:
 
-	Statement()
-		: Node()
+	Statement(SourceLocation loc)
+		: Node(loc)
 	{}
 
 	virtual bool didReturn() const = 0;
@@ -382,8 +383,8 @@ class Module : public virtual Node, public Scope
 	StatementList moduleStatements;
 
 public:
-	Module(std::string filename, std::string name, StatementList moduleStatements)
-		: Node(), Scope(nullptr), _filename(move(filename)), _name(move(name)), moduleStatements(moduleStatements)
+	Module(std::string filename, std::string name, StatementList moduleStatements, SourceLocation loc)
+		: Node(loc), Scope(nullptr, loc), _filename(move(filename)), _name(move(name)), moduleStatements(moduleStatements)
 	{
 	}
 
@@ -416,8 +417,8 @@ public:
 	const std::string& name() const { return _name; }
 	const std::string& mangledName() const { return _mangledName; }
 
-	Declaration(std::string name)
-		: Statement(), _name(std::move(name))
+	Declaration(std::string name, SourceLocation loc)
+		: Statement(loc), _name(std::move(name))
 	{}
 
 	bool didReturn() const override { return false; }
@@ -432,8 +433,8 @@ class ModuleStatement : public Statement
 	std::string _name;
 
 public:
-	ModuleStatement(std::string name)
-		: Statement(), _name(move(name))
+	ModuleStatement(std::string name, SourceLocation loc)
+		: Node(loc), Statement(loc), _name(move(name))
 	{
 	}
 
@@ -458,8 +459,8 @@ class ExpressionStatement : public Statement
 	Expr *_expression;
 
 public:
-	ExpressionStatement(Expr *expression)
-		: Statement(), _expression(expression)
+	ExpressionStatement(Expr *expression, SourceLocation loc)
+		: Node(loc), Statement(loc), _expression(expression)
 	{
 	}
 
@@ -482,8 +483,8 @@ class ReturnStatement : public Statement
 	Expr *_expression;
 
 public:
-	ReturnStatement(Expr *expression)
-		: Statement(), _expression(expression)
+	ReturnStatement(Expr *expression, SourceLocation loc)
+		: Node(loc), Statement(loc), _expression(expression)
 	{
 	}
 
@@ -502,7 +503,7 @@ public:
 class ScopeStatement : public Statement, public Scope
 {
 	friend class Semantic;
-	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*);
+	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*, SourceLocation);
 
 	StatementList _statements;
 
@@ -511,8 +512,8 @@ class ScopeStatement : public Statement, public Scope
 	// TODO: scope attributes
 
 public:
-	ScopeStatement(StatementList statements, Scope *parentScope = nullptr)
-		: Statement(), Scope(parentScope), _statements(statements)
+	ScopeStatement(StatementList statements, Scope *parentScope, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(parentScope, loc), _statements(statements)
 	{}
 
 	StatementList statements() const { return _statements; }
@@ -537,8 +538,8 @@ class IfStatement : public Statement, public Scope
 	DeclList _initStatements;
 
 public:
-	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, DeclList initStatements = DeclList::empty())
-		: Scope(nullptr), _cond(cond), _then(thenStatements), _else(elseStatements), _initStatements(initStatements)
+	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, DeclList initStatements, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(nullptr, loc), _cond(cond), _then(thenStatements), _else(elseStatements), _initStatements(initStatements)
 	{}
 
 	Expr *cond() { return _cond; }
@@ -571,8 +572,8 @@ class LoopStatement : public Statement, public Scope
 	ScopeStatement* _body;
 
 public:
-	LoopStatement(DeclList iterators, Expr *cond, ExprList increments, ScopeStatement* body)
-		: Scope(nullptr), _iterators(iterators), _cond(cond), _increments(increments), _body(body)
+	LoopStatement(DeclList iterators, Expr *cond, ExprList increments, ScopeStatement* body, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(nullptr, loc), _iterators(iterators), _cond(cond), _increments(increments), _body(body)
 	{}
 
 	DeclList iterators() { return _iterators; }
@@ -614,9 +615,9 @@ class PrimitiveType : public TypeExpr
 	Expr *_init = nullptr;
 
 public:
-	static PrimitiveType* get(PrimType type) { return makeType<PrimitiveType>(nullptr, type); }
+	static PrimitiveType* get(PrimType type, SourceLocation loc) { return makeType<PrimitiveType>(nullptr, type, loc); }
 
-	PrimitiveType(PrimType type, SourceLocation loc = CurLoc) : TypeExpr(loc), _type(type) {}
+	PrimitiveType(PrimType type, SourceLocation loc) : Node(loc), TypeExpr(loc), _type(type) {}
 	~PrimitiveType() {}
 
 	PrimType type() const { return _type; }
@@ -655,8 +656,8 @@ class PointerType : public TypeExpr
 	Expr *_init = nullptr;
 
 public:
-	PointerType(PtrType type, TypeExpr *targetType, SourceLocation loc = CurLoc)
-		: TypeExpr(loc), _type(type), _pointerTarget(targetType) {}
+	PointerType(PtrType type, TypeExpr *targetType, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _type(type), _pointerTarget(targetType) {}
 	~PointerType() {}
 
 	PtrType ptrType() const { return _type; }
@@ -699,8 +700,8 @@ class Struct : public TypeExpr, public Scope
 	size_t _sizeof = 0, _alignment = 0;
 
 public:
-	Struct(StatementList members, SourceLocation loc = CurLoc)
-		: TypeExpr(loc), Scope(nullptr), _members(members)
+	Struct(StatementList members, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), Scope(nullptr, loc), _members(members)
 	{}
 
 	std::vector<DataMember>& dataMembers() { return _dataMembers; }
@@ -733,8 +734,8 @@ class FunctionType : public TypeExpr
 	TypeExprList _args = TypeExprList::empty();
 
 public:
-	FunctionType(TypeExpr *returnType, TypeExprList args, SourceLocation loc = CurLoc)
-		: TypeExpr(loc), _returnType(returnType), _args(args) {}
+	FunctionType(TypeExpr *returnType, TypeExprList args, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _returnType(returnType), _args(args) {}
 	~FunctionType() {}
 
 	Expr* init() const override { assert(false); return nullptr; }
@@ -771,8 +772,8 @@ protected:
 	TypeExpr *_type;
 
 public:
-	TypeDecl(std::string name, TypeExpr *type) // TODO: template args
-		: Declaration(move(name)), _type(type)
+	TypeDecl(std::string name, TypeExpr *type, SourceLocation loc) // TODO: template args
+		: Node(loc), Declaration(move(name), loc), _type(type)
 	{}
 
 	TypeExpr* type() { return _type; }
@@ -793,8 +794,8 @@ protected:
 	Expr *_value;
 
 public:
-	ValDecl(std::string name, TypeExpr *type, Expr *value)
-		: Declaration(move(name)), _type(type), _value(value)
+	ValDecl(std::string name, TypeExpr *type, Expr *value, SourceLocation loc)
+		: Node(loc), Declaration(move(name), loc), _type(type), _value(value)
 	{}
 
 	TypeExpr* type() { return _type; }
@@ -810,14 +811,14 @@ public:
 class VarDecl : public ValDecl
 {
 	friend class Semantic;
-	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*);
+	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*, SourceLocation);
 protected:
 	TypeExpr *_valType;
 	Expr *_init;
 
 public:
-	VarDecl(std::string name, TypeExpr *type, Expr *init)
-		: ValDecl(move(name), nullptr, nullptr), _valType(type), _init(init)
+	VarDecl(std::string name, TypeExpr *type, Expr *init, SourceLocation loc)
+		: Node(loc), ValDecl(move(name), nullptr, nullptr, loc), _valType(type), _init(init)
 	{}
 
 	TypeExpr* targetType() { return _valType; }
@@ -852,15 +853,15 @@ class PrimitiveLiteralExpr : public Expr
 	};
 
 public:
-	PrimitiveLiteralExpr(PrimType type, uint64_t v) : Expr(), _type(type), _typeExpr(PrimitiveType::get(type)), u(v) {}
-	PrimitiveLiteralExpr(PrimType type, int64_t v) : Expr(), _type(type), _typeExpr(PrimitiveType::get(type)), i(v) {}
-	PrimitiveLiteralExpr(PrimType type, double v) : Expr(), _type(type), _typeExpr(PrimitiveType::get(type)), f(v) {}
-	PrimitiveLiteralExpr(PrimType type, char32_t v) : Expr(), _type(type), _typeExpr(PrimitiveType::get(type)), c(v) {}
-	PrimitiveLiteralExpr(uint64_t v) : PrimitiveLiteralExpr(PrimType::u64, v) {}
-	PrimitiveLiteralExpr(int64_t v) : PrimitiveLiteralExpr(PrimType::i64, v) {}
-	PrimitiveLiteralExpr(double v) : PrimitiveLiteralExpr(PrimType::f64, v) {}
-	PrimitiveLiteralExpr(char32_t v) : PrimitiveLiteralExpr(PrimType::c32, v) {}
-	PrimitiveLiteralExpr(bool b) : PrimitiveLiteralExpr(PrimType::u1, b ? 1ull : 0ull) {}
+	PrimitiveLiteralExpr(PrimType type, uint64_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), u(v) {}
+	PrimitiveLiteralExpr(PrimType type, int64_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), i(v) {}
+	PrimitiveLiteralExpr(PrimType type, double v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), f(v) {}
+	PrimitiveLiteralExpr(PrimType type, char32_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), c(v) {}
+	PrimitiveLiteralExpr(uint64_t v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::u64, v, loc) {}
+	PrimitiveLiteralExpr(int64_t v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::i64, v, loc) {}
+	PrimitiveLiteralExpr(double v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::f64, v, loc) {}
+	PrimitiveLiteralExpr(char32_t v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::c32, v, loc) {}
+	PrimitiveLiteralExpr(bool b, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::u1, b ? 1ull : 0ull, loc) {}
 
 	PrimType primType() const { return _type; }
 	double getFloat() const { return f; }
@@ -886,10 +887,11 @@ class AggregateLiteralExpr : public Expr
 	ExprList _items;
 
 public:
-	AggregateLiteralExpr(ExprList items, TypeExpr *type = nullptr)
-		: Expr(), _type(type), _items(move(items)) {}
+	AggregateLiteralExpr(ExprList items, TypeExpr *type, SourceLocation loc)
+		: Node(loc), Expr(loc), _type(type), _items(move(items)) {}
 
 	TypeExpr* type() override { return _type; }
+	ExprList items() { return _items; }
 
 	std::string stringof() const override { assert(false); return std::string(); }
 	std::string mangleof() const override { assert(false); return std::string(); }
@@ -906,8 +908,8 @@ class ArrayLiteralExpr: public Expr
 	ExprList items;
 
 public:
-	ArrayLiteralExpr(ExprList items)
-		: Expr(), items(move(items)) {}
+	ArrayLiteralExpr(ExprList items, SourceLocation loc)
+		: Node(loc), Expr(loc), items(move(items)) {}
 
 	TypeExpr* type() override { return nullptr; }
 
@@ -936,8 +938,8 @@ class FunctionLiteralExpr : public Expr, public Scope
 	::FunctionType *_type = nullptr;
 
 public:
-	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType)
-		: Expr(), Scope(nullptr), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
+	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType, SourceLocation loc)
+		: Node(loc), Expr(loc), Scope(nullptr, loc), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
 	{}
 
 	::FunctionType* type() override { return _type; }
@@ -984,10 +986,10 @@ class RefExpr : public Expr
 	RefExpr *_owner;
 
 public:
-	RefExpr(VarDecl *target, RefExpr *owner = nullptr)
-		: Expr(), _type(nullptr), _target(target), _absolute(0), _owner(owner) {}
-	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType)
-		: Expr(), _type(new ::PointerType(ptrType, targetType)), _target(nullptr), _absolute(target), _owner(nullptr) {}
+	RefExpr(VarDecl *target, RefExpr *owner, SourceLocation loc)
+		: Node(loc), Expr(loc), _type(nullptr), _target(target), _absolute(0), _owner(owner) {}
+	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType, SourceLocation loc)
+		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _target(nullptr), _absolute(target), _owner(nullptr) {}
 
 	::PointerType* type() override { return _type; }
 	TypeExpr* targetType() const { return _type->targetType(); }
@@ -1013,8 +1015,8 @@ class DerefExpr : public Expr
 	Expr *_expr;
 
 public:
-	DerefExpr(Expr *expr)
-		: Expr(), _expr(expr) {}
+	DerefExpr(Expr *expr, SourceLocation loc)
+		: Node(loc), Expr(loc), _expr(expr) {}
 
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _expr->type()->asPointer()->targetType(); }
@@ -1036,8 +1038,8 @@ class TypeConvertExpr : public Expr
 	bool _implicit;
 
 public:
-	TypeConvertExpr(Expr *expr, TypeExpr *newType, bool implicit = true)
-		: Expr(), _expr(expr), _newType(newType), _implicit(implicit) {}
+	TypeConvertExpr(Expr *expr, TypeExpr *newType, bool implicit, SourceLocation loc)
+		: Node(loc), Expr(loc), _expr(expr), _newType(newType), _implicit(implicit) {}
 
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _newType; }
@@ -1063,8 +1065,8 @@ class UnaryExpr : public Expr
 	TypeExpr *_type = nullptr;
 
 public:
-	UnaryExpr(UnaryOp op, Expr *operand)
-		: Expr(), _op(op), _operand(operand) {}
+	UnaryExpr(UnaryOp op, Expr *operand, SourceLocation loc)
+		: Node(loc), Expr(loc), _op(op), _operand(operand) {}
 
 	UnaryOp op() { return _op; }
 	Expr* operand() { return _operand; }
@@ -1097,8 +1099,8 @@ class BinaryExpr : public Expr
 	TypeExpr *_type = nullptr;
 
 public:
-	BinaryExpr(BinOp op, Expr *lhs, Expr *rhs)
-		: Expr(), _op(op), _lhs(lhs), _rhs(rhs) {}
+	BinaryExpr(BinOp op, Expr *lhs, Expr *rhs, SourceLocation loc)
+		: Node(loc), Expr(loc), _op(op), _lhs(lhs), _rhs(rhs) {}
 
 	BinOp op() { return _op; }
 	Expr* lhs() { return _lhs; }
@@ -1122,8 +1124,8 @@ class CallExpr : public Expr
 	ExprList _callArgs;
 
 public:
-	CallExpr(Expr *func, ExprList callArgs)
-		: _func(func), _callArgs(callArgs)
+	CallExpr(Expr *func, ExprList callArgs, SourceLocation loc)
+		: Node(loc), Expr(loc), _func(func), _callArgs(callArgs)
 	{}
 
 	TypeExpr* type() override
@@ -1154,8 +1156,8 @@ class AssignExpr : public Expr
 	BinOp _op;
 
 public:
-	AssignExpr(Expr *target, Expr *expr, BinOp op = BinOp::None)
-		: _target(target), _expr(expr), _op(op)
+	AssignExpr(Expr *target, Expr *expr, BinOp op, SourceLocation loc)
+		: Node(loc), Expr(loc), _target(target), _expr(expr), _op(op)
 	{}
 
 	TypeExpr* type() override { return _target->type(); }
@@ -1179,8 +1181,8 @@ class BindExpr : public Expr
 	Expr *_expr;
 
 public:
-	BindExpr(Expr *target, Expr *expr)
-		: _target(target), _expr(expr)
+	BindExpr(Expr *target, Expr *expr, SourceLocation loc)
+		: Node(loc), Expr(loc), _target(target), _expr(expr)
 	{}
 
 	TypeExpr* type() override { return _target->type(); }
@@ -1207,8 +1209,8 @@ class Identifier : public AmbiguousExpr
 	TypeDecl *_type = nullptr;
 
 public:
-	Identifier(const std::string &name)
-		: AmbiguousExpr(), _name(std::move(name)) {}
+	Identifier(const std::string &name, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _name(std::move(name)) {}
 
 	const std::string &getName() const { return _name; }
 
@@ -1222,6 +1224,7 @@ public:
 
 	Expr* resolveExpr() override { return _var ? _var->value() : nullptr; }
 	TypeExpr* resolveType() override { return _type ? _type->type() : nullptr; }
+	const TypeExpr* resolveType() const override { return _type ? _type->type() : nullptr; }
 
 	// type overrides
 	std::string stringof() const override
@@ -1264,8 +1267,8 @@ class MemberLookup : public AmbiguousExpr
 	Node *_result;
 
 public:
-	MemberLookup(Node *node, std::string member)
-		: AmbiguousExpr(), _member(move(member)), _node(node) {}
+	MemberLookup(Node *node, std::string member, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _member(move(member)), _node(node) {}
 
 	Node* expr() const { return _result; }
 
@@ -1277,6 +1280,7 @@ public:
 
 	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
 	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
+	const TypeExpr* resolveType() const override { return dynamic_cast<const TypeExpr*>(_result); }
 
 	// type overrides
 	std::string stringof() const override
@@ -1323,8 +1327,8 @@ class Tuple : public AmbiguousExpr
 	Tuple *_init = nullptr;
 
 public:
-	Tuple(NodeList elements = NodeList::empty(), SourceLocation loc = CurLoc)
-		: AmbiguousExpr(loc), _elements(elements)
+	Tuple(NodeList elements, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _elements(elements)
 	{}
 
 	NodeList elements() const { return _elements; }
@@ -1338,6 +1342,7 @@ public:
 
 	Expr* resolveExpr() override { return this; }
 	TypeExpr* resolveType() override { return this; }
+	const TypeExpr* resolveType() const override { return this; }
 
 	// type overrides
 	std::string stringof() const override;
@@ -1364,38 +1369,6 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 
-//	TypeExprList types() { return _types; }
-//	Expr* init() const override { assert(false); return nullptr; }
-//
-//	size_t size() const override { return 0; }
-//	size_t alignment() const override { return 0; }
-//
-//	Node *getMember(const std::string &name) override { assert(false); return nullptr; }
-//
-//	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
-//	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
-//	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
-//
-//	void accept(ASTVisitor &v) override;
-//
-//	std::string stringof() const override
-//	{
-//		std::string r = "[ ";
-//		for (size_t i = 0; i < _types.length; ++i)
-//			r += (i > 0 ? std::string(",") : std::string()) + _types[i]->stringof();
-//		r += " ]";
-//		return r;
-//	}
-//	std::string mangleof() const override { assert(false); return std::string(); }
-//
-//	raw_ostream &dump(raw_ostream &out, int ind) override
-//	{
-//		out << "tuple: [\n";
-//		for (auto t : _types)
-//			t->dump(out, ind + 1);
-//		return indent(out, ind) << "]\n";
-//	}
-
 private:
 	void analyse();
 };
@@ -1410,8 +1383,8 @@ class UnknownIndex : public AmbiguousExpr
 	ExprList _indices;
 
 public:
-	UnknownIndex(Node *node, ExprList indices)
-		: AmbiguousExpr(), _node(node), _indices(indices) {}
+	UnknownIndex(Node *node, ExprList indices, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _node(node), _indices(indices) {}
 
 	Node* expr() const { return _result; }
 
@@ -1423,6 +1396,7 @@ public:
 
 	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
 	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
+	const TypeExpr* resolveType() const override { return dynamic_cast<const TypeExpr*>(_result); }
 
 	// type overrides
 	std::string stringof() const override
@@ -1465,7 +1439,7 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
-
+/*
 /// Prototype - This class represents the "prototype" for a function,
 /// which captures its name, and its argument names (thus implicitly the number
 /// of arguments the function takes), as well as if it is an operator.
@@ -1480,7 +1454,7 @@ class PrototypeDecl : public Declaration
 
 public:
 	PrototypeDecl(SourceLocation Loc, const std::string &Name, std::vector<std::string> Args, bool IsOperator = false, unsigned Prec = 0)
-		: Declaration(move(Name)), Args(std::move(Args)), IsOperator(IsOperator), Precedence(Prec), Line(Loc.Line)
+		: Declaration(move(Name), Loc), Args(std::move(Args)), IsOperator(IsOperator), Precedence(Prec), Line(Loc.line)
 	{}
 
 	const std::string &name() const { return _name; }
@@ -1526,8 +1500,9 @@ public:
 		return Body ? Body->dump(out, ind) : out << "null\n";
 	}
 };
+*/
 
-Statement* makeForEach(DeclList iterators, Expr *range, StatementList body);
+Statement* makeForEach(DeclList iterators, Expr *range, StatementList body, SourceLocation loc);
 
 template <typename TypeNode, typename... Args>
 struct MakeTypeHelper
@@ -1547,7 +1522,7 @@ struct MakeTypeHelper
 template <typename... Args>
 struct MakeTypeHelper<PrimitiveType, Args...>
 {
-	static PrimitiveType* makeType(Scope *scope, PrimType type);
+	static PrimitiveType* makeType(Scope *scope, PrimType type, SourceLocation loc);
 };
 
 
@@ -1586,6 +1561,8 @@ inline ::FunctionType* TypeExpr::asFunction() { return dynamic_cast<::FunctionTy
 inline const ::FunctionType* TypeExpr::asFunction() const { return dynamic_cast<const ::FunctionType*>(this); }
 inline ::PointerType* TypeExpr::asPointer() { return dynamic_cast<::PointerType*>(this); }
 inline const ::PointerType* TypeExpr::asPointer() const { return dynamic_cast<const ::PointerType*>(this); }
+inline Struct* TypeExpr::asStruct() { return dynamic_cast<Struct*>(this); }
+inline const Struct* TypeExpr::asStruct() const { return dynamic_cast<const Struct*>(this); }
 inline bool TypeExpr::isVoid() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && pt->type() == PrimType::v; }
 inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isBool(pt->type()); }
 inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }

@@ -1,4 +1,5 @@
 #include "semantic.h"
+#include "error.h"
 
 #include <stdio.h>
 
@@ -24,22 +25,6 @@ std::map<std::string, TypeExpr*> types;
 Mode mode = Mode::CompileAndLink;
 int opt = 0;
 
-SourceLocation CurLoc;
-SourceLocation LexLoc = { 1, 0 };
-
-
-/// Error* - These are little helper functions for error handling.
-std::unique_ptr<Expr> Error(const char *Str)
-{
-	fprintf(stderr, "Error: %s\n", Str);
-	return nullptr;
-}
-
-std::unique_ptr<PrototypeDecl> ErrorP(const char *Str)
-{
-	Error(Str);
-	return nullptr;
-}
 
 inline bool ends_with(std::string const & value, std::string const & ending)
 {
@@ -47,7 +32,7 @@ inline bool ends_with(std::string const & value, std::string const & ending)
 	return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
 
-StatementList parse(FILE *file);
+StatementList parse(FILE *file, std::string filename);
 
 extern "C" {
 	int main(int argc, const char *argv[])
@@ -146,16 +131,6 @@ extern "C" {
 		else
 			objFiles.push_back(outFile);
 
-		bool bFirst = true;
-		for (auto &file : srcFiles)
-		{
-			if(bFirst)
-				printf("%s", file.c_str());
-			else
-				printf("%s", (file + " ").c_str());
-		}
-		printf("\n");
-
 		curSrcFile = srcFiles[0];
 
 		// open source file
@@ -163,12 +138,12 @@ extern "C" {
 		fopen_s(&file, srcFiles[0].c_str(), "r");
 		if (!file)
 		{
-			printf("Can't open file: %s\n", srcFiles[0].c_str());
+			outputMessage("Can't open source file: %s\n", srcFiles[0].c_str());
 			return -1;
 		}
 
 		// parse the source
-		StatementList module = parse(file);
+		StatementList module = parse(file, srcFiles[0]);
 
 		// done with the file
 		fclose(file);
@@ -184,7 +159,7 @@ extern "C" {
 			fopen_s(&ast, astFile.c_str(), "w");
 			if (!file)
 			{
-				printf("Can't open ast file: %s\n", argv[3]);
+				outputMessage("Can't open ast file: %s", astFile.c_str());
 				return -1;
 			}
 			class OS : public llvm::raw_ostream

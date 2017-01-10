@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "astvisitor.h"
+#include "error.h"
 
 std::map<std::string, TypeExpr*> typesUsed;
 
@@ -59,23 +60,21 @@ void UnknownIndex::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
-void PrototypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
-void FunctionDecl::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 template <typename... Args>
-PrimitiveType* MakeTypeHelper<PrimitiveType, Args...>::makeType(Scope *scope, PrimType type)
+PrimitiveType* MakeTypeHelper<PrimitiveType, Args...>::makeType(Scope *scope, PrimType type, SourceLocation loc)
 {
 	auto t = typesUsed.find(primTypeMangle[(int)type]);
 	if (t != typesUsed.end())
 		return static_cast<PrimitiveType*>(t->second);
-	PrimitiveType *prim = new PrimitiveType(type);
+	PrimitiveType *prim = new PrimitiveType(type, loc);
 	typesUsed.insert({ primTypeMangle[(int)type], prim });
 	return prim;
 }
 
 
-Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body)
+Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, SourceLocation loc)
 {
 	assert(false); // TODO!!
 
@@ -84,9 +83,9 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body)
 
 	// assign void initialisation for counters (initialised at head of loop body)
 	for (auto &i : iterators)
-		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull);
+		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, loc);
 
-	VarDecl *r = new VarDecl("__loop_range", nullptr, range);
+	VarDecl *r = new VarDecl("__loop_range", nullptr, range, loc);
 	iterators.prepend(r);
 
 	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
@@ -107,7 +106,7 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body)
 
 	Expr *increment = nullptr; // __loop_range = __loop_range.popFront();
 
-	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body);
+	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body, loc);
 }
 
 
@@ -171,9 +170,9 @@ Node *Node::getMember(const std::string &name)
 Node *Expr::getMember(const std::string &name)
 {
 	if (name == "sizeof")
-		return new PrimitiveLiteralExpr(SizeT_Type, type()->size());
+		return new PrimitiveLiteralExpr(SizeT_Type, type()->size(), getLoc());
 	if (name == "alignof")
-		return new PrimitiveLiteralExpr(SizeT_Type, type()->alignment());
+		return new PrimitiveLiteralExpr(SizeT_Type, type()->alignment(), getLoc());
 	return Node::getMember(name);
 }
 
@@ -194,9 +193,9 @@ Node *TypeExpr::getMember(const std::string &name)
 	if (name == "init")
 		return init();
 	if (name == "sizeof")
-		return new PrimitiveLiteralExpr(SizeT_Type, size());
+		return new PrimitiveLiteralExpr(SizeT_Type, size(), getLoc());
 	if (name == "alignof")
-		return new PrimitiveLiteralExpr(SizeT_Type, alignment());
+		return new PrimitiveLiteralExpr(SizeT_Type, alignment(), getLoc());
 	return Node::getMember(name);
 }
 
@@ -242,71 +241,71 @@ Node *PrimitiveType::getMember(const std::string &name)
 	case PrimType::f64:
 	case PrimType::f128:
 		if (name == "infinity")
-			return new PrimitiveLiteralExpr(_type, magicNumbers2[0][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[0][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "nan")
-			return new PrimitiveLiteralExpr(_type, magicNumbers2[1][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[1][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "max")
-			return new PrimitiveLiteralExpr(_type, magicNumbers2[2][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[2][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "min_normal")
-			return new PrimitiveLiteralExpr(_type, magicNumbers2[3][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[3][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "epsilon")
-			return new PrimitiveLiteralExpr(_type, magicNumbers2[4][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(_type, magicNumbers2[4][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "dig")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[0][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[0][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "mant_dig")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[1][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[1][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "max_10_exp")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[2][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[2][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "max_exp")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[3][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[3][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "min_10_exp")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[4][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[4][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "min_exp")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[5][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[5][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "exp_bits")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[6][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[6][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		if (name == "mant_bits")
-			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[7][(int)_type - (int)PrimType::f16]);
+			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[7][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		break;
 	case PrimType::u8:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFULL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFULL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u16:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFULL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFULL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u32:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFULL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFULL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u64:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFFFFFFFFFULL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFFFFFFFFFULL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u128:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0ULL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::i8:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FLL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80LL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FLL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80LL, SourceLocation(-1));
 		break;
 	case PrimType::i16:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFLL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000LL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFLL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000LL, SourceLocation(-1));
 		break;
 	case PrimType::i32:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFLL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80000000LL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFLL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80000000LL, SourceLocation(-1));
 		break;
 	case PrimType::i64:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFFFFFFFFFLL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000000000000000LL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFFFFFFFFFLL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000000000000000LL, SourceLocation(-1));
 		break;
 	case PrimType::i128:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0LL);
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0LL);
+		if (name == "max") return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
+		if (name == "min") return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
 		break;
 	case PrimType::c8:
 	case PrimType::c16:
@@ -367,12 +366,12 @@ Expr* PrimitiveType::makeConversion(Expr *expr, TypeExpr *targetType, bool impli
 	{
 		if (_type == primt->_type)
 			return expr;
-		return new TypeConvertExpr(expr, targetType, implicit);
+		return new TypeConvertExpr(expr, targetType, implicit, expr->getLoc());
 	}
 
 	// TODO: can target construct from 'this'?
 
-	assert(false);
+	error("file", getLine(), "Can't convert ___ to ___.");
 	return nullptr;
 }
 
@@ -470,7 +469,7 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 		return expr;
 	}
 
-	Expr *targetConversion = new DerefExpr(expr);
+	Expr *targetConversion = new DerefExpr(expr, expr->getLoc());
 	return targetConversion->makeConversion(targetType);
 }
 bool PointerType::canPromote(PtrType to) const
@@ -737,14 +736,14 @@ Node *RefExpr::getMember(const std::string &name)
 	{
 		Declaration *decl = s->getDecl(name, true);
 		if (dynamic_cast<VarDecl*>(decl))
-			return new RefExpr((VarDecl*)decl, this);
+			return new RefExpr((VarDecl*)decl, this, getLoc());
 	}
 
 	r = target->getMember(name);
 	if (r)
 		return r;
 
-	DerefExpr *deref = new DerefExpr(this);
+	DerefExpr *deref = new DerefExpr(this, getLoc());
 	r = deref->getMember(name);
 	if (r)
 		return r;
@@ -945,7 +944,7 @@ TypeExpr* Tuple::type()
 			types = types.append(expr->type());
 		}
 
-		Tuple *r = new Tuple(types);
+		Tuple *r = new Tuple(types, SourceLocation(-1));
 		r->analyse();
 		_type = r;
 	}
@@ -967,7 +966,7 @@ Expr* Tuple::init() const
 			init = init.append(t->init());
 		}
 
-		Tuple *r = new Tuple(init);
+		Tuple *r = new Tuple(init, SourceLocation(-1));
 		r->_type = (Tuple*)this;
 		r->analyse();
 		((Tuple*)this)->_init = r;
@@ -977,21 +976,85 @@ Expr* Tuple::init() const
 
 bool Tuple::isSame(const TypeExpr *other) const
 {
-	assert(false);
-	return false;
+	const Tuple *t = dynamic_cast<const Tuple*>(other);
+	if (t == nullptr)
+		return false;
+	if (_elements.length != t->_elements.length)
+		return false;
+	for (size_t i = 0; i < _elements.length; ++i)
+	{
+		const TypeExpr *e1 = dynamic_cast<const TypeExpr*>(_elements[i]);
+		const TypeExpr *e2 = dynamic_cast<const TypeExpr*>(t->_elements[i]);
+		if (!e1 || !e2)
+			return false;
+		if (!e1->isSame(e2))
+			return false;
+	}
+	return true;
 }
 
 ConvType Tuple::convertible(const TypeExpr *target) const
 {
-	// test element-wise conversions to tuple and arrays
-	assert(false);
-	return ConvType::NoConversion;
+	const Tuple *t = dynamic_cast<const Tuple*>(target);
+	if (t == nullptr)
+		return ConvType::NoConversion;
+
+	// TODO: tuples can convert to arrays? structs?
+
+	if (_elements.length != t->_elements.length)
+		return ConvType::NoConversion;
+
+	ConvType conv = ConvType::Convertible;
+	for (size_t i = 0; i < _elements.length; ++i)
+	{
+		const TypeExpr *e1 = dynamic_cast<const TypeExpr*>(_elements[i]);
+		const TypeExpr *e2 = dynamic_cast<const TypeExpr*>(t->_elements[i]);
+		if (!e1 || !e2)
+			return ConvType::NoConversion;
+		ConvType c = e1->convertible(e2);
+		switch (c)
+		{
+			case ConvType::NoConversion:
+				return ConvType::NoConversion;
+			case ConvType::LosesPrecision:
+				if (conv != ConvType::OnlyExplicit)
+					conv = ConvType::LosesPrecision;
+				break;
+			case ConvType::OnlyExplicit:
+				conv = ConvType::OnlyExplicit;
+			default:
+				break;
+		}
+	}
+	return conv;
 }
 
 Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
 {
-	assert(false);
-	return nullptr;
+	Tuple *tup = dynamic_cast<Tuple*>(expr);
+
+	TypeExpr *type = expr->type();
+
+	if (type->isSame(targetType))
+		return expr;
+
+	ConvType conv = type->convertible(targetType);
+	if (conv == ConvType::NoConversion)
+		error("file", getLine(), "Can't convert %s to %s.", type->stringof().c_str(), targetType->stringof().c_str());
+	else if (implicit && conv == ConvType::OnlyExplicit)
+		error("file", getLine(), "Can't implicitly convert %s to %s. Use explicit cast.", type->stringof().c_str(), targetType->stringof().c_str());
+	else if (conv == ConvType::LosesPrecision)
+		emitWarning("file", getLine(), "Conversion from %s to %s loses precision.", type->stringof().c_str(), targetType->stringof().c_str());
+
+	NodeList nodes = NodeList::empty();
+	const Tuple *t = dynamic_cast<const Tuple*>(targetType);
+	for (size_t i = 0; i < _elements.length; ++i)
+	{
+		Expr *expr = dynamic_cast<Expr*>(tup->_elements[i]);
+		TypeExpr *ty = dynamic_cast<TypeExpr*>(t->_elements[i]);
+		nodes = nodes.append(expr->makeConversion(ty, implicit));
+	}
+	return new Tuple(nodes, expr->getLoc());
 }
 
 Node *Tuple::getMember(const std::string &name)

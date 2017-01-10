@@ -32,6 +32,7 @@
     <ClCompile Include="mlang.tab.cpp" />
     <ClCompile Include="src\ast.cpp" />
     <ClCompile Include="src\codegen_llvm.cpp" />
+    <ClCompile Include="src\error.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\semantic.cpp" />
   </ItemGroup>
@@ -42,6 +43,7 @@
     <ClInclude Include="src\astvisitor.h" />
     <ClInclude Include="src\codegen_llvm.h" />
     <ClInclude Include="src\common_llvm.h" />
+    <ClInclude Include="src\error.h" />
     <ClInclude Include="src\semantic.h" />
     <ClInclude Include="src\sourceloc.h" />
     <ClInclude Include="src\util.h" />

@@ -36,6 +36,4 @@ public:
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}
-	virtual void visit(PrototypeDecl &n) {}
-	virtual void visit(FunctionDecl &n) {}
 };

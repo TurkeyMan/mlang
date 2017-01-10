@@ -28,7 +28,7 @@ fn aa(x : SS) { return x.y+2; }
 
 fn f(x : int&)
 {
-	var tuptest = [ 10, 10.0 ];
+	var tuptest : [int, float] = [10, x];
 
 	x = byte.max;
 	x += 20;
@@ -46,7 +46,7 @@ fn f(x : int&)
 
 fn main(argc : long, poo : float) : int
 {
-	if(t : int = 1; t) return cast(double)t+2;
+	if(t : int = 1; t) return cast(double)t+10;
 	var s : int = 10;
 	argc/f(s);
 	return (~argc + argc*argc << 2) >= argc%2;
@@ -61,7 +61,7 @@ def I32 : int;						// typedef/alias
 def S : { var x : int; };			// struct
 def x(T) : T;						// template typedef/alias
 def x(S : size_t) : int[S];			// typed template param
-def x(Types...) : [ Types ];		// variadic template
+def x(Types...) : [Types];			// variadic template
 
 def f : void(int) = (x) { f(); };	// function
 //def f : void(x : int) {}			// function - shorthand
@@ -74,9 +74,9 @@ def f = (x) { return 0xA; };		// inferred function (ie, template)
 var x;								// variable
 var x = 10;							// infer type
 var x : int = 10;					// explicit type
-var x : int[] = [ 10, 20, 30 ];		// array
-var x : int[3] = [ 10, 20, 30 ];	// fixed array
-var x : [ int, float ] = [ 10, 1.0 ];// tuple
+var x : int[] = [10, 20, 30];		// array
+var x : int[3] = [10, 20, 30];		// fixed array
+var x : [int, float] = [10, 1.0];	// tuple
 var x = -10 + 20*2 + 3*(6-3);		// expressions
 
 def x = 10;							// literal, infer type
@@ -85,9 +85,9 @@ def x(U) : U = U(10);				// template literal
 
 
 // reference types
-var xref : int*;// raw ref
-var xref : int&;// borrowed ref
-//var xref : int^;// owned ref
+var xref : int*;	// raw ref
+var xref : int&;	// borrowed ref
+//var xref : int^;	// owned ref
 
 
 // type construction

@@ -145,6 +145,4 @@ public:
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
-	void visit(PrototypeDecl &n) override;
-	void visit(FunctionDecl &n) override;
 };
