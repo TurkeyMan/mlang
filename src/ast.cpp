@@ -1059,8 +1059,22 @@ Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) con
 
 Node *Tuple::getMember(const std::string &name)
 {
-	assert(false);
-	return nullptr;
+	if (name == "length")
+		return new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc());
+	if (isType())
+	{
+		if (name == "init")
+			return init();
+	}
+	if (isType() || isExpr())
+	{
+		// TODO: can we support these properties on mixed tuples?
+		if (name == "sizeof")
+			return new PrimitiveLiteralExpr(SizeT_Type, size(), getLoc());
+		if (name == "alignof")
+			return new PrimitiveLiteralExpr(SizeT_Type, alignment(), getLoc());
+	}
+	return Node::getMember(name);
 }
 
 std::string Tuple::stringof() const
