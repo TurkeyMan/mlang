@@ -186,6 +186,9 @@ public:
 	int getLine() const { return loc.line; }
 	int getCol() const { return loc.col; }
 
+	Expr* asExpr();
+	TypeExpr* asType();
+
 	template <typename T>
 	T* cgData()
 	{
@@ -282,6 +285,9 @@ public:
 
 	Node* getMember(const std::string &name) override;
 
+	bool isConstantInt();
+	int64_t getIntValue();
+
 //	raw_ostream &dump(raw_ostream &out, int ind) override {}
 };
 
@@ -300,7 +306,6 @@ public:
 	virtual Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const = 0;
 
 	virtual TypeExpr* resolveType() { return this; }
-	virtual const TypeExpr* resolveType() const { return this; }
 
 	//helpers
 	TypeExpr* resultType();
@@ -875,7 +880,7 @@ public:
 	PrimitiveType* type() override { return _typeExpr; }
 	PrimitiveLiteralExpr* constEval() override { return this; };
 
-	std::string stringof() const override { assert(false); return std::string(); }
+	std::string stringof() const override;
 	std::string mangleof() const override { assert(false); return std::string(); }
 
 	void accept(ASTVisitor &v) override;
@@ -904,29 +909,6 @@ public:
 	void accept(ASTVisitor &v) override;
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
-};
-
-class ArrayLiteralExpr: public Expr
-{
-	friend class Semantic;
-
-	ExprList items;
-
-public:
-	ArrayLiteralExpr(ExprList items, SourceLocation loc)
-		: Node(loc), Expr(loc), items(move(items)) {}
-
-	TypeExpr* type() override { return nullptr; }
-
-	std::string stringof() const override { assert(false); return std::string(); }
-	std::string mangleof() const override { assert(false); return std::string(); }
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		assert("!");
-		return out;
-	}
 };
 
 class FunctionLiteralExpr : public Expr, public Scope
@@ -993,32 +975,36 @@ public:
 	};
 
 private:
-	::PointerType *_type;
+	::PointerType *_type = nullptr;
 
-	RefExpr *_owner;
-	VarDecl *_target;
-	size_t _absolute;
-	size_t _element;
+	RefExpr *_owner = nullptr;
+	VarDecl *_target = nullptr;
+	size_t _absolute = 0;
+	size_t _element = 0;
+	Expr *_index = nullptr;
 
 	Type _refType;
 
 public:
 
 	RefExpr(VarDecl *target, RefExpr *owner, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(nullptr), _owner(owner), _target(target), _absolute(0), _element(0), _refType(owner ? Type::Member : Type::Direct) {}
+		: Node(loc), Expr(loc), _owner(owner), _target(target), _refType(owner ? Type::Member : Type::Direct) {}
 	RefExpr(RefExpr *owner, size_t element, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(nullptr), _owner(owner), _target(nullptr), _absolute(0), _element(element), _refType(Type::Index) {}
+		: Node(loc), Expr(loc), _owner(owner), _element(element), _refType(Type::Index) {}
+	RefExpr(RefExpr *owner, Expr *index, SourceLocation loc)
+		: Node(loc), Expr(loc), _owner(owner), _index(index), _refType(Type::Index) {}
 	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _owner(nullptr), _target(nullptr), _absolute(target), _element(0), _refType(Type::Absolute) {}
+		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _absolute(target), _refType(Type::Absolute) {}
 
 	::PointerType* type() override { return _type; }
 	TypeExpr* targetType() const { return _type->targetType(); }
 	Type refType() const { return _refType; }
 
-	VarDecl *target() { return _target; }
+	RefExpr* owner() { return _owner; }
+	VarDecl* target() { return _target; }
 	size_t address() { return _absolute; }
 	size_t element() { return _element; }
-	RefExpr *owner() { return _owner; }
+	Expr* index() { return _index; }
 
 	Node *getMember(const std::string &name) override;
 
@@ -1246,7 +1232,6 @@ public:
 
 	Expr* resolveExpr() override { return _var ? _var->value() : nullptr; }
 	TypeExpr* resolveType() override { return _type ? _type->type() : nullptr; }
-	const TypeExpr* resolveType() const override { return _type ? _type->type() : nullptr; }
 
 	// type overrides
 	std::string stringof() const override
@@ -1302,7 +1287,6 @@ public:
 
 	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
 	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
-	const TypeExpr* resolveType() const override { return dynamic_cast<const TypeExpr*>(_result); }
 
 	// type overrides
 	std::string stringof() const override
@@ -1342,6 +1326,10 @@ class Tuple : public AmbiguousExpr
 	NodeList _elements = NodeList::empty();
 	std::vector<size_t> _offsets;
 
+	Node *_element = nullptr;
+	ExprList _shape;
+	Expr *_numElements = nullptr;
+
 	bool allExpr = false, allTypes = false;
 	size_t _size = 0, _alignment = 0;
 
@@ -1351,9 +1339,23 @@ class Tuple : public AmbiguousExpr
 public:
 	Tuple(NodeList elements, SourceLocation loc)
 		: Node(loc), AmbiguousExpr(loc), _elements(elements)
+	{
+		// check if all elements are the same, if so, make it into an array...
+		//...
+	}
+	Tuple(Node *element, ExprList shape, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _element(element), _shape(shape)
 	{}
 
 	NodeList elements() const { return _elements; }
+
+	bool isSequence() const { return _element != nullptr; }
+	Node* seqElement() { return _element; }
+	ExprList shape() { return _shape; }
+	int dimensions() const { return _element == nullptr ? 1 : _shape.length; }
+	ptrdiff_t numElements(int dimension = -1) const;
+	bool isDynamicSize() const { return numElements() == -1; }
+	Expr* dynamicSize() { return _numElements; }
 
 	bool isType() const override { return allTypes; }
 	bool isExpr() const override { return allExpr; }
@@ -1364,7 +1366,6 @@ public:
 
 	Expr* resolveExpr() override { return this; }
 	TypeExpr* resolveType() override { return this; }
-	const TypeExpr* resolveType() const override { return this; }
 
 	// type overrides
 	std::string stringof() const override;
@@ -1395,17 +1396,17 @@ private:
 	void analyse();
 };
 
-class UnknownIndex : public AmbiguousExpr
+class Index : public AmbiguousExpr
 {
 	friend class Semantic;
 
 	Node *_node;
-	Node *_result;
+	Node *_result = nullptr;
 
 	ExprList _indices;
 
 public:
-	UnknownIndex(Node *node, ExprList indices, SourceLocation loc)
+	Index(Node *node, ExprList indices, SourceLocation loc)
 		: Node(loc), AmbiguousExpr(loc), _node(node), _indices(indices) {}
 
 	Node* source() { return _node; }
@@ -1413,15 +1414,14 @@ public:
 
 	Node* expr() const { return _result; }
 
-	bool isType() const override { return dynamic_cast<TypeExpr*>(_result) != nullptr; }
+	bool isType() const override { return _result->asType() != nullptr; }
 
 	// expr overrides
 	TypeExpr* type() override { return resolveExpr()->type(); }
 	Expr* constEval() override { return resolveExpr()->constEval(); };
 
-	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
-	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
-	const TypeExpr* resolveType() const override { return dynamic_cast<const TypeExpr*>(_result); }
+	Expr* resolveExpr() override { return _result->asExpr(); }
+	TypeExpr* resolveType() override { return _result->asType(); }
 
 	// type overrides
 	std::string stringof() const override
@@ -1556,11 +1556,27 @@ struct MakeTypeHelper<PrimitiveType, Args...>
 
 
 // inlines
+inline Expr* Node::asExpr()
+{
+	AmbiguousExpr *e = dynamic_cast<AmbiguousExpr*>(this);
+	if (e && e->isExpr())
+		return e->resolveExpr();
+	return dynamic_cast<Expr*>(this);
+}
+inline TypeExpr* Node::asType()
+{
+	AmbiguousExpr *e = dynamic_cast<AmbiguousExpr*>(this);
+	if (e && e->isType())
+		return e->resolveType();
+	return dynamic_cast<TypeExpr*>(this);
+}
+
+inline bool Expr::isConstantInt() { return type()->isIntegral() && constEval() != nullptr; }
+inline int64_t Expr::getIntValue() { return dynamic_cast<PrimitiveLiteralExpr*>(constEval())->getInt(); }
 inline Expr* Expr::makeConversion(TypeExpr *targetType, bool implicit)
 {
 	return type()->makeConversion(this, targetType, implicit);
 }
-
 
 inline TypeExpr* TypeExpr::resultType()
 {

@@ -283,17 +283,20 @@ unary	: unary_op value_prefix					{ $$ = new UnaryExpr($1, $2, SourceLocation(yy
 
 /*** primaries ***/
 
-unknown_primary		: IDENTIFIER				{ $$ = new Identifier($1, SourceLocation(yylineno)); }
-					| '[' unknown_list ']'		{ $$ = new Tuple($2, SourceLocation(yylineno)); }
-					| '(' unknown ')'			{ $$ = $2; }
-known_value_primary	: literal					{ $$ = $1; }
-					| function_literal			{ $$ = $1; }
-					| '[' known_value_list ']'	{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '(' known_value ')'		{ $$ = $2; }
-known_type_primary	: primitive					{ $$ = $1; }
-					| struct					{ $$ = $1; }
-					| '[' known_type_list ']'	{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '(' known_type ')'		{ $$ = $2; }
+unknown_primary		: IDENTIFIER						{ $$ = new Identifier($1, SourceLocation(yylineno)); }
+					| '[' unknown_list ']'				{ $$ = new Tuple($2, SourceLocation(yylineno)); }
+					| '[' unknown ';' value_list ']'	{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' unknown ')'					{ $$ = $2; }
+known_value_primary	: literal							{ $$ = $1; }
+					| function_literal					{ $$ = $1; }
+					| '[' known_value_list ']'			{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
+					| '[' known_value ';' value_list ']'{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' known_value ')'				{ $$ = $2; }
+known_type_primary	: primitive							{ $$ = $1; }
+					| struct							{ $$ = $1; }
+					| '[' known_type_list ']'			{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
+					| '[' known_type ';' value_list ']'	{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' known_type ')'				{ $$ = $2; }
 
 
 /*** postfix ***/

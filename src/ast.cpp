@@ -43,7 +43,6 @@ void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AggregateLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
-void ArrayLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionLiteralExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void RefExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void DerefExpr::accept(ASTVisitor &v) { v.visit(*this); }
@@ -56,7 +55,7 @@ void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void Identifier::accept(ASTVisitor &v) { v.visit(*this); }
 void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
 void Tuple::accept(ASTVisitor &v) { v.visit(*this); }
-void UnknownIndex::accept(ASTVisitor &v) { v.visit(*this); }
+void Index::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
@@ -671,6 +670,40 @@ raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 //** Expression nodes **
 //**********************
 
+std::string PrimitiveLiteralExpr::stringof() const
+{
+	switch (_type)
+	{
+	case PrimType::v:
+		return "void";
+	case PrimType::u1:
+		return u ? "true" : "false";
+	case PrimType::f16:
+	case PrimType::f32:
+	case PrimType::f64:
+	case PrimType::f128:
+		return std::to_string(f);
+	case PrimType::u8:
+	case PrimType::u16:
+	case PrimType::u32:
+	case PrimType::u64:
+	case PrimType::u128:
+		return std::to_string(u);
+	case PrimType::i8:
+	case PrimType::i16:
+	case PrimType::i32:
+	case PrimType::i64:
+	case PrimType::i128:
+		return std::to_string(i);
+	case PrimType::c8:
+	case PrimType::c16:
+	case PrimType::c32:
+		return std::to_string(c);
+	default:
+		assert(0); return std::string();
+	}
+}
+
 raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 {
 	switch (_type)
@@ -886,49 +919,133 @@ void Tuple::analyse()
 	_size = 0;
 	_alignment = 0;
 
-	allExpr = true, allTypes = _elements.length > 0;
-	for (auto e : _elements)
+	if (!isSequence())
 	{
-		size_t size = 0;
-		size_t align = 0;
+		TypeExpr *ty1 = _elements[0]->asType();
+		if (ty1)
+		{
+			bool same = false;
+			if (_elements.length == 1 && ty1)
+				same = true;
+			else
+			{
+				same = true;
+				for (size_t i = 1; i < _elements.length; ++i)
+				{
+					TypeExpr *ty2 = _elements[i]->asType();
+					if (!ty2 || !ty1->isSame(ty2))
+					{
+						same = false;
+						break;
+					}
+				}
+			}
+			if (same)
+			{
+				_element = _elements[0];
+				_shape = ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc()));
+				_elements = NodeList::empty();
+			}
+		}
+	}
 
-		Expr *expr = dynamic_cast<Expr*>(e);
+	if (isSequence())
+	{
+		// TODO: attempt to calculate constant shape?
+		//...
+
+		allExpr = false, allTypes = false;
+		Expr *expr = dynamic_cast<Expr*>(_element);
 		if (expr)
 		{
-			size = expr->type()->size();
-			align = expr->type()->alignment();
-
-			allTypes = false;
+			allExpr = true;
+			_alignment = expr->type()->alignment();
 		}
 		else
 		{
-			TypeExpr *type = dynamic_cast<TypeExpr*>(e);
+			TypeExpr *type = dynamic_cast<TypeExpr*>(_element);
 			if (type)
 			{
-				size = type->size();
-				align = type->alignment();
+				allTypes = true;
+				_alignment = type->alignment();
+			}
+		}
+	}
+	else
+	{
+		allExpr = true, allTypes = _elements.length > 0;
+		for (auto e : _elements)
+		{
+			size_t size = 0;
+			size_t align = 0;
 
-				allExpr = false;
+			Expr *expr = dynamic_cast<Expr*>(e);
+			if (expr)
+			{
+				size = expr->type()->size();
+				align = expr->type()->alignment();
+
+				allTypes = false;
 			}
 			else
 			{
-				allExpr = false;
-				allTypes = false;
+				TypeExpr *type = dynamic_cast<TypeExpr*>(e);
+				if (type)
+				{
+					size = type->size();
+					align = type->alignment();
 
-				// accept other nodes in tuples?
-				assert(false);
+					allExpr = false;
+				}
+				else
+				{
+					allExpr = false;
+					allTypes = false;
+
+					// accept other nodes in tuples?
+					assert(false);
+				}
 			}
+
+			_size = alignto(_size, align);
+			_offsets.push_back(_size);
+			_size += size;
+			_alignment = align > _alignment ? align : _alignment;
 		}
 
-		_size = alignto(_size, align);
-		_offsets.push_back(_size);
-		_size += size;
-		_alignment = align > _alignment ? align : _alignment;
+		_size = alignto(_size, _alignment);
 	}
-
-	_size = alignto(_size, _alignment);
 }
 
+ptrdiff_t Tuple::numElements(int dimension) const
+{
+	assert(dimension < dimensions());
+
+	if (_element == nullptr)
+		return _elements.length;
+
+	if (dimension < 0)
+	{
+		ptrdiff_t len = 1;
+		for (auto e : _shape)
+		{
+			if (!e->type()->isIntegral())
+				error("file", getLine(), "Array index must be integral!");
+			e = e->constEval();
+			if (!e)
+				return -1;
+			return (ptrdiff_t)e->getIntValue();
+		}
+		return len;
+	}
+
+	if (!_shape[dimension]->type()->isIntegral())
+		error("file", getLine(), "Array index must be integral!");
+	Expr *e = _shape[dimension]->constEval();
+	if (!e)
+		return -1;
+	return e->getIntValue();
+}
 TypeExpr* Tuple::type()
 {
 	if (!_type)
@@ -937,16 +1054,26 @@ TypeExpr* Tuple::type()
 		if (!allExpr)
 			return nullptr; // error?
 
-		NodeList types = NodeList::empty();
-		for (auto e : _elements)
+		if (isSequence())
 		{
-			Expr *expr = dynamic_cast<Expr*>(e);
-			types = types.append(expr->type());
+			Expr *expr = dynamic_cast<Expr*>(_element);
+			Tuple *r = new Tuple(expr->type(), _shape, SourceLocation(-1));
+			r->analyse();
+			_type = r;
 		}
+		else
+		{
+			NodeList types = NodeList::empty();
+			for (auto e : _elements)
+			{
+				Expr *expr = dynamic_cast<Expr*>(e);
+				types = types.append(expr->type());
+			}
 
-		Tuple *r = new Tuple(types, SourceLocation(-1));
-		r->analyse();
-		_type = r;
+			Tuple *r = new Tuple(types, SourceLocation(-1));
+			r->analyse();
+			_type = r;
+		}
 	}
 	return _type;
 }
@@ -959,17 +1086,28 @@ Expr* Tuple::init() const
 		if (!allTypes)
 			return nullptr; // error?
 
-		NodeList init = NodeList::empty();
-		for (auto e : _elements)
+		if (isSequence())
 		{
-			TypeExpr *t = dynamic_cast<TypeExpr*>(e);
-			init = init.append(t->init());
+			TypeExpr *t = dynamic_cast<TypeExpr*>(_element);
+			Tuple *r = new Tuple(t->init(), _shape, SourceLocation(-1));
+			r->_type = (Tuple*)this;
+			r->analyse();
+			((Tuple*)this)->_init = r;
 		}
+		else
+		{
+			NodeList init = NodeList::empty();
+			for (auto e : _elements)
+			{
+				TypeExpr *t = dynamic_cast<TypeExpr*>(e);
+				init = init.append(t->init());
+			}
 
-		Tuple *r = new Tuple(init, SourceLocation(-1));
-		r->_type = (Tuple*)this;
-		r->analyse();
-		((Tuple*)this)->_init = r;
+			Tuple *r = new Tuple(init, SourceLocation(-1));
+			r->_type = (Tuple*)this;
+			r->analyse();
+			((Tuple*)this)->_init = r;
+		}
 	}
 	return _init;
 }
@@ -979,15 +1117,44 @@ bool Tuple::isSame(const TypeExpr *other) const
 	const Tuple *t = dynamic_cast<const Tuple*>(other);
 	if (t == nullptr)
 		return false;
-	if (_elements.length != t->_elements.length)
-		return false;
-	for (size_t i = 0; i < _elements.length; ++i)
+
+	size_t d = dimensions();
+	if (d == t->dimensions())
 	{
-		const TypeExpr *e1 = dynamic_cast<const TypeExpr*>(_elements[i]);
-		const TypeExpr *e2 = dynamic_cast<const TypeExpr*>(t->_elements[i]);
-		if (!e1 || !e2)
+		for (size_t i = 0; i < dimensions(); ++i)
+		{
+			size_t count = numElements(i);
+			if (count == -1 || count != t->numElements(i))
+				return false;
+		}
+	}
+
+	const TypeExpr *e1 = nullptr, *e2 = nullptr;
+	if (_element)
+	{
+		e1 = _element->asType();
+		if (!e1)
 			return false;
-		if (!e1->isSame(e2))
+	}
+	if (t->_element)
+	{
+		e2 = t->_element->asType();
+		if (!e2)
+			return false;
+	}
+
+	if (e1 && e2)
+		return e1->isSame(e2);
+
+	// arbitrary tuple?
+	size_t count = numElements(0);
+	for (size_t i = 0; i < count; ++i)
+	{
+		const TypeExpr *t1 = e1 ? e1 : _elements[i]->asType();
+		const TypeExpr *t2 = e2 ? e2 : t->_elements[i]->asType();
+		if (!t1 || !t2)
+			return false;
+		if (!t1->isSame(t2))
 			return false;
 	}
 	return true;
@@ -999,19 +1166,46 @@ ConvType Tuple::convertible(const TypeExpr *target) const
 	if (t == nullptr)
 		return ConvType::NoConversion;
 
-	// TODO: tuples can convert to arrays? structs?
+	// TODO: tuples can convert to structs?
 
-	if (_elements.length != t->_elements.length)
-		return ConvType::NoConversion;
-
-	ConvType conv = ConvType::Convertible;
-	for (size_t i = 0; i < _elements.length; ++i)
+	size_t d = dimensions();
+	if (d == t->dimensions())
 	{
-		const TypeExpr *e1 = dynamic_cast<const TypeExpr*>(_elements[i]);
-		const TypeExpr *e2 = dynamic_cast<const TypeExpr*>(t->_elements[i]);
-		if (!e1 || !e2)
+		for (size_t i = 0; i < dimensions(); ++i)
+		{
+			size_t count = numElements(i);
+			if (count == -1 || count != t->numElements(i))
+				return ConvType::NoConversion;
+		}
+	}
+
+	const TypeExpr *e1 = nullptr, *e2 = nullptr;
+	if (_element)
+	{
+		e1 = _element->asType();
+		if (!e1)
 			return ConvType::NoConversion;
-		ConvType c = e1->convertible(e2);
+	}
+	if (t->_element)
+	{
+		e2 = t->_element->asType();
+		if (!e2)
+			return ConvType::NoConversion;
+	}
+
+	if (e1 && e2)
+		return e1->convertible(e2);
+
+	// arbitrary tuple?
+	ConvType conv = ConvType::Convertible;
+	size_t count = numElements(0);
+	for (size_t i = 0; i < count; ++i)
+	{
+		const TypeExpr *t1 = e1 ? e1 : _elements[i]->asType();
+		const TypeExpr *t2 = e2 ? e2 : t->_elements[i]->asType();
+		if (!t1 || !t2)
+			return ConvType::NoConversion;
+		ConvType c = t1->convertible(t2);
 		switch (c)
 		{
 			case ConvType::NoConversion:
@@ -1046,21 +1240,39 @@ Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) con
 	else if (conv == ConvType::LosesPrecision)
 		emitWarning("file", getLine(), "Conversion from %s to %s loses precision.", type->stringof().c_str(), targetType->stringof().c_str());
 
-	NodeList nodes = NodeList::empty();
 	const Tuple *t = dynamic_cast<const Tuple*>(targetType);
-	for (size_t i = 0; i < _elements.length; ++i)
+
+	if (tup->_element && t->_element)
 	{
-		Expr *expr = dynamic_cast<Expr*>(tup->_elements[i]);
-		TypeExpr *ty = dynamic_cast<TypeExpr*>(t->_elements[i]);
+		// convert only the array element
+		Expr *e = tup->_element->asExpr();
+		Tuple *r = new Tuple(e->makeConversion(t->_element->asType()), tup->shape(), expr->getLoc());
+		r->analyse();
+		return r;
+	}
+
+	NodeList nodes = NodeList::empty();
+	size_t count = tup->numElements(0);
+	for (size_t i = 0; i < count; ++i)
+	{
+		// TODO: optimize by not recalculating _element each cycle...
+		Expr *expr = (tup->_element ? tup->_element : tup->_elements[i])->asExpr();
+		TypeExpr *ty = (t->_element ? t->_element : t->_elements[i])->asType();
 		nodes = nodes.append(expr->makeConversion(ty, implicit));
 	}
-	return new Tuple(nodes, expr->getLoc());
+	Tuple *r = new Tuple(nodes, expr->getLoc());
+	r->analyse();
+	return r;
 }
 
 Node *Tuple::getMember(const std::string &name)
 {
-	if (name == "length")
+	if (name == "length" && dimensions() == 1)
+	{
+		if (_element)
+			return _shape[0];
 		return new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc());
+	}
 	if (isType())
 	{
 		if (name == "init")
@@ -1080,13 +1292,29 @@ Node *Tuple::getMember(const std::string &name)
 std::string Tuple::stringof() const
 {
 	std::string s = "[ ";
-	bool first = true;
-	for (auto &e : _elements)
+	if (isSequence())
 	{
-		if (!first)
-			s.append(", ");
-		first = false;
-		s.append(e->stringof());
+		s.append(_element->stringof());
+		s.append("; ");
+		bool first = true;
+		for (auto &i : _shape)
+		{
+			if (!first)
+				s.append(", ");
+			first = false;
+			s.append(i->stringof());
+		}
+	}
+	else
+	{
+		bool first = true;
+		for (auto &e : _elements)
+		{
+			if (!first)
+				s.append(", ");
+			first = false;
+			s.append(e->stringof());
+		}
 	}
 	s.append(" ]");
 	return std::move(s);
@@ -1099,12 +1327,12 @@ raw_ostream &Tuple::dump(raw_ostream &out, int ind)
 	return indent(out, ind) << "]\n";
 }
 
-Node *UnknownIndex::getMember(const std::string &name)
+Node *Index::getMember(const std::string &name)
 {
 	return dynamic_cast<AmbiguousExpr*>(_result)->resolve()->getMember(name);
 }
 
-raw_ostream &UnknownIndex::dump(raw_ostream &out, int ind)
+raw_ostream &Index::dump(raw_ostream &out, int ind)
 {
 	out << "index: " << _node->stringof() << "\n";
 	indent(out, ind) << "indices: [\n";

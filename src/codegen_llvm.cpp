@@ -748,12 +748,6 @@ void LLVMGenerator::visit(AggregateLiteralExpr &n)
 	}
 }
 
-void LLVMGenerator::visit(ArrayLiteralExpr &n)
-{
-	if (n.doneCodegen()) return;
-
-}
-
 void LLVMGenerator::visit(FunctionLiteralExpr &n)
 {
 	if (n.doneCodegen()) return;
@@ -967,10 +961,26 @@ void LLVMGenerator::visit(RefExpr &n)
 			Tuple *targetType = dynamic_cast<Tuple*>(owner->targetType()->resolveType());
 			assert(targetType);
 
-			Type *t = targetType->cgData<LLVMData>()->type;
-			Value *v = owner->cgData<LLVMData>()->value;
+			if (targetType->isSequence())
+			{
+				Expr *index = n.index();
+				index->accept(*this);
 
-			cg->value = Builder.CreateStructGEP(t, v, n.element());
+				Type *t = targetType->seqElement()->asType()->cgData<LLVMData>()->type;
+				Value *v = owner->cgData<LLVMData>()->value;
+				Value *i = index->cgData<LLVMData>()->value;
+
+				// gotta cast pointers to arrays to pointers to elements to index elements
+				v = Builder.CreatePointerCast(v, llvm::PointerType::getUnqual(t));
+				cg->value = Builder.CreateGEP(t, v, i);
+			}
+			else
+			{
+				Type *t = targetType->cgData<LLVMData>()->type;
+				Value *v = owner->cgData<LLVMData>()->value;
+
+				cg->value = Builder.CreateStructGEP(t, v, n.element());
+			}
 		}
 	}
 }
@@ -1519,20 +1529,37 @@ void LLVMGenerator::visit(Tuple &n)
 
 	if (n.isType())
 	{
-		// gather member types
-		std::vector<Type*> elements;
-		for (auto e : n.elements())
+		if (n.isSequence())
 		{
-			TypeExpr *t = dynamic_cast<TypeExpr*>(e);
+			TypeExpr *t = dynamic_cast<TypeExpr*>(n.seqElement());
 			t->accept(*this);
-			t = t->resolveType();
+
+			for (auto e : n.shape())
+				e->accept(*this);
 
 			Type *ty = t->cgData<LLVMData>()->type;
-			elements.push_back(ty);
+			if (!n.isDynamicSize())
+				cg->type = ArrayType::get(ty, n.numElements());
+			else
+				cg->type = ty;
 		}
+		else
+		{
+			// gather member types
+			std::vector<Type*> elements;
+			for (auto e : n.elements())
+			{
+				TypeExpr *t = dynamic_cast<TypeExpr*>(e);
+				t->accept(*this);
+				t = t->resolveType();
 
-		// make LLVM struct
-		cg->type = StructType::get(ctx, elements);
+				Type *ty = t->cgData<LLVMData>()->type;
+				elements.push_back(ty);
+			}
+
+			// make LLVM struct
+			cg->type = StructType::get(ctx, elements);
+		}
 	}
 	else if (n.isExpr())
 	{
@@ -1541,21 +1568,37 @@ void LLVMGenerator::visit(Tuple &n)
 
 		cg->value = UndefValue::get(type->cgData<LLVMData>()->type);
 
-		auto elements = n.elements();
-		for (size_t i = 0; i < elements.length; ++i)
+		if (n.isSequence())
 		{
-			Expr *expr = dynamic_cast<Expr*>(elements[i]);
+			Expr *expr = dynamic_cast<Expr*>(n.seqElement());
 			expr->accept(*this);
 
 			Value *val = expr->cgData<LLVMData>()->value;
 
-			unsigned int idx[1] = { (unsigned int)i };
-			cg->value = Builder.CreateInsertValue(cg->value, val, idx);
+			for (ptrdiff_t i = 0; i < n.numElements(); ++i)
+			{
+				unsigned int idx[1] = { (unsigned int)i };
+				cg->value = Builder.CreateInsertValue(cg->value, val, idx);
+			}
+		}
+		else
+		{
+			auto elements = n.elements();
+			for (size_t i = 0; i < elements.length; ++i)
+			{
+				Expr *expr = dynamic_cast<Expr*>(elements[i]);
+				expr->accept(*this);
+
+				Value *val = expr->cgData<LLVMData>()->value;
+
+				unsigned int idx[1] = { (unsigned int)i };
+				cg->value = Builder.CreateInsertValue(cg->value, val, idx);
+			}
 		}
 	}
 }
 
-void LLVMGenerator::visit(UnknownIndex &n)
+void LLVMGenerator::visit(Index &n)
 {
 	if (n.doneCodegen()) return;
 
@@ -1674,7 +1717,15 @@ void LLVMGenerator::visit(VarDecl &n)
 		}
 		else
 		{
-			AllocaInst *alloc = Builder.CreateAlloca(typeCg, nullptr, n.name() + ".addr");
+			Expr *arrayLen = nullptr;
+			Tuple *tup = dynamic_cast<Tuple*>(n.targetType());
+			if (tup && tup->isSequence() && tup->isDynamicSize())
+			{
+				arrayLen = tup->dynamicSize();
+				arrayLen->accept(*this);
+			}
+
+			AllocaInst *alloc = Builder.CreateAlloca(typeCg, arrayLen ? arrayLen->cgData<LLVMData>()->value : nullptr, n.name() + ".addr");
 			alloc->setAlignment(n.targetType()->alignment());
 
 			cg->value = alloc;

@@ -19,7 +19,6 @@ public:
 	virtual void visit(::FunctionType &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
 	virtual void visit(AggregateLiteralExpr &n) {}
-	virtual void visit(ArrayLiteralExpr &n) {}
 	virtual void visit(FunctionLiteralExpr &n) {}
 	virtual void visit(RefExpr &n) {}
 	virtual void visit(DerefExpr &n) {}
@@ -32,7 +31,7 @@ public:
 	virtual void visit(Identifier &n) {}
 	virtual void visit(MemberLookup &n) {}
 	virtual void visit(Tuple &n) {}
-	virtual void visit(UnknownIndex &n) {}
+	virtual void visit(Index &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}

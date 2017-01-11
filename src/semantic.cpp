@@ -277,12 +277,6 @@ void Semantic::visit(AggregateLiteralExpr &n)
 	assert(false);
 }
 
-void Semantic::visit(ArrayLiteralExpr &n)
-{
-	if (n.doneSemantic()) return;
-
-}
-
 void Semantic::visit(FunctionLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
@@ -356,9 +350,18 @@ void Semantic::visit(RefExpr &n)
 		if (n._refType == RefExpr::Type::Index)
 		{
 			Tuple *tup = dynamic_cast<Tuple*>(n._owner->targetType());
-			TypeExpr *ty = dynamic_cast<TypeExpr*>(tup->elements()[n._element]);
-			n._type = new PointerType(PtrType::LValue, ty, n.getLoc()); // TODO: is LValue correct? should it be the same as the owner?
-			n._type->accept(*this);
+			if (tup->isSequence())
+			{
+				TypeExpr *ty = dynamic_cast<TypeExpr*>(tup->_element);
+				n._type = new PointerType(PtrType::LValue, ty, n.getLoc()); // TODO: is LValue correct? should it be the same as the owner?
+				n._type->accept(*this);
+			}
+			else
+			{
+				TypeExpr *ty = dynamic_cast<TypeExpr*>(tup->elements()[n._element]);
+				n._type = new PointerType(PtrType::LValue, ty, n.getLoc()); // TODO: is LValue correct? should it be the same as the owner?
+				n._type->accept(*this);
+			}
 		}
 		else
 		{
@@ -597,15 +600,30 @@ void Semantic::visit(Tuple &n)
 	for (auto e : n._elements)
 		e->accept(*this);
 
+	if (n._element)
+		n._element->accept(*this);
+
+	for (auto e : n._shape)
+		e->accept(*this);
+
 	n.analyse();
 
 	if (n.isExpr())
 		n.type()->accept(*this);
 	if (n.isType())
 		n.init()->accept(*this);
+
+	if (n.isDynamicSize())
+	{
+		n._numElements = n._shape[0];
+		for (size_t i = 1; i < n._shape.length; ++i)
+			n._numElements = new BinaryExpr(BinOp::Mul, n._numElements, n._shape[1], n.getLoc());
+		n._numElements = n._numElements->makeConversion(PrimitiveType::get(SizeT_Type, n.getLoc()), false);
+		n._numElements->accept(*this);
+	}
 }
 
-void Semantic::visit(UnknownIndex &n)
+void Semantic::visit(Index &n)
 {
 	if (n.doneSemantic()) return;
 
@@ -630,20 +648,45 @@ void Semantic::visit(UnknownIndex &n)
 	Tuple *tup = dynamic_cast<Tuple*>(val);
 	if (tup)
 	{
-		// validate index
-		if (n._indices.length != 1)
-			error("file", n.getLine(), "Invalid tuple index.");
-		if (!n._indices[0]->type()->isIntegral())
-			error("file", n.getLine(), "Tuple index must be integral type.");
+		if (tup->isSequence())
+		{
+			// validate index
+			if (n._indices.length != tup->dimensions())
+				error("file", n.getLine(), "Array index has incorrect number of dimensions.");
+			for (size_t i = 0; i < n._indices.length; ++i)
+			{
+				Expr *index = n._indices[i];
 
-		PrimitiveLiteralExpr *idx = dynamic_cast<PrimitiveLiteralExpr*>(n._indices[0]->constEval());
-		int64_t i = idx->getInt();
-		if (i < 0 || (size_t)i >= tup->elements().length)
-			error("file", n.getLine(), "Tuple index out of bounds.");
+//				// HACK: REMOVE ME!!! cast all indices to size_t in semantic!
+//				i = i->makeConversion(PrimitiveType::get(SizeT_Type, n.getLoc()), true);
+//				i->accept(*this);
 
-		// get tuple element
-		n._result = tup->elements()[i];
+				if (!index->type()->isIntegral())
+					error("file", n.getLine(), "Array index must be integral type.");
 
+				int64_t offset = index->getIntValue();
+				if (offset < 0 || (size_t)offset >= tup->numElements(i))
+					error("file", n.getLine(), "Array index out of bounds.");
+			}
+
+			// get array element
+			n._result = tup->seqElement();
+		}
+		else
+		{
+			// validate index
+			if (n._indices.length != 1)
+				error("file", n.getLine(), "Invalid tuple index.");
+			if (!n._indices[0]->type()->isIntegral())
+				error("file", n.getLine(), "Tuple index must be integral type.");
+
+			int64_t i = n._indices[0]->getIntValue();
+			if (i < 0 || (size_t)i >= tup->elements().length)
+				error("file", n.getLine(), "Tuple index out of bounds.");
+
+			// get tuple element
+			n._result = tup->elements()[i];
+		}
 		return;
 	}
 
@@ -661,20 +704,59 @@ void Semantic::visit(UnknownIndex &n)
 		{
 			Tuple *tup = ty->asTuple();
 
-			// validate index
-			if (n._indices.length != 1)
-				error("file", n.getLine(), "Invalid tuple index.");
-			if (!n._indices[0]->type()->isIntegral())
-				error("file", n.getLine(), "Tuple index must be integral type.");
+			if (tup->isSequence())
+			{
+				// validate index
+				if (n._indices.length != tup->_shape.length)
+					error("file", n.getLine(), "Array index has incorrect number of dimensions.");
+				for (auto &i : n._indices)
+				{
+					// HACK: REMOVE ME!!! cast all indices to size_t in semantic!
+					i = i->makeConversion(PrimitiveType::get(SizeT_Type, n.getLoc()), true);
+					i->accept(*this);
 
-			PrimitiveLiteralExpr *idx = dynamic_cast<PrimitiveLiteralExpr*>(n._indices[0]->constEval());
-			int64_t i = idx->getInt();
-			if (i < 0 || (size_t)i >= tup->elements().length)
-				error("file", n.getLine(), "Tuple index out of bounds.");
+					if (!i->type()->isIntegral())
+						error("file", n.getLine(), "Array index must be integral type.");
+				}
 
-			// create tuple ref...
-			n._result = new RefExpr(ref, i, n.getLoc());
-			n._result->accept(*this);
+				// generate array offset
+				Expr *index = n._indices[0];
+				if (n._indices.length > 1)
+				{
+					// matrix indexing requires offset calculation...
+					Expr *stride = tup->_shape[0];
+					for (size_t i = 1; i < n._indices.length; ++i)
+					{
+						Expr *mul = new BinaryExpr(BinOp::Mul, n._indices[i], stride, n.getLoc());
+						index = new BinaryExpr(BinOp::Add, index, mul, n.getLoc());
+						if (i < n._indices.length - 1)
+							stride = new BinaryExpr(BinOp::Mul, stride, tup->_shape[i], n.getLoc());
+					}
+					index->accept(*this);
+				}
+
+				// create array index...
+				n._result = new RefExpr(ref, index, n.getLoc());
+				n._result->accept(*this);
+			}
+			else
+			{
+				// validate index
+				if (n._indices.length != 1)
+					error("file", n.getLine(), "Expected 1-dimensional index.");
+				Expr *e = n._indices[0]->constEval();
+				if (!e)
+					error("file", n.getLine(), "Tuple index must be constant.");
+				if (!e->type()->isIntegral())
+					error("file", n.getLine(), "Tuple index must be integral type.");
+				int64_t i = e->getIntValue();
+				if (i < 0 || (size_t)i >= tup->elements().length)
+					error("file", n.getLine(), "Tuple index out of bounds.");
+
+				// create tuple ref...
+				n._result = new RefExpr(ref, i, n.getLoc());
+				n._result->accept(*this);
+			}
 		}
 		else
 		{
@@ -865,7 +947,7 @@ void Semantic::visit(VarDecl &n)
 			PrimitiveType *pt = n._init->type()->asPrimitive();
 			if (!pt || pt->type() != PrimType::v)
 			{
-				n._init = n._init->makeConversion(n._valType);
+				n._init = n._init->makeConversion(n._valType->resolveType());
 				n._init->accept(*this);
 			}
 		}

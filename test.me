@@ -31,6 +31,11 @@ fn f(x : int&)
 	var tuptest : [int, float] = [10, x];
 	tuptest[0] = 10;
 
+	var arr : [long; 3] = [10, 20, 30];
+	arr[x] = 100;
+	arr[0] = [100; 3][2];
+
+
 	x = byte.max;
 	x += 20;
 

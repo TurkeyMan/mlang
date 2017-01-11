@@ -40,7 +40,6 @@ public:
 	void visit(FunctionType &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(AggregateLiteralExpr &n) override;
-	void visit(ArrayLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
 	void visit(RefExpr &n) override;
 	void visit(DerefExpr &n) override;
@@ -53,7 +52,7 @@ public:
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &n) override;
-	void visit(UnknownIndex &n) override;
+	void visit(Index &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
