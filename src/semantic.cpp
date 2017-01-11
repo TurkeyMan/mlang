@@ -259,6 +259,24 @@ void Semantic::visit(Struct &n)
 void Semantic::visit(FunctionType &n)
 {
 	if (n.doneSemantic()) return;
+
+	if (n._args.length > 0)
+	{
+		pushScope(nullptr);
+
+		for (size_t i = 0; i < n._args.length; ++i)
+		{
+			n._args[i]->accept(*this);
+			n._argTypes = n._argTypes.append(n._args[i]->type()->asPointer()->targetType());
+		}
+
+		popScope();
+	}
+	else
+	{
+		for (size_t i = 0; i < n._argTypes.length; ++i)
+			n._argTypes[i]->accept(*this);
+	}
 }
 
 void Semantic::visit(PrimitiveLiteralExpr &n)
@@ -665,7 +683,7 @@ void Semantic::visit(Index &n)
 					error("file", n.getLine(), "Array index must be integral type.");
 
 				int64_t offset = index->getIntValue();
-				if (offset < 0 || (size_t)offset >= tup->numElements(i))
+				if (offset < 0 || (ptrdiff_t)offset >= tup->numElements(i))
 					error("file", n.getLine(), "Array index out of bounds.");
 			}
 
@@ -929,11 +947,15 @@ void Semantic::visit(VarDecl &n)
 	if (!n._valType && !n._init)
 		assert(false);// , "var statement needs either type or init value!");
 
-	Declaration *decl = scope()->getDecl(n._name, true);
-	if (decl)
+	Scope *s = scope();
+	if (s)
 	{
-		// already declared!
-		return;
+		Declaration *decl = s->getDecl(n._name, true);
+		if (decl)
+		{
+			// already declared!
+			return;
+		}
 	}
 
 	if (n._init)
@@ -961,12 +983,15 @@ void Semantic::visit(VarDecl &n)
 	n._type = new PointerType(PtrType::LValue, n._valType, n.getLoc());
 	n._type->accept(*this);
 
-	Node *owner = scope();
-	if (!dynamic_cast<Struct*>(owner))
+	if (s)
 	{
-		n._value = new RefExpr(&n, nullptr, n.getLoc());
-		n._value->accept(*this);
-	}
+		Node *owner = scope();
+		if (!dynamic_cast<Struct*>(owner))
+		{
+			n._value = new RefExpr(&n, nullptr, n.getLoc());
+			n._value->accept(*this);
+		}
 
-	scope()->addDecl(n._name, &n);
+		scope()->addDecl(n._name, &n);
+	}
 }

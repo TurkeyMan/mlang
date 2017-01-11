@@ -1,6 +1,7 @@
 #include "ast.h"
 #include "astvisitor.h"
 #include "error.h"
+#include "string.h"
 
 std::map<std::string, TypeExpr*> typesUsed;
 
@@ -368,6 +369,13 @@ Expr* PrimitiveType::makeConversion(Expr *expr, TypeExpr *targetType, bool impli
 		return new TypeConvertExpr(expr, targetType, implicit, expr->getLoc());
 	}
 
+	PointerType *ptrt = targetType->asPointer();
+	if (ptrt)
+	{
+		if (isIntegral())
+			return new TypeConvertExpr(expr, targetType, implicit, expr->getLoc());
+	}
+
 	// TODO: can target construct from 'this'?
 
 	error("file", getLine(), "Can't convert ___ to ___.");
@@ -581,11 +589,11 @@ bool FunctionType::isSame(const TypeExpr *other) const
 		return false;
 	if (!_returnType->isSame(ft->_returnType))
 		return false;
-	if (_args.length != ft->_args.length)
+	if (_argTypes.length != ft->_argTypes.length)
 		return false;
-	for (size_t i = 0; i < _args.length; ++i)
+	for (size_t i = 0; i < _argTypes.length; ++i)
 	{
-		if (!_args[i]->isSame(ft->_args[i]))
+		if (!_argTypes[i]->isSame(ft->_argTypes[i]))
 			return false;
 	}
 	return true;
@@ -606,8 +614,8 @@ std::string FunctionType::stringof() const
 {
 	std::string r = _returnType ? _returnType->stringof() : std::string("???");
 	r += "(";
-	for (size_t i = 0; i < _args.length; ++i)
-		r += (i > 0 ? std::string(",") : std::string()) + _args[i]->stringof();
+	for (size_t i = 0; i < _argTypes.length; ++i)
+		r += (i > 0 ? std::string(",") : std::string()) + _argTypes[i]->stringof();
 	r += ")";
 	return r;
 }
@@ -624,7 +632,7 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 	else
 		out << "???\n";
 	indent(out, ind) << "args: (\n";
-	for (auto a : _args)
+	for (auto a : _argTypes)
 		a->dump(indent(out, ind + 1), ind + 1);
 	return indent(out, ind) << ")\n";
 }
@@ -911,9 +919,126 @@ raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+Tuple* Tuple::makeStringLiteral(const char *str, SourceLocation loc)
+{
+	NodeList s = NodeList::empty();
+	std::vector<size_t> offsets;
+
+	PrimType ty = PrimType::c8;
+
+	size_t len = strlen(str) - 1;
+	if (str[len] == 'c')
+		ty = PrimType::c8, --len;
+	else if (str[len] == 'w')
+		ty = PrimType::c16, --len;
+	else if (str[len] == 'd')
+		ty = PrimType::c32, --len;
+
+	offsets.reserve(len);
+
+	bool escape = str[0] == '\"';
+
+	for (size_t i = 1; i < len;)
+	{
+		char32_t c;
+		i += utfDecode(str + i, &c);
+
+		if (escape && c == '\\')
+		{
+			switch (str[i++])
+			{
+				case '\'':	c = '\'';	break;
+				case '"':	c = '\"';	break;
+				case '?':	c = '\?';	break;
+				case '\\':	c = '\\';	break;
+				case '0':	c = '\0';	break;
+				case 'a':	c = '\a';	break;
+				case 'b':	c = '\b';	break;
+				case 'f':	c = '\f';	break;
+				case 'n':	c = '\n';	break;
+				case 'r':	c = '\r';	break;
+				case 't':	c = '\t';	break;
+				case 'v':	c = '\v';	break;
+				case 'x':
+				{
+					char h = toHex(str[i]); ++i;
+					char l = toHex(str[i]); ++i;
+					if (h >= 16 || l >= 16)
+						error("file", loc.line, "Invalid hexadecimal character.");
+					c = (h << 4) | l;
+					break;
+				}
+				case 'u':
+				{
+					char16_t hh = toHex(str[i]); ++i; char16_t hl = toHex(str[i]); ++i;
+					char16_t lh = toHex(str[i]); ++i; char16_t ll = toHex(str[i]); ++i;
+					if (hh >= 16 || hl >= 16 || lh >= 16 || ll >= 16)
+						error("file", loc.line, "Invalid hexadecimal character.");
+					c = (hh << 12) | (hl << 8) | (lh << 4) | ll;
+					break;
+				}
+				case 'U':
+				{
+					char16_t hhh = toHex(str[i]); ++i; char16_t hhl = toHex(str[i]); ++i;
+					char16_t hlh = toHex(str[i]); ++i; char16_t hll = toHex(str[i]); ++i;
+					char16_t lhh = toHex(str[i]); ++i; char16_t lhl = toHex(str[i]); ++i;
+					char16_t llh = toHex(str[i]); ++i; char16_t lll = toHex(str[i]); ++i;
+					if (hhh >= 16 || hhl >= 16 || hlh >= 16 || hll >= 16 || lhh >= 16 || lhl >= 16 || llh >= 16 || lll >= 16)
+						error("file", loc.line, "Invalid hexadecimal character.");
+					c = (hhh << 28) | (hhl << 24) | (hlh << 20) | (hll << 16) | (lhh << 12) | (lhl << 8) | (llh << 4) | lll;
+					break;
+				}
+			}
+		}
+
+		if (ty == PrimType::c8)
+		{
+			char buffer[6];
+			size_t count = utfEncode(c, buffer);
+			for (size_t j = 0; j < count; ++j)
+			{
+				offsets.push_back(s.length);
+				s = s.append(new PrimitiveLiteralExpr(ty, (char32_t)buffer[j], loc));
+			}
+		}
+		else if (ty == PrimType::c16)
+		{
+			char16_t buffer[3];
+			size_t count = utfEncode(c, buffer);
+			for (size_t j = 0; j < count; ++j)
+			{
+				offsets.push_back(s.length);
+				s = s.append(new PrimitiveLiteralExpr(ty, (char32_t)buffer[j], loc));
+			}
+		}
+		else if (ty == PrimType::c32)
+		{
+			offsets.push_back(s.length);
+			s = s.append(new PrimitiveLiteralExpr(ty, c, loc));
+		}
+		else
+			assert(false);
+	}
+	len = s.length;
+
+	Tuple *r = new Tuple(s, loc);
+
+	r->_size = len;
+	r->_alignment = 1;
+	r->allExpr = true;
+	r->_offsets = std::move(offsets);
+
+	r->_type = new Tuple(PrimitiveType::get(ty, loc), ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, len, loc)), loc);
+
+	return r;
+}
+
 void Tuple::analyse()
 {
 #define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
+
+	if (_alignment != 0)
+		return; // already done?
 
 	// compose the struct
 	_size = 0;

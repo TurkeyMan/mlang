@@ -41,6 +41,7 @@ static std::string filename;
 }
 
 %token MODULE STATIC
+%token EXTERN
 %token DEF VAR
 %token FN STRUCT
 %token CONST
@@ -65,7 +66,7 @@ static std::string filename;
 %type <expr> known_value value known_value_primary known_value_postfix value_postfix known_value_prefix value_prefix known_value_infix1 value_infix1 known_value_infix2 value_infix2 known_value_infix3 value_infix3 known_value_infix4 value_infix4 known_value_infix5 value_infix5 known_value_infix6 value_infix6 known_value_infix7 value_infix7 known_value_infix8 value_infix8 known_value_infix9 value_infix9 known_value_infix10 value_infix10 known_value_infix11 value_infix11 known_value_infix12 value_infix12 value_assign
 %type <exprList> value_list known_value_list assign_value_list parameters array
 
-%type <type> primitive struct struct_def ref
+%type <type> primitive struct function struct_def ref
 %type <type> known_type type known_type_primary known_type_postfix type_postfix known_type_prefix known_type_infix1 known_type_infix2 known_type_infix3 known_type_infix4 known_type_infix5 known_type_infix6 known_type_infix7 known_type_infix8 known_type_infix9 known_type_infix10 known_type_infix11 known_type_infix12
 %type <typeExprList> known_type_list  // type_list
 
@@ -119,6 +120,13 @@ var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 					| var_decl_list ',' var_decl				{ $$ = $1.append($3); }
 var_decl_assign_list: var_decl_assign							{ $$ = DeclList::empty().append($1); }
 					| var_decl_assign_list ',' var_decl_assign	{ $$ = $1.append($3); }
+
+//decl_attr			: EXTERN
+//					| PUBLIC
+//					| PRIVATE
+//					| EXTERN '(' IDENTIFIER ')'
+//decl_attrs		: decl_attr
+//					| decl_attrs decl_attr
 
 unknown_list		: unknown									{ $$ = NodeList::empty().append($1); }
 					| unknown_list ',' unknown					{ $$ = $1.append($3); }
@@ -189,7 +197,7 @@ literal		: NUL		{ $$ = new PrimitiveLiteralExpr(SizeT_Type, 0ull, SourceLocation
 			| FLOAT		{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
 			| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1, SourceLocation(yylineno)); }
 			| BOOL		{ $$ = new PrimitiveLiteralExpr((bool)$1, SourceLocation(yylineno)); }
-//			| STRING	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
+			| STRING	{ $$ = Tuple::makeStringLiteral($1, SourceLocation(yylineno)); }
 
 primitive	: VOID		{ $$ = PrimitiveType::get(PrimType::v, SourceLocation(yylineno)); }
 			| U1		{ $$ = PrimitiveType::get(PrimType::u1, SourceLocation(yylineno)); }
@@ -263,6 +271,9 @@ struct_def				: '{' '}'												{ $$ = new Struct(StatementList::empty(), Sou
 						| '{' struct_statements '}'								{ $$ = new Struct($2, SourceLocation(yylineno)); }
 struct					: STRUCT struct_def										{ $$ = $2; }
 
+function				: FN function_arguments									{ $$ = new ::FunctionType(PrimitiveType::get(PrimType::v, SourceLocation(yylineno)), $2, SourceLocation(yylineno)); }
+						| FN function_arguments ':' type						{ $$ = new ::FunctionType($4, $2, SourceLocation(yylineno)); }
+
 function_literal_inner	: function_arguments '{' '}'							{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr, SourceLocation(yylineno)); }
 						| function_arguments '{' code_statements '}'			{ $$ = new FunctionLiteralExpr($3, $1, nullptr, SourceLocation(yylineno)); }
 						| function_arguments ':' type '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3, SourceLocation(yylineno)); }
@@ -294,6 +305,7 @@ known_value_primary	: literal							{ $$ = $1; }
 					| '(' known_value ')'				{ $$ = $2; }
 known_type_primary	: primitive							{ $$ = $1; }
 					| struct							{ $$ = $1; }
+					| function							{ $$ = $1; }
 					| '[' known_type_list ']'			{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
 					| '[' known_type ';' value_list ']'	{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
 					| '(' known_type ')'				{ $$ = $2; }
@@ -303,13 +315,13 @@ known_type_primary	: primitive							{ $$ = $1; }
 
 unknown_postfix		: unknown_primary			{ $$ = $1; }
 					| member					{ $$ = $1; }
-					| unknown_postfix array		{ $$ = new UnknownIndex($1, $2, SourceLocation(yylineno)); }
+					| unknown_postfix array		{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
 known_value_postfix	: known_value_primary		{ $$ = $1; }
 					| call						{ $$ = $1; }
-					| known_value_postfix array	{ $$ = new UnknownIndex($1, $2, SourceLocation(yylineno)); }
+					| known_value_postfix array	{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
 known_type_postfix	: known_type_primary		{ $$ = $1; }
 					| ref						{ $$ = $1; }
-					| known_type_postfix array	{ $$ = new UnknownIndex($1, $2, SourceLocation(yylineno)); }
+					| known_type_postfix array	{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
 
 value_postfix		: known_value_postfix		{ $$ = $1; }
 					| unknown_postfix			{ $$ = $1; /* Check/fix category */ }

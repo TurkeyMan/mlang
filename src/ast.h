@@ -739,10 +739,13 @@ class FunctionType : public TypeExpr
 	friend class Semantic;
 
 	TypeExpr *_returnType = nullptr;
-	TypeExprList _args = TypeExprList::empty();
+	TypeExprList _argTypes = TypeExprList::empty();
+	DeclList _args = DeclList::empty();
 
 public:
 	FunctionType(TypeExpr *returnType, TypeExprList args, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _returnType(returnType), _argTypes(args) {}
+	FunctionType(TypeExpr *returnType, DeclList args, SourceLocation loc)
 		: Node(loc), TypeExpr(loc), _returnType(returnType), _args(args) {}
 	~FunctionType() {}
 
@@ -758,7 +761,7 @@ public:
 	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	TypeExpr* returnType() const { return _returnType; }
-	TypeExprList argTypes() const { return _args; }
+	TypeExprList argTypes() const { return _argTypes; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -1346,6 +1349,8 @@ public:
 	Tuple(Node *element, ExprList shape, SourceLocation loc)
 		: Node(loc), AmbiguousExpr(loc), _element(element), _shape(shape)
 	{}
+
+	static Tuple* makeStringLiteral(const char *string, SourceLocation loc);
 
 	NodeList elements() const { return _elements; }
 

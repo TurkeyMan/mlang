@@ -10,11 +10,31 @@ long long htoi(const char *text)
 	long long v = 0;
 	while(*text)
 	{
-		v <<= 4;
-		if(*text >= '0' && *text <= '9')
+		if(*text != '_')
+		{
+			v <<= 4;
+			if(*text >= '0' && *text <= '9')
+				v |= *text - '0';
+			else
+				v |= 10 + (*text | 0x20) - 'a';
+		}
+		++text;
+	}
+	return v;
+}
+
+long long btoi(const char *text)
+{
+	if(text[0] == '0' && text[1] == 'b')
+		text += 2;
+	long long v = 0;
+	while(*text)
+	{
+		if(*text != '_')
+		{
+			v <<= 1;
 			v |= *text - '0';
-		else
-			v |= 10 + (*text | 0x20) - 'a';
+		}
 		++text;
 	}
 	return v;
@@ -41,6 +61,7 @@ D			[0-9]
 L			[a-zA-Z_]
 I			[0-9a-zA-Z_]
 H			[a-fA-F0-9]
+B			[01]
 E			[Ee][+-]?{D}+
 
 %%
@@ -49,6 +70,8 @@ E			[Ee][+-]?{D}+
 
 module		{ return MODULE; }
 static		{ return STATIC; }
+
+extern		{ return EXTERN; }
 
 def			{ return DEF; }
 var			{ return VAR; }
@@ -139,20 +162,21 @@ is			{ return IS; }
 ">>="		{ return ASREQ; }
 ">>>="		{ return LSREQ; }
 
-\"(\\.|[^\\"])*\" { yylval.sval = _strdup(yytext); return STRING; }
-\`(\\.|[^\\`])*\` { yylval.sval = _strdup(yytext); return STRING; }
-\'(\\.|[^\\'])*\' { yylval.ival = charval(yytext); return CHAR; }
+\"(\\.|[^\n"])*\"[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
+\`(\\.|[^\n`])*\`[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
+\'(\\.|[^\n'])*\'[cwd]? { yylval.ival = charval(yytext); return CHAR; }
 
 null			{ yylval.ival = 0; return NUL; }
 
 true			{ yylval.ival = 1; return BOOL; }
 false			{ yylval.ival = 0; return BOOL; }
 
-{D}+\.{D}+{E}	{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+\.{D}+		{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+{E}			{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+			{ yylval.ival = atoi(yytext); return INT; }
-"0x"{H}+		{ yylval.ival = htoi(yytext); return INT; }
+{D}+\.{D}+{E}		{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+\.{D}+			{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+{E}				{ yylval.fval = atof(yytext); return FLOAT; }
+{D}+				{ yylval.ival = atoi(yytext); return INT; }
+"0x"{H}({H}|_{H})*	{ yylval.ival = htoi(yytext); return INT; }
+"0b"{B}({B}|_{B})*	{ yylval.ival = btoi(yytext); return INT; }
 
 {L}{I}*			{ yylval.sval = _strdup(yytext); return IDENTIFIER; }
 
