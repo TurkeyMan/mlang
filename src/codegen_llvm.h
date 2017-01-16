@@ -32,14 +32,20 @@ class LLVMGenerator;
 
 struct LLVMData
 {
-	llvm::Value *value = nullptr;
-	llvm::Type *type = nullptr;
-	llvm::DIScope *scope = nullptr;
+	union {
+		llvm::Value *value = nullptr;
+		llvm::Type *type;
+	};
+	union {
+		llvm::DIType *divalue = nullptr;
+		llvm::DIType *ditype;
+	};
+	llvm::DIScope *discope = nullptr;
 
 	~LLVMData()
 	{
-		if (value)
-			delete value;
+//		if (value)
+//			delete value;
 //		if (type)
 //			delete type; // TODO: dunno how to clean up llvm::Types? O_o
 //		if (scope)

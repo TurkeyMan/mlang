@@ -62,6 +62,7 @@ LLVMGenerator::LLVMGenerator(Compiler &compiler)
 	{
 		DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, module.second->filename(), module.second->directory(), "M-Lang Compiler", compiler.opt > 0, "", 0);
 		module.second->setCodegenData(new ModuleInfo(cu));
+		module.second->cgData<LLVMData>()->discope = cu;
 	}
 }
 
@@ -598,35 +599,81 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	switch (n.type())
 	{
 	case PrimType::v:
-		cg->type = Type::getVoidTy(ctx); break;
+		cg->type = Type::getVoidTy(ctx);
+//		cg->type = DBuilder->create
+		break;
 	case PrimType::u1:
-		cg->type = Type::getInt1Ty(ctx); break;
+		cg->type = Type::getInt1Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("bool", 1, 1, dwarf::DW_ATE_boolean);
+		break;
 	case PrimType::i8:
+		cg->type = Type::getInt8Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("byte", 8, 8, dwarf::DW_ATE_signed);
+		break;
 	case PrimType::u8:
+		cg->type = Type::getInt8Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("ubyte", 8, 8, dwarf::DW_ATE_unsigned);
+		break;
 	case PrimType::c8:
-		cg->type = Type::getInt8Ty(ctx); break;
+		cg->type = Type::getInt8Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("char", 8, 8, dwarf::DW_ATE_UTF);
+		break;
 	case PrimType::i16:
+		cg->type = Type::getInt16Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("short", 16, 16, dwarf::DW_ATE_signed);
+		break;
 	case PrimType::u16:
+		cg->type = Type::getInt16Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("ushort", 16, 16, dwarf::DW_ATE_unsigned);
+		break;
 	case PrimType::c16:
-		cg->type = Type::getInt16Ty(ctx); break;
+		cg->type = Type::getInt16Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("wchar", 16, 16, dwarf::DW_ATE_UTF);
+		break;
 	case PrimType::i32:
+		cg->type = Type::getInt32Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("int", 32, 32, dwarf::DW_ATE_signed);
+		break;
 	case PrimType::u32:
+		cg->type = Type::getInt32Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("uint", 32, 32, dwarf::DW_ATE_unsigned);
+		break;
 	case PrimType::c32:
-		cg->type = Type::getInt32Ty(ctx); break;
+		cg->type = Type::getInt32Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("dchar", 32, 32, dwarf::DW_ATE_UTF);
+		break;
 	case PrimType::i64:
+		cg->type = Type::getInt64Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("long", 64, 64, dwarf::DW_ATE_signed);
+		break;
 	case PrimType::u64:
-		cg->type = Type::getInt64Ty(ctx); break;
+		cg->type = Type::getInt64Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("ulong", 64, 64, dwarf::DW_ATE_unsigned);
+		break;
 	case PrimType::i128:
+		cg->type = Type::getInt128Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("cent", 128, 128, dwarf::DW_ATE_signed);
+		break;
 	case PrimType::u128:
-		cg->type = Type::getInt128Ty(ctx); break;
+		cg->type = Type::getInt128Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("ucent", 128, 128, dwarf::DW_ATE_unsigned);
+		break;
 	case PrimType::f16:
-		cg->type = Type::getHalfTy(ctx); break;
+		cg->type = Type::getHalfTy(ctx);
+		cg->ditype = DBuilder->createBasicType("half", 16, 16, dwarf::DW_ATE_float);
+		break;
 	case PrimType::f32:
-		cg->type = Type::getFloatTy(ctx); break;
+		cg->type = Type::getFloatTy(ctx);
+		cg->ditype = DBuilder->createBasicType("float", 632, 32, dwarf::DW_ATE_float);
+		break;
 	case PrimType::f64:
-		cg->type = Type::getDoubleTy(ctx); break;
+		cg->type = Type::getDoubleTy(ctx);
+		cg->ditype = DBuilder->createBasicType("double", 64, 64, dwarf::DW_ATE_float);
+		break;
 	case PrimType::f128:
-		cg->type = Type::getFP128Ty(ctx); break;
+		cg->type = Type::getFP128Ty(ctx);
+		cg->ditype = DBuilder->createBasicType("extended", 128, 128, dwarf::DW_ATE_float);
+		break;
 //		cg->type = Type::getX86_FP80Ty(ctx); break;
 //		cg->type = Type::getPPC_FP128Ty(ctx); break;
 	default:
@@ -644,6 +691,7 @@ void LLVMGenerator::visit(PointerType &n)
 	LLVMData *targetCg = n.targetType()->cgData<LLVMData>();
 
 	cg->type = llvm::PointerType::getUnqual(targetCg->type);
+	cg->ditype = DBuilder->createPointerType(targetCg->ditype, 64); // TODO: machine pointer size? 32bit?
 }
 
 void LLVMGenerator::visit(Struct &n)
@@ -655,7 +703,7 @@ void LLVMGenerator::visit(Struct &n)
 	pushScope(&n);
 
 	// gather member types
-	std::vector<Type*> elements;
+	SmallVector<Type*, 8> elements;
 	for (auto &m : n.dataMembers())
 	{
 		m.decl->accept(*this);
@@ -679,14 +727,21 @@ void LLVMGenerator::visit(FunctionType &n)
 	llvm::Type *r = n.returnType()->cgData<LLVMData>()->type;
 
 	TypeExprList argList = n.argTypes();
-	std::vector<llvm::Type *> args;
+	SmallVector<llvm::Type*, 8> args;
+	SmallVector<Metadata*, 8> types;
+
+	if (!n.returnType()->isVoid())
+		types.push_back(n.returnType()->cgData<LLVMData>()->ditype);
+
 	for (auto a : argList)
 	{
 		a->accept(*this);
 		args.push_back(a->cgData<LLVMData>()->type);
+		types.push_back(a->cgData<LLVMData>()->ditype);
 	}
 
 	cg->type = llvm::FunctionType::get(r, args, false);
+	cg->ditype = DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(types));
 }
 
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
@@ -1650,7 +1705,23 @@ void LLVMGenerator::visit(TypeDecl &n)
 {
 	if (n.doneCodegen()) return;
 
-	n.type()->accept(*this);
+	TypeExpr *ty = n.type();
+
+	ty->accept(*this);
+
+	Struct *s = ty->asStruct();
+	if (s)
+	{
+		LLVMData *cg = n.cgData<LLVMData>();
+
+		SmallVector<llvm::Metadata*, 8> elements;
+		for (auto &member : s->dataMembers())
+			elements.push_back(member.decl->cgData<LLVMData>()->divalue);
+
+		cg->ditype = DBuilder->createStructType(scope()->cgData<LLVMData>()->discope, n.name(), nullptr, n.getLoc().line, ty->size(), ty->alignment(), 0, nullptr, DBuilder->getOrCreateArray(elements), 0, nullptr, n.mangledName());
+
+		ty->cgData<LLVMData>()->ditype = cg->ditype;
+	}
 }
 
 void LLVMGenerator::visit(ValDecl &n)
@@ -1955,7 +2026,7 @@ void LLVMGenerator::emitLocation(Node *node)
 	if (!node)
 		return Builder.SetCurrentDebugLocation(DebugLoc());
 
-	DIScope *scope = node->cgData<LLVMData>()->scope;
+	DIScope *scope = node->cgData<LLVMData>()->discope;
 //	DIScope *Scope;
 //	if (LexicalBlocks.empty())
 //		Scope = TheCU;
