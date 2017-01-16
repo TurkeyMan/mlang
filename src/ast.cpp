@@ -3,6 +3,8 @@
 #include "error.h"
 #include "string.h"
 
+namespace m {
+
 std::map<std::string, TypeExpr*> typesUsed;
 
 PrimType SizeT_Type = PrimType::i64;
@@ -338,16 +340,16 @@ ConvType PrimitiveType::convertible(const TypeExpr *target) const
 			else if ((isInt(_type) || isChar(_type) || isBool(_type)) && tyWidth(_type) < tyWidth(pt))
 				return ConvType::Convertible;
 		}
-		else if (isSigned(pt))
+		else if (isSignedInt(pt))
 		{
-			if (isUnsigned(_type) && tyWidth(_type) < tyWidth(pt))
+			if (isUnsignedInt(_type) && tyWidth(_type) < tyWidth(pt))
 				return ConvType::Convertible;
-			else if (isSigned(_type) && tyWidth(_type) <= tyWidth(pt))
+			else if (isSignedInt(_type) && tyWidth(_type) <= tyWidth(pt))
 				return ConvType::Convertible;
 		}
-		else if (isUnsigned(pt))
+		else if (isUnsignedInt(pt))
 		{
-			if (isUnsigned(_type) && tyWidth(_type) <= tyWidth(pt))
+			if (isUnsignedInt(_type) && tyWidth(_type) <= tyWidth(pt))
 				return ConvType::Convertible;
 		}
 		return ConvType::LosesPrecision;
@@ -1521,4 +1523,6 @@ raw_ostream &LoopStatement::dump(raw_ostream &out, int ind)
 	_body->dump(indent(out, ind + 1), ind + 1);
 	indent(out, ind) << "}\n";
 	return out;
+}
+
 }

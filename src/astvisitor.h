@@ -1,12 +1,15 @@
 #pragma once
 
+#include "mlang.h"
 #include "ast.h"
+
+namespace m {
 
 class ASTVisitor : public gc_cleanup
 {
 public:
 	virtual void visit(Declaration &n) {}
-	virtual void visit(::Module &n) {}
+	virtual void visit(Module &n) {}
 	virtual void visit(ModuleStatement &n) {}
 	virtual void visit(ExpressionStatement &n) {}
 	virtual void visit(ReturnStatement &n) {}
@@ -14,9 +17,9 @@ public:
 	virtual void visit(IfStatement &n) {}
 	virtual void visit(LoopStatement &n) {}
 	virtual void visit(PrimitiveType &n) {}
-	virtual void visit(::PointerType &n) {}
+	virtual void visit(PointerType &n) {}
 	virtual void visit(Struct &n) {}
-	virtual void visit(::FunctionType &n) {}
+	virtual void visit(FunctionType &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
 	virtual void visit(AggregateLiteralExpr &n) {}
 	virtual void visit(FunctionLiteralExpr &n) {}
@@ -36,3 +39,5 @@ public:
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}
 };
+
+}

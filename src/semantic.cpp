@@ -1,18 +1,15 @@
 #include "semantic.h"
 #include "error.h"
 
-Semantic::Semantic()
-{
-}
+namespace m {
 
-void Semantic::run(const std::string &srcFile, StatementList moduleStatements)
+void Semantic::run()
 {
-	// TODO: make default module name from filename without extension
-	size_t dot = srcFile.find('.');
-	std::string moduleName = srcFile.substr(0, dot);
-
-	module = new Module(srcFile, moduleName, moduleStatements, SourceLocation(0));
-	module->accept(*this);
+	for (auto module : compiler.modules)
+	{
+		currentModule = module.second;
+		currentModule->accept(*this);
+	}
 }
 
 TypeExpr* Semantic::typeForUnaryExpression(UnaryOp op, TypeExpr *type)
@@ -137,7 +134,7 @@ void Semantic::visit(ModuleStatement &n)
 {
 	if (n.doneSemantic()) return;
 
-	module->name() = n.name();
+	currentModule->name() = n.name();
 }
 
 void Semantic::visit(ExpressionStatement &n)
@@ -311,7 +308,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	// if is static method, parent is struct static members
 	// if is local function, parent is parent function
 	// else parent is module scope
-	scope()->_parentScope = module;
+	scope()->_parentScope = currentModule;
 
 	for (auto a : n.args())
 	{
@@ -513,7 +510,7 @@ void Semantic::visit(CallExpr &n)
 	FunctionType *funcType = n._func->type()->asFunction();
 	while (!funcType)
 	{
-		::PointerType *ptr = n._func->type()->asPointer();
+		PointerType *ptr = n._func->type()->asPointer();
 
 		if (!ptr)
 			assert(false); // not call-able!
@@ -933,8 +930,11 @@ void Semantic::visit(ValDecl &n)
 	{
 		n._type->accept(*this);
 
-		n._value = n._value->makeConversion(n._type);
-		n._value->accept(*this);
+		if (!n._value->type()->isVoid())
+		{
+			n._value = n._value->makeConversion(n._type);
+			n._value->accept(*this);
+		}
 	}
 
 	scope()->addDecl(n._name, &n);
@@ -994,4 +994,6 @@ void Semantic::visit(VarDecl &n)
 
 		scope()->addDecl(n._name, &n);
 	}
+}
+
 }

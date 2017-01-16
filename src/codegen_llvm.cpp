@@ -1,5 +1,11 @@
+#pragma warning(disable: 4996)
+
+#include "mlang.h"
+#undef error
+#undef min
+#undef max
+
 #include "codegen_llvm.h"
-#include "error.h"
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -7,6 +13,7 @@ using namespace llvm::orc;
 
 // TODO: READ THIS AND DO! http://llvm.org/docs/Frontend/PerformanceTips.html#id7
 
+namespace m {
 
 class MemStream : public llvm::raw_ostream
 {
@@ -20,13 +27,22 @@ public:
 	std::string take() { return std::move(text); }
 };
 
+class ModuleInfo
+{
+public:
+	ModuleInfo(DICompileUnit *cu)
+		: compileUnit(cu)
+	{}
 
-LLVMGenerator::LLVMGenerator(::Module *_module)
-	: ctx(getGlobalContext())
+	DICompileUnit *compileUnit;
+};
+
+LLVMGenerator::LLVMGenerator(Compiler &compiler)
+	: compiler(compiler)
+	, ctx(getGlobalContext())
 	, Builder(ctx)
-	, module(_module)
 	, TheJIT(llvm::make_unique<KaleidoscopeJIT>())
-	, TheModule(llvm::make_unique<llvm::Module>(_module->name(), ctx))
+	, TheModule(llvm::make_unique<llvm::Module>(compiler.outFile, ctx))
 {
 	// Open a new module.
 	TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
@@ -42,8 +58,11 @@ LLVMGenerator::LLVMGenerator(::Module *_module)
 	// Construct the DIBuilder, we do this here because we need the module.
 	DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
 
-	// Create the compile unit for the module.
-	KSDbgInfo.TheCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, _module->filename(), ".", "M-Lang Compiler", 0, "", 0);
+	for (auto module : compiler.modules)
+	{
+		DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, module.second->filename(), module.second->directory(), "M-Lang Compiler", compiler.opt > 0, "", 0);
+		module.second->setCodegenData(new ModuleInfo(cu));
+	}
 }
 
 void LLVMGenerator::pushFunction(FunctionLiteralExpr *f)
@@ -118,47 +137,48 @@ void InitCodegen()
 	cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 }
 
-void Codegen(::Module *module, Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime)
+void Codegen(Compiler &compiler)
 {
-	LLVMGenerator *generator = new LLVMGenerator(module);
+	LLVMGenerator *generator = new LLVMGenerator(compiler);
 
-	module->accept(*generator);
+	for (auto module : compiler.modules)
+		module.second->accept(*generator);
 
-	generator->codegen(mode, opt, outFile, irFile, runtime);
+	generator->codegen();
 }
 
-void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime)
+void LLVMGenerator::codegen()
 {
 	// Finalize the debug info.
 	DBuilder->finalize();
 
 	std::vector<std::string> linkOptions;
 
-	if (runtime.compare("MT") == 0)
+	if (compiler.runtime.compare("MT") == 0)
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MT_StaticRelease");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (runtime.compare("MTd") == 0)
+	else if (compiler.runtime.compare("MTd") == 0)
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MTd_StaticDebug");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (runtime.compare("MD") == 0)
+	else if (compiler.runtime.compare("MD") == 0)
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MD_DynamicRelease");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (runtime.compare("MDd") == 0)
+	else if (compiler.runtime.compare("MDd") == 0)
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (runtime.compare("none") != 0)
+	else if (compiler.runtime.compare("none") != 0)
 	{
 		// bad runtime!
 		assert(false);
@@ -176,7 +196,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 
 	TheModule->addModuleFlag(llvm::Module::ModFlagBehavior::AppendUnique, "Linker Options", MDNode::get(ctx, linkOpts));
 
-	if (!irFile.empty())
+	if (!compiler.irFile.empty())
 	{
 		// Print out all of the generated code.
 		MemStream output;
@@ -187,10 +207,10 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		if (!ir.empty())
 		{
 			FILE *file;
-			fopen_s(&file, irFile.c_str(), "w");
+			fopen_s(&file, compiler.irFile.c_str(), "w");
 			if (!file)
 			{
-				printf("Can't open file for output: %s\n", irFile.c_str());
+				printf("Can't open file for output: %s\n", compiler.irFile.c_str());
 				return;
 			}
 			fwrite(ir.c_str(), 1, ir.size(), file);
@@ -198,9 +218,9 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		}
 	}
 
-	if (!outFile.empty())
+	if (!compiler.outFile.empty())
 	{
-		if (mode == Mode::OutputBC)
+		if (compiler.mode == Mode::OutputBC)
 		{
 			// TODO:...
 			assert(false);
@@ -209,9 +229,9 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 
 		TargetMachine::CodeGenFileType fileType = FileType;
 
-		if (mode == Mode::OutputAsm)
+		if (compiler.mode == Mode::OutputAsm)
 			fileType = TargetMachine::CGFT_AssemblyFile;
-		else if (mode == Mode::Compile || mode == Mode::CompileAndLink)
+		else if (compiler.mode == Mode::Compile || compiler.mode == Mode::CompileAndLink)
 			fileType = TargetMachine::CGFT_ObjectFile;
 
 		Triple targetTriple = Triple(TheModule->getTargetTriple());
@@ -228,7 +248,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		std::string CPUStr = getCPUStr(), FeaturesStr = getFeaturesStr();
 
 		CodeGenOpt::Level OLvl = CodeGenOpt::None;
-		switch (opt)
+		switch (compiler.opt)
 		{
 			case 0: OLvl = CodeGenOpt::None; break;
 			case 1: OLvl = CodeGenOpt::Less; break;
@@ -268,7 +288,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
 		if (fileType == TargetMachine::CGFT_AssemblyFile)
 			OpenFlags |= sys::fs::F_Text;
-		auto Out = std::make_unique<tool_output_file>(outFile, EC, OpenFlags);
+		auto Out = std::make_unique<tool_output_file>(compiler.outFile, EC, OpenFlags);
 //		std::unique_ptr<tool_output_file> Out =
 //			GetOutputStream(TheTarget->getName(), targetTriple.getOS(), outFile);
 		assert(Out);
@@ -292,7 +312,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 		setFunctionAttributes(CPUStr, FeaturesStr, *TheModule);
 
 		if (RelaxAll.getNumOccurrences() > 0 && fileType != TargetMachine::CGFT_ObjectFile)
-			errs() << outFile << ": warning: ignoring -mc-relax-all because filetype != obj";
+			errs() << compiler.outFile << ": warning: ignoring -mc-relax-all because filetype != obj";
 
 		{
 			raw_pwrite_stream *OS = &Out->os();
@@ -314,13 +334,13 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 			const PassRegistry *PR = PassRegistry::getPassRegistry();
 			if (!RunPass.empty()) {
 				if (!StartAfter.empty() || !StopAfter.empty()) {
-					errs() << outFile << ": start-after and/or stop-after passes are "
+					errs() << compiler.outFile << ": start-after and/or stop-after passes are "
 						"redundant when run-pass is specified.\n";
 					assert(false);
 				}
 				const PassInfo *PI = PR->getPassInfo(RunPass);
 				if (!PI) {
-					errs() << outFile << ": run-pass pass is not registered.\n";
+					errs() << compiler.outFile << ": run-pass pass is not registered.\n";
 					assert(false);
 				}
 				StopAfterID = StartBeforeID = PI->getTypeInfo();
@@ -329,7 +349,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 				if (!StartAfter.empty()) {
 					const PassInfo *PI = PR->getPassInfo(StartAfter);
 					if (!PI) {
-						errs() << outFile << ": start-after pass is not registered.\n";
+						errs() << compiler.outFile << ": start-after pass is not registered.\n";
 						assert(false);
 					}
 					StartAfterID = PI->getTypeInfo();
@@ -337,7 +357,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 				if (!StopAfter.empty()) {
 					const PassInfo *PI = PR->getPassInfo(StopAfter);
 					if (!PI) {
-						errs() << outFile << ": stop-after pass is not registered.\n";
+						errs() << compiler.outFile << ": stop-after pass is not registered.\n";
 						assert(false);
 					}
 					StopAfterID = PI->getTypeInfo();
@@ -349,7 +369,7 @@ void LLVMGenerator::codegen(Mode mode, int opt, std::string outFile, std::string
 //				StartAfterID, StopAfterID, MIR.get())) {
 			if (Target->addPassesToEmitFile(PM, *OS, fileType, true, StartBeforeID,
 				StartAfterID, StopAfterID, nullptr)) {
-				errs() << outFile << ": target does not support generation of this file type!\n";
+				errs() << compiler.outFile << ": target does not support generation of this file type!\n";
 				assert(false);
 			}
 
@@ -375,7 +395,7 @@ void LLVMGenerator::visit(Declaration &n)
 
 }
 
-void LLVMGenerator::visit(::Module &n)
+void LLVMGenerator::visit(Module &n)
 {
 	if (n.doneCodegen()) return;
 
@@ -614,7 +634,7 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	}
 }
 
-void LLVMGenerator::visit(::PointerType &n)
+void LLVMGenerator::visit(PointerType &n)
 {
 	if (n.doneCodegen()) return;
 
@@ -649,7 +669,7 @@ void LLVMGenerator::visit(Struct &n)
 	popScope();
 }
 
-void LLVMGenerator::visit(::FunctionType &n)
+void LLVMGenerator::visit(FunctionType &n)
 {
 	if (n.doneCodegen()) return;
 
@@ -734,7 +754,7 @@ void LLVMGenerator::visit(AggregateLiteralExpr &n)
 
 	n.type()->accept(*this);
 
-	::Struct *s = n.type()->asStruct();
+	Struct *s = n.type()->asStruct();
 	llvm::StructType *ty = dyn_cast<StructType>(s->cgData<LLVMData>()->type);
 
 	cg->value = UndefValue::get(ty);
@@ -756,7 +776,7 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 
 	n.type()->accept(*this);
 
-	::FunctionType *fn = n.type()->asFunction();
+	FunctionType *fn = n.type()->asFunction();
 	TypeExpr *rt = fn->returnType();
 
 	llvm::FunctionType *sig = (llvm::FunctionType*)fn->cgData<LLVMData>()->type;
@@ -901,7 +921,7 @@ void LLVMGenerator::visit(RefExpr &n)
 
 	LLVMData *cg = n.cgData<LLVMData>();
 
-	::PointerType *type = n.type();
+	PointerType *type = n.type();
 	type->accept(*this);
 	llvm::PointerType *typeCg = (llvm::PointerType*)type->cgData<LLVMData>()->type;
 
@@ -1042,7 +1062,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 			cg->value = Builder.CreateCast(cast_types[castType], exprCg->value, typeCg->type, "cast");
 		return;
 	}
-	::PointerType *ptrt = dynamic_cast<::PointerType*>(type);
+	PointerType *ptrt = dynamic_cast<PointerType*>(type);
 	if (ptrt)
 	{
 		assert(false);
@@ -1088,7 +1108,7 @@ void LLVMGenerator::visit(UnaryExpr &n)
 			cg->value = Builder.CreateNot(operandCg->value, "not");
 			break;
 		case UnaryOp::BitNot:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateXor(operandCg->value, (uint64_t)-1, "comp");
 			break;
 		case UnaryOp::PreDec:
@@ -1168,7 +1188,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFDiv(lhCg->value, rhCg->value, "fdiv");
-			else if (isUnsigned(primType))
+			else if (isUnsignedInt(primType))
 				cg->value = Builder.CreateUDiv(lhCg->value, rhCg->value, "udiv");
 			else
 				cg->value = Builder.CreateSDiv(lhCg->value, rhCg->value, "sdiv");
@@ -1177,7 +1197,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFRem(lhCg->value, rhCg->value, "fmod");
-			else if (isUnsigned(primType))
+			else if (isUnsignedInt(primType))
 				cg->value = Builder.CreateURem(lhCg->value, rhCg->value, "umod");
 			else
 				cg->value = Builder.CreateSRem(lhCg->value, rhCg->value, "smod");
@@ -1209,27 +1229,27 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			assert(false);
 			break;
 		case BinOp::SHL:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateShl(lhCg->value, rhCg->value, "shl");
 			break;
 		case BinOp::ASR:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateAShr(lhCg->value, rhCg->value, "asr");
 			break;
 		case BinOp::LSR:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateLShr(lhCg->value, rhCg->value, "lsr");
 			break;
 		case BinOp::BitAnd:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateAnd(lhCg->value, rhCg->value, "and");
 			break;
 		case BinOp::BitOr:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateOr(lhCg->value, rhCg->value, "or");
 			break;
 		case BinOp::BitXor:
-			assert(isBinary(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateXor(lhCg->value, rhCg->value, "xor");
 			break;
 		case BinOp::LogicAnd:
@@ -1252,7 +1272,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOEQ(lhCg->value, rhCg->value, "feq");
-				else if (isBinary(lhPrimType))
+				else if (isNotFloat(lhPrimType))
 					cg->value = Builder.CreateICmpEQ(lhCg->value, rhCg->value, "eq");
 				else
 					assert(false);
@@ -1267,7 +1287,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpONE(lhCg->value, rhCg->value, "fne");
-				else if (isBinary(lhPrimType))
+				else if (isNotFloat(lhPrimType))
 					cg->value = Builder.CreateICmpNE(lhCg->value, rhCg->value, "ne");
 				else
 					assert(false);
@@ -1282,9 +1302,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOGT(lhCg->value, rhCg->value, "fgt");
-				else if (isUnsigned(lhPrimType))
+				else if (isUnsignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpUGT(lhCg->value, rhCg->value, "ugt");
-				else if (isSigned(lhPrimType))
+				else if (isSignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpSGT(lhCg->value, rhCg->value, "sgt");
 				else
 					assert(false);
@@ -1299,9 +1319,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOGE(lhCg->value, rhCg->value, "fge");
-				else if (isUnsigned(lhPrimType))
+				else if (isUnsignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpUGE(lhCg->value, rhCg->value, "uge");
-				else if (isSigned(lhPrimType))
+				else if (isSignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpSGE(lhCg->value, rhCg->value, "sge");
 				else
 					assert(false);
@@ -1316,9 +1336,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOLT(lhCg->value, rhCg->value, "flt");
-				else if (isUnsigned(lhPrimType))
+				else if (isUnsignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpULT(lhCg->value, rhCg->value, "ult");
-				else if (isSigned(lhPrimType))
+				else if (isSignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpSLT(lhCg->value, rhCg->value, "slt");
 				else
 					assert(false);
@@ -1333,9 +1353,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOLE(lhCg->value, rhCg->value, "fle");
-				else if (isUnsigned(lhPrimType))
+				else if (isUnsignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpULE(lhCg->value, rhCg->value, "ule");
-				else if (isSigned(lhPrimType))
+				else if (isSignedInt(lhPrimType))
 					cg->value = Builder.CreateICmpSLE(lhCg->value, rhCg->value, "sle");
 				else
 					assert(false);
@@ -1414,7 +1434,7 @@ void LLVMGenerator::visit(CallExpr &n)
 
 	// TODO: handle calling on function pointers?
 
-	::FunctionType *fn = func->type()->asFunction();
+	FunctionType *fn = func->type()->asFunction();
 	if (fn)
 	{
 		LLVMData *cgFn = func->cgData<LLVMData>();
@@ -1566,8 +1586,6 @@ void LLVMGenerator::visit(Tuple &n)
 		TypeExpr *type = n.type();
 		type->accept(*this);
 
-		cg->value = UndefValue::get(type->cgData<LLVMData>()->type);
-
 		if (n.isSequence())
 		{
 			Expr *expr = dynamic_cast<Expr*>(n.seqElement());
@@ -1575,14 +1593,27 @@ void LLVMGenerator::visit(Tuple &n)
 
 			Value *val = expr->cgData<LLVMData>()->value;
 
-			for (ptrdiff_t i = 0; i < n.numElements(); ++i)
+			if (expr->isConstant())
 			{
-				unsigned int idx[1] = { (unsigned int)i };
-				cg->value = Builder.CreateInsertValue(cg->value, val, idx);
+				std::vector<Constant*> elements;
+				elements.reserve(n.numElements());
+				for (ptrdiff_t i = 0; i < n.numElements(); ++i)
+					elements.push_back(dyn_cast<Constant>(val));
+				cg->value = ConstantArray::get(dyn_cast<ArrayType>(type->cgData<LLVMData>()->type), elements);
+			}
+			else
+			{
+				cg->value = UndefValue::get(type->cgData<LLVMData>()->type);
+				for (ptrdiff_t i = 0; i < n.numElements(); ++i)
+					cg->value = Builder.CreateInsertValue(cg->value, val, { (unsigned int)i });
 			}
 		}
 		else
 		{
+			cg->value = UndefValue::get(type->cgData<LLVMData>()->type);
+
+			// TODO: ConstantStruct version when tuple elements are all const?
+
 			auto elements = n.elements();
 			for (size_t i = 0; i < elements.length; ++i)
 			{
@@ -1631,7 +1662,7 @@ void LLVMGenerator::visit(ValDecl &n)
 	n.type()->accept(*this);
 	n.value()->accept(*this);
 
-	assert(n.value()->type() == n.type()); // is this true?
+	assert(n.value()->type() == n.type() || n.value()->type()->isVoid()); // is this true?
 
 	if (n.value()->type()->asFunction())
 	{
@@ -1640,6 +1671,21 @@ void LLVMGenerator::visit(ValDecl &n)
 //		func->setName(n.mangledName());
 		func->setLinkage(Function::ExternalLinkage);
 		cg->value = func;
+	}
+	else if (n.value()->type()->isVoid() && n.type()->asFunction())
+	{
+		llvm::FunctionType *sig = (llvm::FunctionType*)n.type()->cgData<LLVMData>()->type;
+
+		// TODO: use n.mangledName()
+		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, n.name(), TheModule.get());
+//		function->setCallingConv(CallingConv::X86_VectorCall)
+		function->addFnAttr(Attribute::AttrKind::NoUnwind);
+//		function->addFnAttr(Attribute::AttrKind::UWTable);
+		cg->value = function;
+
+		// HACK: WOAH MADHAX!!!! probably need a prototype node, or a generally better way of dealing with prototypes...
+		// since the expression evaluates the declarations value (void), let's just stuff the function proto there...
+		n.value()->cgData<LLVMData>()->value = function;
 	}
 	else
 	{
@@ -1657,7 +1703,7 @@ void LLVMGenerator::visit(VarDecl &n)
 
 	llvm::Type *typeCg = n.targetType()->cgData<LLVMData>()->type;
 
-	::FunctionType *pFunc = n.type()->asFunction();
+	FunctionType *pFunc = n.type()->asFunction();
 	if (pFunc)
 	{
 		// function pointer
@@ -1669,7 +1715,7 @@ void LLVMGenerator::visit(VarDecl &n)
 
 		// TODO: support static; insert in global scope with local mangling...
 
-		if (dynamic_cast<::Module*>(s))
+		if (dynamic_cast<Module*>(s))
 		{
 			GlobalVariable *global = TheModule->getGlobalVariable(n.name());
 			if (global != nullptr)
@@ -1904,38 +1950,32 @@ static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction, const std::stri
 // Debug Info Support
 //===----------------------------------------------------------------------===//
 
-DIType *DebugInfo::getDoubleTy(LLVMGenerator &g)
+void LLVMGenerator::emitLocation(Node *node)
 {
-	if (DblTy)
-		return DblTy;
+	if (!node)
+		return Builder.SetCurrentDebugLocation(DebugLoc());
 
-	DblTy = g.DBuilder->createBasicType("double", 64, 64, dwarf::DW_ATE_float);
-	return DblTy;
+	DIScope *scope = node->cgData<LLVMData>()->scope;
+//	DIScope *Scope;
+//	if (LexicalBlocks.empty())
+//		Scope = TheCU;
+//	else
+//		Scope = LexicalBlocks.back();
+	Builder.SetCurrentDebugLocation(DebugLoc::get(node->getLine(), node->getCol(), scope));
 }
 
-void DebugInfo::emitLocation(LLVMGenerator &g, Expr *AST)
-{
-	if (!AST)
-		return g.Builder.SetCurrentDebugLocation(DebugLoc());
-	DIScope *Scope;
-	if (LexicalBlocks.empty())
-		Scope = TheCU;
-	else
-		Scope = LexicalBlocks.back();
-	g.Builder.SetCurrentDebugLocation(
-		DebugLoc::get(AST->getLine(), AST->getCol(), Scope));
-}
+//DISubroutineType *LLVMGenerator::createFunctionType(unsigned NumArgs, DIFile *Unit)
+//{
+//	SmallVector<Metadata *, 8> EltTys;
+//	DIType *DblTy = KSDbgInfo.getDoubleTy(*this);
+//
+//	// Add the result type.
+//	EltTys.push_back(DblTy);
+//
+//	for (unsigned i = 0, e = NumArgs; i != e; ++i)
+//		EltTys.push_back(DblTy);
+//
+//	return DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(EltTys));
+//}
 
-DISubroutineType *LLVMGenerator::createFunctionType(unsigned NumArgs, DIFile *Unit)
-{
-	SmallVector<Metadata *, 8> EltTys;
-	DIType *DblTy = KSDbgInfo.getDoubleTy(*this);
-
-	// Add the result type.
-	EltTys.push_back(DblTy);
-
-	for (unsigned i = 0, e = NumArgs; i != e; ++i)
-		EltTys.push_back(DblTy);
-
-	return DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(EltTys));
 }

@@ -12,8 +12,20 @@ extern int yylineno;
 
 void yyerror(const char *s);
 
+#include "mlang.h"
+
+// WTF windows.h!!!
+// THIS is why M needs to exist!
+#undef min
+#undef max
+#undef CONST
+#undef VOID
+
 #include "src/ast.h"
 #include "src/error.h"
+
+
+using namespace m;
 
 static StatementList parseTree = StatementList::empty();
 static std::string filename;
@@ -24,20 +36,20 @@ static std::string filename;
 	int64_t ival;
 	double fval;
 	const char *sval;
-	Node *node;
-	NodeList nodeList;
-	AmbiguousExpr *ambiguous;
-	Expr *expr;
-	ExprList exprList;
-	TypeExpr *type;
-	TypeExprList typeExprList;
-	Statement *statement;
-	StatementList statementList;
-	ValDecl *decl;
-	DeclList declList;
-	UnaryOp unaryOp;
-	BinOp binaryOp;
-	PtrType ptrType;
+	m::Node *node;
+	m::NodeList nodeList;
+	m::AmbiguousExpr *ambiguous;
+	m::Expr *expr;
+	m::ExprList exprList;
+	m::TypeExpr *type;
+	m::TypeExprList typeExprList;
+	m::Statement *statement;
+	m::StatementList statementList;
+	m::ValDecl *decl;
+	m::DeclList declList;
+	m::UnaryOp unaryOp;
+	m::BinOp binaryOp;
+	m::PtrType ptrType;
 }
 
 %token MODULE STATIC
@@ -51,8 +63,8 @@ static std::string filename;
 
 %token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
 
-%token <ival> INT CHAR BOOL NUL
-%token <fval> FLOAT
+%token <ival> INTEGER CHARACTER BOOL_T NUL
+%token <fval> FLOATING
 %token <sval> STRING IDENTIFIER
 
 %type <node> any_postfix
@@ -114,7 +126,6 @@ var_decl_assign		: var_decl									{ $$ = $1; }
 					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3, SourceLocation(yylineno)); }
 var_decl_assign_void: var_decl_assign							{ $$ = $1; }
 					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
-					| IDENTIFIER '=' VOID						{ $$ = new VarDecl($1, nullptr, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
 
 var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 					| var_decl_list ',' var_decl				{ $$ = $1.append($3); }
@@ -163,6 +174,7 @@ empty_statement			: ';'																	{ $$ = nullptr; }
 module_statement		: MODULE IDENTIFIER ';'													{ $$ = new ModuleStatement($2, SourceLocation(yylineno)); }
 def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, SourceLocation(yylineno)); }
+						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
 						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, SourceLocation(yylineno)); }
 						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, SourceLocation(yylineno)); }
 						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, SourceLocation(yylineno)); }
@@ -193,10 +205,10 @@ control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr
 /**** EXPRESSION PRODUCTIONS ****/
 
 literal		: NUL		{ $$ = new PrimitiveLiteralExpr(SizeT_Type, 0ull, SourceLocation(yylineno)); }
-			| INT		{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
-			| FLOAT		{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
-			| CHAR		{ $$ = new PrimitiveLiteralExpr((char32_t)$1, SourceLocation(yylineno)); }
-			| BOOL		{ $$ = new PrimitiveLiteralExpr((bool)$1, SourceLocation(yylineno)); }
+			| INTEGER	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
+			| FLOATING	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
+			| CHARACTER	{ $$ = new PrimitiveLiteralExpr((char32_t)$1, SourceLocation(yylineno)); }
+			| BOOL_T	{ $$ = new PrimitiveLiteralExpr((bool)$1, SourceLocation(yylineno)); }
 			| STRING	{ $$ = Tuple::makeStringLiteral($1, SourceLocation(yylineno)); }
 
 primitive	: VOID		{ $$ = PrimitiveType::get(PrimType::v, SourceLocation(yylineno)); }

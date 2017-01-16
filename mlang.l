@@ -164,19 +164,19 @@ is			{ return IS; }
 
 \"(\\.|[^\n"])*\"[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
 \`(\\.|[^\n`])*\`[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
-\'(\\.|[^\n'])*\'[cwd]? { yylval.ival = charval(yytext); return CHAR; }
+\'(\\.|[^\n'])*\'[cwd]? { yylval.ival = charval(yytext); return CHARACTER; }
 
 null			{ yylval.ival = 0; return NUL; }
 
-true			{ yylval.ival = 1; return BOOL; }
-false			{ yylval.ival = 0; return BOOL; }
+true			{ yylval.ival = 1; return BOOL_T; }
+false			{ yylval.ival = 0; return BOOL_T; }
 
-{D}+\.{D}+{E}		{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+\.{D}+			{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+{E}				{ yylval.fval = atof(yytext); return FLOAT; }
-{D}+				{ yylval.ival = atoi(yytext); return INT; }
-"0x"{H}({H}|_{H})*	{ yylval.ival = htoi(yytext); return INT; }
-"0b"{B}({B}|_{B})*	{ yylval.ival = btoi(yytext); return INT; }
+{D}+\.{D}+{E}		{ yylval.fval = atof(yytext); return FLOATING; }
+{D}+\.{D}+			{ yylval.fval = atof(yytext); return FLOATING; }
+{D}+{E}				{ yylval.fval = atof(yytext); return FLOATING; }
+{D}+				{ yylval.ival = atoi(yytext); return INTEGER; }
+"0x"{H}({H}|_{H})*	{ yylval.ival = htoi(yytext); return INTEGER; }
+"0b"{B}({B}|_{B})*	{ yylval.ival = btoi(yytext); return INTEGER; }
 
 {L}{I}*			{ yylval.sval = _strdup(yytext); return IDENTIFIER; }
 

@@ -13,35 +13,9 @@
 #include "common_llvm.h"
 #include <llvm/Support/raw_ostream.h>
 
-class ASTVisitor;
-
 using llvm::raw_ostream;
 
-using std::move;
-
-
-//using string = std::basic_string<char, std::char_traits<char>, gc_allocator<char>>;
-//template <class K, class T, class P = std::less<K>>
-//using map = std::map<K, T, P, gc_allocator<std::pair<const K, T>>>;
-
-
-enum TypeFlags { TF_Unsigned = 1, TF_Signed = 2, TF_Char = 4, TF_Float = 8, TF_Bool = 16 };
-
-extern uint8_t typeFlags[];
-extern uint8_t typeWidth[];
-extern uint8_t typeBytes[];
-extern const char *primTypeNames[];
-
-#define isFloat(pt) (typeFlags[(int)pt] & TF_Float)
-#define isBinary(pt) (typeFlags[(int)pt] & ~TF_Float)
-#define isSigned(pt) (typeFlags[(int)pt] & TF_Signed)
-#define isUnsigned(pt) (typeFlags[(int)pt] & TF_Unsigned)
-#define isInt(pt) (typeFlags[(int)pt] > 0 && typeFlags[(int)pt] < TF_Char)
-#define isChar(pt) (typeFlags[(int)pt] & TF_Char)
-#define isBool(pt) (typeFlags[(int)pt] & TF_Bool)
-
-#define tyWidth(pt) typeWidth[(int)pt]
-#define tyBytes(pt) typeBytes[(int)pt]
+namespace m {
 
 template <typename T>
 struct List
@@ -121,11 +95,36 @@ private:
 };
 
 
+class ASTVisitor;
+
+
+//using string = std::basic_string<char, std::char_traits<char>, gc_allocator<char>>;
+//template <class K, class T, class P = std::less<K>>
+//using map = std::map<K, T, P, gc_allocator<std::pair<const K, T>>>;
+
+
+enum TypeFlags { TF_Unsigned = 1, TF_Signed = 2, TF_Char = 4, TF_Float = 8, TF_Bool = 16 };
+
+extern uint8_t typeFlags[];
+extern uint8_t typeWidth[];
+extern uint8_t typeBytes[];
+extern const char *primTypeNames[];
+
+#define isFloat(pt) (typeFlags[(int)pt] & TF_Float)
+#define isNotFloat(pt) (typeFlags[(int)pt] & ~TF_Float)
+#define isSignedInt(pt) (typeFlags[(int)pt] & TF_Signed)
+#define isUnsignedInt(pt) (typeFlags[(int)pt] & TF_Unsigned)
+#define isInt(pt) (typeFlags[(int)pt] > 0 && typeFlags[(int)pt] < TF_Char)
+#define isChar(pt) (typeFlags[(int)pt] & TF_Char)
+#define isBool(pt) (typeFlags[(int)pt] & TF_Bool)
+
+#define tyWidth(pt) typeWidth[(int)pt]
+#define tyBytes(pt) typeBytes[(int)pt]
+
 
 inline raw_ostream &indent(raw_ostream &O, int size) {
 	return O << std::string(size*2, ' ');
 }
-
 
 // prototype nodes used for arguments?
 class Statement;
@@ -269,8 +268,11 @@ TypeNode* makeType(Scope *scope, Args&&... args)
 
 class Expr : public virtual Node
 {
+protected:
+	bool _isConstant = false;
+
 public:
-	Expr(SourceLocation loc) : Node(loc) {}
+	Expr(bool isConst, SourceLocation loc) : Node(loc), _isConstant(isConst) {}
 
 	virtual TypeExpr* type() = 0;
 
@@ -284,6 +286,8 @@ public:
 	virtual Expr* constEval() { return nullptr; };
 
 	Node* getMember(const std::string &name) override;
+
+	bool isConstant() const { return _isConstant; }
 
 	bool isConstantInt();
 	int64_t getIntValue();
@@ -315,10 +319,10 @@ public:
 
 	PrimitiveType* asPrimitive();
 	const PrimitiveType* asPrimitive() const;
-	::FunctionType* asFunction();
-	const ::FunctionType* asFunction() const;
-	::PointerType* asPointer();
-	const ::PointerType* asPointer() const;
+	FunctionType* asFunction();
+	const FunctionType* asFunction() const;
+	PointerType* asPointer();
+	const PointerType* asPointer() const;
 	Struct* asStruct();
 	const Struct* asStruct() const;
 	Tuple* asTuple();
@@ -340,7 +344,7 @@ class AmbiguousExpr : public Expr, public TypeExpr
 
 public:
 	AmbiguousExpr(SourceLocation loc)
-		: Expr(loc), TypeExpr(loc) {}
+		: Expr(false, loc), TypeExpr(loc) {}
 
 	std::string mangleof() const override
 	{
@@ -385,25 +389,34 @@ class Module : public virtual Node, public Scope
 {
 	friend class Semantic;
 
-	std::string _filename;
 	std::string _name;
+	std::string _path;
+	std::string _filename;
+	std::string _directory;
 
 	StatementList moduleStatements;
 
+	void *_codegenInternal;
+
 public:
-	Module(std::string filename, std::string name, StatementList moduleStatements, SourceLocation loc)
-		: Node(loc), Scope(nullptr, loc), _filename(move(filename)), _name(move(name)), moduleStatements(moduleStatements)
-	{
-	}
+	Module(std::string path, std::string filename, std::string moduleName, StatementList moduleStatements)
+		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(moduleName), _path(move(path)), _filename(move(filename)), moduleStatements(moduleStatements)
+	{}
 
 	std::string stringof() const override { return _name; assert(false); } // TODO: test me!
 	std::string mangleof() const override { return "_M" + _name; assert(false); } // TODO: test me!
 
+	const std::string& path() const { return _path; }
 	const std::string& filename() const { return _filename; }
+	const std::string& directory() const { return _directory; }
 	const std::string& name() const { return _name; }
 	std::string& name() { return _name; }
 
 	StatementList statements() { return moduleStatements; }
+
+	void setCodegenData(void *cgData) { _codegenInternal = cgData; }
+	template <typename T = void>
+	T* getCodegenData() { return (T*)_codegenInternal; }
 
 	void accept(ASTVisitor &v) override;
 };
@@ -864,10 +877,10 @@ class PrimitiveLiteralExpr : public Expr
 	};
 
 public:
-	PrimitiveLiteralExpr(PrimType type, uint64_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), u(v) {}
-	PrimitiveLiteralExpr(PrimType type, int64_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), i(v) {}
-	PrimitiveLiteralExpr(PrimType type, double v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), f(v) {}
-	PrimitiveLiteralExpr(PrimType type, char32_t v, SourceLocation loc) : Node(loc), Expr(loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), c(v) {}
+	PrimitiveLiteralExpr(PrimType type, uint64_t v, SourceLocation loc) : Node(loc), Expr(true, loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), u(v) {}
+	PrimitiveLiteralExpr(PrimType type, int64_t v, SourceLocation loc) : Node(loc), Expr(true, loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), i(v) {}
+	PrimitiveLiteralExpr(PrimType type, double v, SourceLocation loc) : Node(loc), Expr(true, loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), f(v) {}
+	PrimitiveLiteralExpr(PrimType type, char32_t v, SourceLocation loc) : Node(loc), Expr(true, loc), _type(type), _typeExpr(PrimitiveType::get(type, loc)), c(v) {}
 	PrimitiveLiteralExpr(uint64_t v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::u64, v, loc) {}
 	PrimitiveLiteralExpr(int64_t v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::i64, v, loc) {}
 	PrimitiveLiteralExpr(double v, SourceLocation loc) : PrimitiveLiteralExpr(PrimType::f64, v, loc) {}
@@ -900,7 +913,7 @@ class AggregateLiteralExpr : public Expr
 
 public:
 	AggregateLiteralExpr(ExprList items, TypeExpr *type, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(type), _items(move(items)) {}
+		: Node(loc), Expr(false, loc), _type(type), _items(std::move(items)) {}
 
 	TypeExpr* type() override { return _type; }
 
@@ -925,14 +938,14 @@ class FunctionLiteralExpr : public Expr, public Scope
 	bool inferReturnType;
 
 	TypeExprList argTypes = TypeExprList::empty();
-	::FunctionType *_type = nullptr;
+	FunctionType *_type = nullptr;
 
 public:
 	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType, SourceLocation loc)
-		: Node(loc), Expr(loc), Scope(nullptr, loc), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
+		: Node(loc), Expr(true, loc), Scope(nullptr, loc), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
 	{}
 
-	::FunctionType* type() override { return _type; }
+	FunctionType* type() override { return _type; }
 
 	DeclList args() const { return _args; }
 	StatementList statements() { return bodyStatements; }
@@ -978,7 +991,7 @@ public:
 	};
 
 private:
-	::PointerType *_type = nullptr;
+	PointerType *_type = nullptr;
 
 	RefExpr *_owner = nullptr;
 	VarDecl *_target = nullptr;
@@ -991,15 +1004,15 @@ private:
 public:
 
 	RefExpr(VarDecl *target, RefExpr *owner, SourceLocation loc)
-		: Node(loc), Expr(loc), _owner(owner), _target(target), _refType(owner ? Type::Member : Type::Direct) {}
+		: Node(loc), Expr(false, loc), _owner(owner), _target(target), _refType(owner ? Type::Member : Type::Direct) {}
 	RefExpr(RefExpr *owner, size_t element, SourceLocation loc)
-		: Node(loc), Expr(loc), _owner(owner), _element(element), _refType(Type::Index) {}
+		: Node(loc), Expr(false, loc), _owner(owner), _element(element), _refType(Type::Index) {}
 	RefExpr(RefExpr *owner, Expr *index, SourceLocation loc)
-		: Node(loc), Expr(loc), _owner(owner), _index(index), _refType(Type::Index) {}
+		: Node(loc), Expr(false, loc), _owner(owner), _index(index), _refType(Type::Index) {}
 	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType, SourceLocation loc)
-		: Node(loc), Expr(loc), _type(new ::PointerType(ptrType, targetType, loc)), _absolute(target), _refType(Type::Absolute) {}
+		: Node(loc), Expr(false, loc), _type(new PointerType(ptrType, targetType, loc)), _absolute(target), _refType(Type::Absolute) {}
 
-	::PointerType* type() override { return _type; }
+	PointerType* type() override { return _type; }
 	TypeExpr* targetType() const { return _type->targetType(); }
 	Type refType() const { return _refType; }
 
@@ -1027,7 +1040,7 @@ class DerefExpr : public Expr
 
 public:
 	DerefExpr(Expr *expr, SourceLocation loc)
-		: Node(loc), Expr(loc), _expr(expr) {}
+		: Node(loc), Expr(false, loc), _expr(expr) {}
 
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _expr->type()->asPointer()->targetType(); }
@@ -1050,7 +1063,7 @@ class TypeConvertExpr : public Expr
 
 public:
 	TypeConvertExpr(Expr *expr, TypeExpr *newType, bool implicit, SourceLocation loc)
-		: Node(loc), Expr(loc), _expr(expr), _newType(newType), _implicit(implicit) {}
+		: Node(loc), Expr(expr->isConstant(), loc), _expr(expr), _newType(newType), _implicit(implicit) {}
 
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _newType; }
@@ -1077,7 +1090,7 @@ class UnaryExpr : public Expr
 
 public:
 	UnaryExpr(UnaryOp op, Expr *operand, SourceLocation loc)
-		: Node(loc), Expr(loc), _op(op), _operand(operand) {}
+		: Node(loc), Expr(operand->isConstant(), loc), _op(op), _operand(operand) {}
 
 	UnaryOp op() { return _op; }
 	Expr* operand() { return _operand; }
@@ -1111,7 +1124,7 @@ class BinaryExpr : public Expr
 
 public:
 	BinaryExpr(BinOp op, Expr *lhs, Expr *rhs, SourceLocation loc)
-		: Node(loc), Expr(loc), _op(op), _lhs(lhs), _rhs(rhs) {}
+		: Node(loc), Expr(lhs->isConstant() && rhs->isConstant(), loc), _op(op), _lhs(lhs), _rhs(rhs) {}
 
 	BinOp op() { return _op; }
 	Expr* lhs() { return _lhs; }
@@ -1136,12 +1149,12 @@ class CallExpr : public Expr
 
 public:
 	CallExpr(Expr *func, ExprList callArgs, SourceLocation loc)
-		: Node(loc), Expr(loc), _func(func), _callArgs(callArgs)
+		: Node(loc), Expr(false, loc), _func(func), _callArgs(callArgs)
 	{}
 
 	TypeExpr* type() override
 	{
-		::FunctionType *f = dynamic_cast<::FunctionType*>(_func->type());
+		FunctionType *f = dynamic_cast<FunctionType*>(_func->type());
 		return f->returnType();
 	}
 
@@ -1168,7 +1181,7 @@ class AssignExpr : public Expr
 
 public:
 	AssignExpr(Expr *target, Expr *expr, BinOp op, SourceLocation loc)
-		: Node(loc), Expr(loc), _target(target), _expr(expr), _op(op)
+		: Node(loc), Expr(false, loc), _target(target), _expr(expr), _op(op)
 	{}
 
 	TypeExpr* type() override { return _target->type(); }
@@ -1193,7 +1206,7 @@ class BindExpr : public Expr
 
 public:
 	BindExpr(Expr *target, Expr *expr, SourceLocation loc)
-		: Node(loc), Expr(loc), _target(target), _expr(expr)
+		: Node(loc), Expr(false, loc), _target(target), _expr(expr)
 	{}
 
 	TypeExpr* type() override { return _target->type(); }
@@ -1230,7 +1243,7 @@ public:
 	bool isType() const override { return _type != nullptr; }
 
 	// expr overrides
-	TypeExpr* type() override { return resolveExpr()->type(); }
+	TypeExpr* type() override { return _var->type(); }
 	Expr* constEval() override { return resolveExpr()->constEval(); };
 
 	Expr* resolveExpr() override { return _var ? _var->value() : nullptr; }
@@ -1585,17 +1598,17 @@ inline Expr* Expr::makeConversion(TypeExpr *targetType, bool implicit)
 
 inline TypeExpr* TypeExpr::resultType()
 {
-	::FunctionType *f = asFunction();
+	FunctionType *f = asFunction();
 	if (f)
 		return f->returnType()->evalType();
 	return this;
 }
 inline TypeExpr* TypeExpr::evalType()
 {
-	::FunctionType *f = asFunction();
+	FunctionType *f = asFunction();
 	if (f)
 		return f->returnType()->evalType();
-	::PointerType *p = asPointer();
+	PointerType *p = asPointer();
 	if (p)
 		return p->targetType()->evalType();
 	return this;
@@ -1603,10 +1616,10 @@ inline TypeExpr* TypeExpr::evalType()
 
 inline PrimitiveType* TypeExpr::asPrimitive() { return dynamic_cast<PrimitiveType*>(this); }
 inline const PrimitiveType* TypeExpr::asPrimitive() const { return dynamic_cast<const PrimitiveType*>(this); }
-inline ::FunctionType* TypeExpr::asFunction() { return dynamic_cast<::FunctionType*>(this); }
-inline const ::FunctionType* TypeExpr::asFunction() const { return dynamic_cast<const ::FunctionType*>(this); }
-inline ::PointerType* TypeExpr::asPointer() { return dynamic_cast<::PointerType*>(this); }
-inline const ::PointerType* TypeExpr::asPointer() const { return dynamic_cast<const ::PointerType*>(this); }
+inline FunctionType* TypeExpr::asFunction() { return dynamic_cast<FunctionType*>(this); }
+inline const FunctionType* TypeExpr::asFunction() const { return dynamic_cast<const FunctionType*>(this); }
+inline PointerType* TypeExpr::asPointer() { return dynamic_cast<PointerType*>(this); }
+inline const PointerType* TypeExpr::asPointer() const { return dynamic_cast<const PointerType*>(this); }
 inline Struct* TypeExpr::asStruct() { return dynamic_cast<Struct*>(this); }
 inline const Struct* TypeExpr::asStruct() const { return dynamic_cast<const Struct*>(this); }
 inline Tuple* TypeExpr::asTuple() { return dynamic_cast<Tuple*>(this); }
@@ -1615,3 +1628,5 @@ inline bool TypeExpr::isVoid() const { const PrimitiveType *pt = dynamic_cast<co
 inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isBool(pt->type()); }
 inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }
 inline bool TypeExpr::isFloatingPoint() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isFloat(pt->type()); }
+
+}

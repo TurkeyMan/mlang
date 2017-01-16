@@ -1,38 +1,29 @@
-#include "semantic.h"
-#include "error.h"
+#include "mlang.h"
 
-#include <stdio.h>
+#include "semantic.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#include <stdio.h>
+
+m::StatementList parse(FILE *file, std::string filename);
+
+namespace m {
 
 void InitCodegen();
-void Codegen(Module *pAST, Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime);
-void Link(std::string outFile, std::vector<std::string> objFiles, std::vector<std::string> libPaths, std::vector<std::string> libs);
+void Codegen(Compiler &compiler);
+void Link(Compiler &compiler);
 
-std::vector<std::string> srcFiles;
 std::string curSrcFile;
-std::string outFile;
-std::string irFile;
 std::string astFile;
-std::vector<std::string> objFiles;
-std::vector<std::string> libPaths;
-std::vector<std::string> libs;
-std::string runtime = "MD"; // multi-threaded dll - release
 
-std::map<std::string, TypeExpr*> types;
-
-Mode mode = Mode::CompileAndLink;
-int opt = 0;
-
+Compiler mlang;
 
 inline bool ends_with(std::string const & value, std::string const & ending)
 {
 	if (ending.size() > value.size()) return false;
 	return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
 }
-
-StatementList parse(FILE *file, std::string filename);
 
 extern "C" {
 	int main(int argc, const char *argv[])
@@ -47,11 +38,11 @@ extern "C" {
 		{
 			if (!strcmp(argv[arg], "-o"))
 			{
-				outFile = argv[++arg];
+				mlang.outFile = argv[++arg];
 			}
 			else if (!strcmp(argv[arg], "-emit-ir"))
 			{
-				irFile = argv[++arg];
+				mlang.irFile = argv[++arg];
 			}
 			else if (!strcmp(argv[arg], "-emit-ast"))
 			{
@@ -59,138 +50,169 @@ extern "C" {
 			}
 			else if (!strcmp(argv[arg], "-C"))
 			{
-				mode = Mode::Compile;
+				mlang.mode = Mode::Compile;
 			}
 			else if (!strcmp(argv[arg], "-S"))
 			{
-				mode = Mode::OutputAsm;
+				mlang.mode = Mode::OutputAsm;
 			}
 			else if (!strcmp(argv[arg], "-B"))
 			{
-				mode = Mode::OutputBC;
+				mlang.mode = Mode::OutputBC;
 			}
 			else if (!strncmp(argv[arg], "-O", 2))
 			{
 				if (argv[arg][2])
-					opt = atoi(argv[arg] + 2);
+					mlang.opt = atoi(argv[arg] + 2);
 				else
-					opt = 2;
+					mlang.opt = 2;
 			}
 			else if (!strncmp(argv[arg], "-L", 2))
 			{
 				if (argv[arg][2])
-					libPaths.push_back(argv[arg] + 2);
+					mlang.libPaths.push_back(argv[arg] + 2);
 			}
 			else if (!strncmp(argv[arg], "-l", 2))
 			{
 				if (argv[arg][2])
-					libs.push_back(argv[arg] + 2);
+					mlang.libs.push_back(argv[arg] + 2);
 			}
 			else if (!strncmp(argv[arg], "-runtime=", 9))
 			{
 				if (argv[arg][9])
-					runtime = argv[arg] + 9;
+					mlang.runtime = argv[arg] + 9;
 			}
 			else
-				srcFiles.push_back(argv[arg]);
+				mlang.srcFiles.push_back(argv[arg]);
 
 			++arg;
 		}
 
-		if (outFile.empty())
+		if (mlang.outFile.empty())
 		{
-			if (mode == Mode::Compile)
+			if (mlang.mode == Mode::Compile)
 #if defined(_MSC_VER)
-				outFile = "out.obj";
+				mlang.outFile = "out.obj";
 #else
-				outFile = "out.o";
+				mlang.outFile = "out.o";
 #endif
-			else if (mode == Mode::CompileAndLink)
+			else if (mlang.mode == Mode::CompileAndLink)
 #if defined(_MSC_VER)
-				outFile = "out.exe";
+				mlang.outFile = "out.exe";
 #else
-				outFile = "a.out";
+				mlang.outFile = "a.out";
 #endif
-			else if (mode == Mode::OutputAsm)
+			else if (mlang.mode == Mode::OutputAsm)
 #if defined(_MSC_VER)
-				outFile = "out.asm";
+				mlang.outFile = "out.asm";
 #else
-				outFile = "out.s";
+				mlang.outFile = "out.s";
 #endif
-			else if (mode == Mode::OutputBC)
-				outFile = "out.bc";
+			else if (mlang.mode == Mode::OutputBC)
+				mlang.outFile = "out.bc";
 		}
 
-		if (mode == Mode::CompileAndLink)
+		if (mlang.mode == Mode::CompileAndLink)
 		{
-			if (ends_with(outFile, ".exe") || ends_with(outFile, ".lib") || ends_with(outFile, ".dll"))
-				objFiles.push_back(outFile.substr(0, outFile.size() - 4) + ".obj");
+			if (ends_with(mlang.outFile, ".exe") || ends_with(mlang.outFile, ".lib") || ends_with(mlang.outFile, ".dll"))
+				mlang.objFile = mlang.outFile.substr(0, mlang.outFile.size() - 4) + ".obj";
 			else
-				objFiles.push_back(outFile + ".obj");
+				mlang.objFile = mlang.outFile + ".obj";
 		}
 		else
-			objFiles.push_back(outFile);
+			mlang.objFile = mlang.outFile;
 
-		curSrcFile = srcFiles[0];
-
-		// open source file
-		FILE *file;
-		fopen_s(&file, srcFiles[0].c_str(), "r");
-		if (!file)
+		for (auto &src : mlang.srcFiles)
 		{
-			outputMessage("Can't open source file: %s\n", srcFiles[0].c_str());
-			return -1;
-		}
-
-		// parse the source
-		StatementList module = parse(file, srcFiles[0]);
-
-		// done with the file
-		fclose(file);
-
-		// semantic
-		Semantic semantic;
-		semantic.run(srcFiles[0], module);
-
-		// dump parse tree
-		FILE *ast = nullptr;
-		if (!astFile.empty())
-		{
-			fopen_s(&ast, astFile.c_str(), "w");
-			if (!file)
+			char path[260];
+			char *pFilePart;
+			DWORD len = GetFullPathNameA(src.c_str(), sizeof(path), path, &pFilePart);
+			if (len == 0)
 			{
-				outputMessage("Can't open ast file: %s", astFile.c_str());
+				outputMessage("Source file %s does not exist\n", src.c_str());
 				return -1;
 			}
-			class OS : public llvm::raw_ostream
+			if (!pFilePart)
 			{
-				FILE *ast;
-				uint64_t offset = 0;
-			public:
-				OS(FILE *ast) : ast(ast) {}
-				void write_impl(const char *Ptr, size_t Size) override
+				outputMessage("Source filename is a directory: %s\n", src.c_str());
+				return -1;
+			}
+
+			// open source file
+			FILE *file;
+			fopen_s(&file, src.c_str(), "r");
+			if (!file)
+			{
+				outputMessage("Can't open source file: %s\n", src.c_str());
+				return -1;
+			}
+
+			// parse the source
+			m::StatementList statements = parse(file, src);
+
+			// done with the file
+			fclose(file);
+
+			// HACK?: make default module name from filename without extension
+			std::string moduleName = src;
+			size_t slash = moduleName.find_last_of('/');
+			slash = max(moduleName.find_last_of('\\'), slash);
+			size_t dot = moduleName.find_last_of('.');
+			if (dot > slash)
+				moduleName = moduleName.substr(0, dot);
+			std::replace(moduleName.begin(), moduleName.end(), '/', '.');
+			std::replace(moduleName.begin(), moduleName.end(), '\\', '.');
+
+			m::Module *module = new m::Module(path, pFilePart, std::move(moduleName), statements);
+
+			mlang.modules.insert({ moduleName, module });
+
+			// dump parse tree
+			FILE *ast = nullptr;
+			if (!astFile.empty())
+			{
+				fopen_s(&ast, (src + ".ast").c_str(), "w");
+				if (!file)
 				{
-					if (ast)
-						fwrite(Ptr, 1, Size, ast);
-					offset += Size;
+					outputMessage("Can't open ast file: %s", astFile.c_str());
+					return -1;
 				}
-				uint64_t current_pos() const override { return offset; }
-			};
-			OS os(ast);
-			for (auto s : module)
-				s->dump(os, 0);
-			os.flush();
-			fclose(ast);
+				class OS : public llvm::raw_ostream
+				{
+					FILE *ast;
+					uint64_t offset = 0;
+				public:
+					OS(FILE *ast) : ast(ast) {}
+					void write_impl(const char *Ptr, size_t Size) override
+					{
+						if (ast)
+							fwrite(Ptr, 1, Size, ast);
+						offset += Size;
+					}
+					uint64_t current_pos() const override { return offset; }
+				};
+				OS os(ast);
+				for (auto s : statements)
+					s->dump(os, 0);
+				os.flush();
+				fclose(ast);
+			}
 		}
 
+		// semantic
+		m::Semantic semantic(mlang);
+		semantic.run();
+
 		// codegen
-		if(mode != Mode::Parse)
-			Codegen(semantic.getModule(), mode, opt, objFiles[0], irFile, runtime);
+		if(mlang.mode != Mode::Parse)
+			Codegen(mlang);
 
 		// link
-		if (mode == Mode::CompileAndLink)
-			Link(outFile, objFiles, libPaths, libs);
+		if (mlang.mode == Mode::CompileAndLink)
+			Link(mlang);
 
 		return 0;
 	}
+}
+
 }

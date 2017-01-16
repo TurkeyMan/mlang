@@ -76,6 +76,9 @@
     <ClInclude Include="src\string.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\mlang.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="test.ast" />

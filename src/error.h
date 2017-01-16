@@ -1,7 +1,4 @@
-#include <stdarg.h>
-
 void outputMessage(const char *message, ...);
-void vaOutputMessage(const char *message, va_list args);
 
 void emitWarning(const char *file, int line, const char *message, ...);
 void emitError(const char *file, int line, const char *message, ...);

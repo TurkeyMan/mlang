@@ -1,16 +1,9 @@
 #include "error.h"
 #include <stdio.h>
+#include <stdarg.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-
-void outputMessage(const char *message, ...)
-{
-	va_list args;
-	va_start(args, message);
-	vaOutputMessage(message, args);
-	va_end(args);
-}
 
 void vaOutputMessage(const char *message, va_list args)
 {
@@ -20,6 +13,14 @@ void vaOutputMessage(const char *message, va_list args)
 
 	fputs(buffer, stderr);
 	OutputDebugStringA(buffer);
+}
+
+void outputMessage(const char *message, ...)
+{
+	va_list args;
+	va_start(args, message);
+	vaOutputMessage(message, args);
+	va_end(args);
 }
 
 void emitWarning(const char *file, int line, const char *message, ...)

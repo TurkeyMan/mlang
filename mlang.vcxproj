@@ -44,6 +44,7 @@
     <ClInclude Include="src\codegen_llvm.h" />
     <ClInclude Include="src\common_llvm.h" />
     <ClInclude Include="src\error.h" />
+    <ClInclude Include="src\mlang.h" />
     <ClInclude Include="src\semantic.h" />
     <ClInclude Include="src\sourceloc.h" />
     <ClInclude Include="src\string.h" />

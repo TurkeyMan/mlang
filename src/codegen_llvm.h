@@ -26,13 +26,15 @@
 
 using namespace llvm;
 
+namespace m {
 
 class LLVMGenerator;
 
 struct LLVMData
 {
-	llvm::Value* value = nullptr;
-	llvm::Type* type = nullptr;
+	llvm::Value *value = nullptr;
+	llvm::Type *type = nullptr;
+	llvm::DIScope *scope = nullptr;
 
 	~LLVMData()
 	{
@@ -40,18 +42,9 @@ struct LLVMData
 			delete value;
 //		if (type)
 //			delete type; // TODO: dunno how to clean up llvm::Types? O_o
+//		if (scope)
+//			delete scope;
 	}
-};
-
-class DebugInfo
-{
-public:
-	DICompileUnit *TheCU;
-	DIType *DblTy;
-	std::vector<DIScope *> LexicalBlocks;
-
-	void emitLocation(LLVMGenerator &g, Expr *AST);
-	DIType *getDoubleTy(LLVMGenerator &g);
 };
 
 struct FunctionState
@@ -66,8 +59,14 @@ struct FunctionState
 
 class LLVMGenerator : public ASTVisitor
 {
-	friend class DebugInfo; // HACK
 private:
+	Compiler &compiler;
+
+	Module *module;
+
+	std::vector<Scope*> _scope;
+	std::vector<FunctionState> _functionStack;
+
 	LLVMContext &ctx;
 
 	std::unique_ptr<orc::KaleidoscopeJIT> TheJIT;
@@ -75,14 +74,12 @@ private:
 //	std::map<std::string, AllocaInst *> NamedValues;
 //	std::map<std::string, std::unique_ptr<PrototypeDecl>> FunctionProtos;
 
-	DebugInfo KSDbgInfo;
 	IRBuilder<> Builder;
+
 	std::unique_ptr<DIBuilder> DBuilder;
+//	std::vector<DIScope *> LexicalBlocks;
 
-	::Module *module;
-
-	std::vector<Scope*> _scope;
-	std::vector<FunctionState> _functionStack;
+	void emitLocation(Node *node);
 
 //	Function *getFunction(std::string Name);
 
@@ -102,9 +99,9 @@ private:
 	}
 
 public:
-	LLVMGenerator(::Module *module);
+	LLVMGenerator(Compiler &compiler);
 
-	void codegen(Mode mode, int opt, std::string outFile, std::string irFile, std::string runtime);
+	void codegen();
 
 	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
 	void pushScope(Scope *s) { _scope.push_back(s); }
@@ -115,7 +112,7 @@ public:
 	void earlyReturn(Expr *expr);
 
 	void visit(Declaration &n) override;
-	void visit(::Module &n) override;
+	void visit(Module &n) override;
 	void visit(ModuleStatement &n) override;
 	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
@@ -123,9 +120,9 @@ public:
 	void visit(IfStatement &n) override;
 	void visit(LoopStatement &n) override;
 	void visit(PrimitiveType &n) override;
-	void visit(::PointerType &v) override;
+	void visit(PointerType &v) override;
 	void visit(Struct &n) override;
-	void visit(::FunctionType &v) override;
+	void visit(FunctionType &v) override;
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(AggregateLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;
@@ -145,3 +142,5 @@ public:
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
 };
+
+}

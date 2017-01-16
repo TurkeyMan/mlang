@@ -1,19 +1,28 @@
 #pragma once
+#if !defined(_SEMANTIC_H)
+#define _SEMANTIC_H
 
+
+#include "mlang.h"
 #include "astvisitor.h"
+
+namespace m {
 
 class Semantic : public ASTVisitor
 {
 private:
-	Module *module = nullptr;
+	Compiler &compiler;
+	Module *currentModule;
+
 	std::vector<Scope*> _scope;
 	std::vector<FunctionLiteralExpr*> _function;
 
 public:
-	Semantic();
+	Semantic(Compiler &compiler)
+		: compiler(compiler)
+	{}
 
-	void run(const std::string &srcFile, StatementList module);
-	Module* getModule() const { return module; }
+	void run();
 
 	TypeExpr* typeForUnaryExpression(UnaryOp op, TypeExpr *expr);
 	TypeExpr* typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *right);
@@ -57,3 +66,7 @@ public:
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;
 };
+
+}
+
+#endif // _SEMANTIC_H
