@@ -23,6 +23,8 @@ public:
 	Mode mode = Mode::CompileAndLink;
 	int opt = 0;
 
+	bool debug = false;
+
 	std::map<std::string, m::Module*> modules;
 
 	std::map<std::string, m::TypeExpr*> types;

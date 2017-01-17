@@ -122,6 +122,8 @@ void Semantic::visit(Module &n)
 {
 	if (n.doneSemantic()) return;
 
+	n._module = &n;
+
 	pushScope(&n);
 
 	for (auto s : n.statements())
@@ -207,6 +209,7 @@ void Semantic::visit(Struct &n)
 	if (n.doneSemantic()) return;
 
 	n._parentScope = scope();
+	n._module = n._parentScope->_module;
 	pushScope(&n);
 
 #define alignto(x, a) (((x) + ((a)-1)) & ~((a)-1))
@@ -297,6 +300,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	if (n.doneSemantic()) return;
 
 	n._parentScope = scope();
+	n._module = n._parentScope->_module;
 
 	pushScope(&n);
 	pushFunction(&n);
@@ -308,7 +312,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	// if is static method, parent is struct static members
 	// if is local function, parent is parent function
 	// else parent is module scope
-	scope()->_parentScope = currentModule;
+	scope()->_parentScope = scope()->_module = currentModule;
 
 	for (auto a : n.args())
 	{
@@ -364,7 +368,7 @@ void Semantic::visit(RefExpr &n)
 	{
 		if (n._refType == RefExpr::Type::Index)
 		{
-			Tuple *tup = dynamic_cast<Tuple*>(n._owner->targetType());
+			Tuple *tup = dynamic_cast<Tuple*>(n._owner->type()->asPointer()->targetType());
 			if (tup->isSequence())
 			{
 				TypeExpr *ty = dynamic_cast<TypeExpr*>(tup->_element);
@@ -404,11 +408,11 @@ void Semantic::visit(TypeConvertExpr &n)
 	n._expr->accept(*this);
 	n._newType->accept(*this);
 
-	PointerType *pt = n._expr->type()->asPointer();
-	while (pt)
+	TypeExpr *pt = n._expr->type();
+	while (pt->ptrDepth() > n._newType->ptrDepth())
 	{
 		n._expr = new DerefExpr(n._expr, n.getLoc());
-		pt = n._expr->type()->asPointer();
+		pt = n._expr->type();
 	}
 
 	// TODO: validate conversion is possible...
@@ -708,8 +712,15 @@ void Semantic::visit(Index &n)
 	RefExpr *ref = dynamic_cast<RefExpr*>(val);
 	if (ref)
 	{
+		Expr *ptr = ref;
+		while (ptr->type()->ptrDepth() > 1)
+		{
+			ptr = new DerefExpr(ptr, n.getLoc());
+			ptr->accept(*this);
+		}
+
 		// make appropriate deref...
-		TypeExpr *ty = ref->targetType();
+		TypeExpr *ty = ptr->type()->asPointer()->targetType();
 
 		if (ty->asStruct())
 		{
@@ -751,7 +762,7 @@ void Semantic::visit(Index &n)
 				}
 
 				// create array index...
-				n._result = new RefExpr(ref, index, n.getLoc());
+				n._result = new RefExpr(ptr, index, n.getLoc());
 				n._result->accept(*this);
 			}
 			else
@@ -769,7 +780,7 @@ void Semantic::visit(Index &n)
 					error("file", n.getLine(), "Tuple index out of bounds.");
 
 				// create tuple ref...
-				n._result = new RefExpr(ref, i, n.getLoc());
+				n._result = new RefExpr(ptr, i, n.getLoc());
 				n._result->accept(*this);
 			}
 		}
@@ -789,6 +800,7 @@ void Semantic::visit(ScopeStatement &n)
 	if (n.doneSemantic()) return;
 
 	n._parentScope = scope();
+	n._module = n._parentScope->_module;
 
 	std::vector<VarDecl*> varStack;
 
@@ -828,6 +840,7 @@ void Semantic::visit(IfStatement &n)
 	if (n._initStatements.length > 0)
 	{
 		n._parentScope = s;
+		n._module = n._parentScope->_module;
 		pushScope(&n);
 
 		for (auto s : n._initStatements)
@@ -860,6 +873,7 @@ void Semantic::visit(LoopStatement &n)
 	if (n._iterators.length > 0)
 	{
 		n._parentScope = s;
+		n._module = n._parentScope->_module;
 		pushScope(&n);
 
 		for (auto i : n._iterators)
@@ -935,6 +949,14 @@ void Semantic::visit(ValDecl &n)
 			n._value = n._value->makeConversion(n._type);
 			n._value->accept(*this);
 		}
+	}
+
+	// HACK: since the names are needed during codegen, we need to supply them in advance...
+	if (n._value->type()->asFunction())
+	{
+		FunctionLiteralExpr *fn = dynamic_cast<FunctionLiteralExpr*>(n.value());
+		fn->defLoc() = n.getLoc();
+		fn->givenName() = n.name();
 	}
 
 	scope()->addDecl(n._name, &n);

@@ -37,10 +37,12 @@ struct LLVMData
 		llvm::Type *type;
 	};
 	union {
-		llvm::DIType *divalue = nullptr;
+		llvm::Metadata *divalue = nullptr;
 		llvm::DIType *ditype;
 	};
 	llvm::DIScope *discope = nullptr;
+
+	DIFile* file() const { return discope->getFile(); }
 
 	~LLVMData()
 	{
@@ -110,6 +112,8 @@ public:
 	void codegen();
 
 	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
+	LLVMData* scopeCg() const { return scope()->cgData<LLVMData>(); }
+
 	void pushScope(Scope *s) { _scope.push_back(s); }
 	void popScope() { _scope.pop_back(); }
 

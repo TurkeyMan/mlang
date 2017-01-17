@@ -60,6 +60,10 @@ extern "C" {
 			{
 				mlang.mode = Mode::OutputBC;
 			}
+			else if (!strcmp(argv[arg], "-g"))
+			{
+				mlang.debug = true;
+			}
 			else if (!strncmp(argv[arg], "-O", 2))
 			{
 				if (argv[arg][2])

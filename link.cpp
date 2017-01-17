@@ -23,6 +23,16 @@ void Link(Compiler &compiler)
 		link = "link.exe";
 
 	std::string args = "/OUT:\"" + compiler.outFile + "\" /MACHINE:X64 /ERRORREPORT:PROMPT /NOLOGO /DYNAMICBASE /SUBSYSTEM:CONSOLE";
+
+	if (compiler.debug)
+	{
+		args += " /DEBUG";
+		if (compiler.outFile.substr(compiler.outFile.length() - 4) == ".exe")
+			args += " /PDB:\"" + compiler.outFile.substr(0, compiler.outFile.length() - 4) + ".pdb\"";
+		else
+			args += " /PDB:\"" + compiler.outFile + ".pdb\"";
+	}
+
 	for (auto &libPath : compiler.libPaths)
 		args += " /LIBPATH:" + libPath;
 	for (auto &lib : compiler.libs)

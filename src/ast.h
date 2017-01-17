@@ -127,6 +127,8 @@ inline raw_ostream &indent(raw_ostream &O, int size) {
 }
 
 // prototype nodes used for arguments?
+class Module;
+
 class Statement;
 class Declaration;
 class ValDecl;
@@ -237,7 +239,8 @@ class Scope : public virtual Node
 	std::map<std::string, Declaration*> _symbols;
 	std::map<std::string, Scope*> _imports;
 
-	Scope *_parentScope; // parent scope
+	Scope *_parentScope = nullptr; // parent scope
+	Module *_module = nullptr;
 
 	std::string stringof() const override { assert(false); return std::string(); }
 	std::string mangleof() const override { assert(false); return std::string(); }
@@ -247,6 +250,7 @@ public:
 		: Node(loc), _parentScope(parent)
 	{}
 
+	Module *module() const { return _module; }
 	Scope *parentScope() const { return _parentScope; }
 	Declaration *getDecl(const std::string& name, bool onlyLocal = false);
 	void addDecl(const std::string& name, Declaration *decl);
@@ -396,8 +400,6 @@ class Module : public virtual Node, public Scope
 
 	StatementList moduleStatements;
 
-	void *_codegenInternal;
-
 public:
 	Module(std::string path, std::string filename, std::string moduleName, StatementList moduleStatements)
 		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(moduleName), _path(move(path)), _filename(move(filename)), moduleStatements(moduleStatements)
@@ -413,10 +415,6 @@ public:
 	std::string& name() { return _name; }
 
 	StatementList statements() { return moduleStatements; }
-
-	void setCodegenData(void *cgData) { _codegenInternal = cgData; }
-	template <typename T = void>
-	T* getCodegenData() { return (T*)_codegenInternal; }
 
 	void accept(ASTVisitor &v) override;
 };
@@ -940,10 +938,16 @@ class FunctionLiteralExpr : public Expr, public Scope
 	TypeExprList argTypes = TypeExprList::empty();
 	FunctionType *_type = nullptr;
 
+	std::string _givenName;
+	SourceLocation _defLoc = SourceLocation(0);
+
 public:
 	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType, SourceLocation loc)
 		: Node(loc), Expr(true, loc), Scope(nullptr, loc), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
-	{}
+	{
+		static int literalCount = 0;
+		_givenName = std::string("fn_literal_") + std::to_string(literalCount++);
+	}
 
 	FunctionType* type() override { return _type; }
 
@@ -951,6 +955,9 @@ public:
 	StatementList statements() { return bodyStatements; }
 
 	Node *getMember(const std::string &name) override { return Expr::getMember(name); }
+
+	std::string& givenName() { return _givenName; }
+	SourceLocation& defLoc() { return _defLoc; }
 
 	std::string stringof() const override { assert(false); return std::string(); }
 	std::string mangleof() const override { assert(false); return std::string(); }
@@ -993,7 +1000,7 @@ public:
 private:
 	PointerType *_type = nullptr;
 
-	RefExpr *_owner = nullptr;
+	Expr *_owner = nullptr;
 	VarDecl *_target = nullptr;
 	size_t _absolute = 0;
 	size_t _element = 0;
@@ -1005,9 +1012,9 @@ public:
 
 	RefExpr(VarDecl *target, RefExpr *owner, SourceLocation loc)
 		: Node(loc), Expr(false, loc), _owner(owner), _target(target), _refType(owner ? Type::Member : Type::Direct) {}
-	RefExpr(RefExpr *owner, size_t element, SourceLocation loc)
+	RefExpr(Expr *owner, size_t element, SourceLocation loc)
 		: Node(loc), Expr(false, loc), _owner(owner), _element(element), _refType(Type::Index) {}
-	RefExpr(RefExpr *owner, Expr *index, SourceLocation loc)
+	RefExpr(Expr *owner, Expr *index, SourceLocation loc)
 		: Node(loc), Expr(false, loc), _owner(owner), _index(index), _refType(Type::Index) {}
 	RefExpr(PtrType ptrType, size_t target, TypeExpr *targetType, SourceLocation loc)
 		: Node(loc), Expr(false, loc), _type(new PointerType(ptrType, targetType, loc)), _absolute(target), _refType(Type::Absolute) {}
@@ -1016,7 +1023,7 @@ public:
 	TypeExpr* targetType() const { return _type->targetType(); }
 	Type refType() const { return _refType; }
 
-	RefExpr* owner() { return _owner; }
+	Expr* owner() { return _owner; }
 	VarDecl* target() { return _target; }
 	size_t address() { return _absolute; }
 	size_t element() { return _element; }

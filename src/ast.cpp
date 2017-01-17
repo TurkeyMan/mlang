@@ -447,8 +447,32 @@ ConvType PointerType::convertible(const TypeExpr *target) const
 		} while (ptrt || ptrf);
 
 		// compare pointer targets are the same type
+		ConvType conv = ConvType::Convertible;
 		if (!from->isSame(target))
-			return ConvType::NoConversion;
+		{
+			Tuple *from_tup = (Tuple*)dynamic_cast<const Tuple*>(from);
+			Tuple *to_tup = (Tuple*)dynamic_cast<const Tuple*>(target);
+			if ((!from_tup || !from_tup->isSequence()) && (!to_tup || !to_tup->isSequence()))
+				return ConvType::NoConversion;
+			else if (from_tup && to_tup)
+			{
+				if (to_tup->numElements() > from_tup->numElements() || !from_tup->seqElement()->asType()->isSame(to_tup->seqElement()->asType()))
+					return ConvType::NoConversion;
+				conv = ConvType::OnlyExplicit;
+			}
+			else if (from_tup)
+			{
+				if (!from_tup->seqElement()->asType()->isSame(target))
+					return ConvType::NoConversion;
+				conv = ConvType::OnlyExplicit;
+			}
+			else if (to_tup)
+			{
+				if (!from->isSame(to_tup->seqElement()->asType()))
+					return ConvType::NoConversion;
+				conv = ConvType::OnlyExplicit;
+			}
+		}
 
 		// validate each layer of pointer is convertible
 		while (fromDepth--, toDepth--)
@@ -456,7 +480,7 @@ ConvType PointerType::convertible(const TypeExpr *target) const
 			if (!fromStack[fromDepth]->canPromote(toStack[toDepth]->ptrType()))
 				return ConvType::NoConversion;
 		}
-		return ConvType::Convertible;
+		return conv;
 	}
 
 	// if target is not a pointer, we will try and convert the pointer target type
@@ -474,7 +498,54 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 	int depth = targetType->ptrDepth();
 	if(depth > 0 && ptrDepth() <= depth)
 	{
-		assert(expr->type()->convertible(targetType) == ConvType::Convertible);
+		TypeExpr *target = targetType;
+		PointerType *ptrt = targetType->asPointer();
+		TypeExpr *from = expr->type();
+
+		PointerType *toStack[128];
+		PointerType *fromStack[128];
+		size_t toDepth = 0, fromDepth = 0;
+
+		// burrow down to the pointer target
+		PointerType *ptrf;
+		do
+		{
+			ptrf = from->asPointer();
+			assert(ptrf);
+ 			if (ptrt)
+			{
+				toStack[toDepth++] = ptrt;
+				target = ptrt->targetType();
+				ptrt = target->asPointer();
+			}
+			fromStack[fromDepth++] = ptrf;
+			from = ptrf->targetType();
+			ptrf = from->asPointer();
+		} while (ptrt || ptrf);
+
+		// compare pointer targets are the same type
+		if (!from->isSame(target))
+		{
+			// only allow explicit conversions of array types
+			assert(!implicit);
+
+			Tuple *from_tup = dynamic_cast<Tuple*>(from);
+			Tuple *to_tup = dynamic_cast<Tuple*>(target);
+			assert((from_tup && from_tup->isSequence()) || (to_tup && to_tup->isSequence()));
+
+			if (from_tup && to_tup)
+				assert(to_tup->numElements() <= from_tup->numElements() && from_tup->seqElement()->asType()->isSame(to_tup->seqElement()->asType()));
+			else if (from_tup)
+				assert(from_tup->seqElement()->asType()->isSame(target));
+			else if (to_tup)
+				assert(from->isSame(to_tup->seqElement()->asType()));
+
+			expr = new TypeConvertExpr(expr, targetType, false, SourceLocation(0));
+		}
+
+		// validate each layer of pointer is convertible
+		while (fromDepth--, toDepth--)
+			assert(fromStack[fromDepth]->canPromote(toStack[toDepth]->ptrType()));
 		return expr;
 	}
 
@@ -780,6 +851,13 @@ Node *RefExpr::getMember(const std::string &name)
 		Declaration *decl = s->getDecl(name, true);
 		if (dynamic_cast<VarDecl*>(decl))
 			return new RefExpr((VarDecl*)decl, this, getLoc());
+	}
+	// KINDA HAX: if target is an array, we can get some things...
+	Tuple *arr = dynamic_cast<Tuple*>(target);
+	if (arr && arr->isSequence())
+	{
+		if (name == "ptr")
+			return makeConversion(new PointerType(PtrType::RawPtr, arr->seqElement()->asType(), SourceLocation(0)), false);
 	}
 
 	r = target->getMember(name);

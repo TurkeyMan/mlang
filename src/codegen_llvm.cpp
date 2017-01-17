@@ -59,11 +59,7 @@ LLVMGenerator::LLVMGenerator(Compiler &compiler)
 	DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
 
 	for (auto module : compiler.modules)
-	{
-		DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, module.second->filename(), module.second->directory(), "M-Lang Compiler", compiler.opt > 0, "", 0);
-		module.second->setCodegenData(new ModuleInfo(cu));
-		module.second->cgData<LLVMData>()->discope = cu;
-	}
+		module.second->accept(*this);
 }
 
 void LLVMGenerator::pushFunction(FunctionLiteralExpr *f)
@@ -141,9 +137,6 @@ void InitCodegen()
 void Codegen(Compiler &compiler)
 {
 	LLVMGenerator *generator = new LLVMGenerator(compiler);
-
-	for (auto module : compiler.modules)
-		module.second->accept(*generator);
 
 	generator->codegen();
 }
@@ -289,7 +282,7 @@ void LLVMGenerator::codegen()
 		sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
 		if (fileType == TargetMachine::CGFT_AssemblyFile)
 			OpenFlags |= sys::fs::F_Text;
-		auto Out = std::make_unique<tool_output_file>(compiler.outFile, EC, OpenFlags);
+		auto Out = std::make_unique<tool_output_file>(compiler.mode == Mode::CompileAndLink ? compiler.objFile : compiler.outFile, EC, OpenFlags);
 //		std::unique_ptr<tool_output_file> Out =
 //			GetOutputStream(TheTarget->getName(), targetTriple.getOS(), outFile);
 		assert(Out);
@@ -400,6 +393,11 @@ void LLVMGenerator::visit(Module &n)
 {
 	if (n.doneCodegen()) return;
 
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, n.filename(), n.directory(), "M-Lang Compiler", compiler.opt > 0, "", 0);
+	cg->divalue = cg->discope = cu;
+
 	pushScope(&n);
 
 	for (auto &s : n.symbols())
@@ -453,6 +451,8 @@ void LLVMGenerator::visit(ScopeStatement &n)
 	pushScope(&n);
 	for (auto &s : n.statements())
 	{
+		emitLocation(s);
+
 		s->accept(*this);
 		if (s->didReturn())
 			break; // can't reach any statements after a return!
@@ -842,6 +842,10 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 //	function->addFnAttr(Attribute::AttrKind::UWTable);
 	cg->value = function;
 
+	DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, n.givenName(), n.givenName(), scopeCg()->file(), n.defLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), true, true, n.getLoc().line, 0, compiler.opt > 0);
+	function->setSubprogram(di);
+	cg->divalue = cg->discope = di;
+
 	// Create a new basic block to start insertion into.
 	BasicBlock *block = BasicBlock::Create(ctx, "entry", function);
 	Builder.SetInsertPoint(block);
@@ -850,38 +854,38 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 	pushFunction(&n);
 	FunctionState &funcState = _functionStack.back();
 
-	// create stack storage for all the args
-	DeclList args = n.args();
-	for (auto &a : args)
-		a->accept(*this);
+	// unset current location (begin as prologue)
+	emitLocation(nullptr);
 
-	// set names and store arg values
+	// create stack storage and store all the args
+	DeclList args = n.args();
 	size_t i = 0;
 	for (auto &a : function->args())
 	{
-		VarDecl *arg = (VarDecl*)args[i++];
+		VarDecl *arg = (VarDecl*)args[i];
+		arg->accept(*this);
 
 		a.setName(arg->name());
 
-//		// Create a debug descriptor for the variable.
-//		DILocalVariable *D = DBuilder->createParameterVariable(
-//			SP, Arg.getName(), ++ArgIdx, Unit, LineNo, KSDbgInfo.getDoubleTy(),
-//			true);
-//
-//		DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
-//			DebugLoc::get(LineNo, 0, SP),
-//			Builder.GetInsertBlock());
-
 		AllocaInst *alloc = (AllocaInst*)arg->cgData<LLVMData>()->value;
+
+		// TODO: i + i assumed i == 0 is return value?? void return should not +1 ??
+		DILocalVariable *diarg = DBuilder->createParameterVariable(cg->discope, arg->name(), i + 1, scopeCg()->file(), n.getLoc().line, arg->type()->cgData<LLVMData>()->ditype, true, 0);
+		DBuilder->insertDeclare(alloc, diarg, DBuilder->createExpression(), DebugLoc::get(n.getLoc().line, 0, cg->discope), Builder.GetInsertBlock());
+
 		StoreInst *store = Builder.CreateStore(&a, alloc);
 		store->setAlignment(arg->targetType()->alignment());
+
+		++i;
 	}
 
-//		KSDbgInfo.emitLocation(Body.get());
+//	KSDbgInfo.emitLocation(Body.get());
 
 	bool bDidReturn = false;
 	for (auto &s : n.statements())
 	{
+		emitLocation(s);
+
 		s->accept(*this);
 
 		bDidReturn = s->didReturn();
@@ -980,7 +984,7 @@ void LLVMGenerator::visit(RefExpr &n)
 	type->accept(*this);
 	llvm::PointerType *typeCg = (llvm::PointerType*)type->cgData<LLVMData>()->type;
 
-	RefExpr *owner = n.owner();
+	Expr *owner = n.owner();
 	if (owner)
 		owner->accept(*this);
 
@@ -994,7 +998,7 @@ void LLVMGenerator::visit(RefExpr &n)
 		if (n.refType() == RefExpr::Type::Member)
 		{
 			// assert that 'owner' is a struct (for now?)
-			Struct *targetType = dynamic_cast<Struct*>(owner->targetType()->resolveType());
+			Struct *targetType = dynamic_cast<Struct*>(owner->type()->asPointer()->targetType()->resolveType());
 			assert(targetType);
 
 			Type *t = targetType->cgData<LLVMData>()->type;
@@ -1033,7 +1037,7 @@ void LLVMGenerator::visit(RefExpr &n)
 		else if (n.refType() == RefExpr::Type::Index)
 		{
 			// assert that 'owner' is a tuple (for now?)
-			Tuple *targetType = dynamic_cast<Tuple*>(owner->targetType()->resolveType());
+			Tuple *targetType = dynamic_cast<Tuple*>(owner->type()->asPointer()->targetType()->resolveType());
 			assert(targetType);
 
 			if (targetType->isSequence())
@@ -1091,11 +1095,11 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 	LLVMData *exprCg = expr->cgData<LLVMData>();
 	LLVMData *typeCg = type->cgData<LLVMData>();
 
-	PrimitiveType *primt = dynamic_cast<PrimitiveType*>(type);
+	PrimitiveType *primt = type->asPrimitive();
 	if (primt)
 	{
 		PrimType src;
-		PrimitiveType *from_pt = dynamic_cast<PrimitiveType*>(exprType);
+		PrimitiveType *from_pt = exprType->asPrimitive();
 		if (!from_pt)
 		{
 			// TODO: can 'from_type' be wrangled into a primitive type??
@@ -1117,10 +1121,21 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 			cg->value = Builder.CreateCast(cast_types[castType], exprCg->value, typeCg->type, "cast");
 		return;
 	}
-	PointerType *ptrt = dynamic_cast<PointerType*>(type);
+	PointerType *ptrt = type->asPointer();
 	if (ptrt)
 	{
-		assert(false);
+		if (exprType->asPrimitive())
+		{
+			assert(false); // test!
+			cg->value = Builder.CreateBitOrPointerCast(exprCg->value, typeCg->type, "cast");
+			return;
+		}
+		else
+		{
+			assert(exprType->ptrDepth() == ptrt->ptrDepth());
+			cg->value = Builder.CreatePointerCast(exprCg->value, typeCg->type, "cast");
+			return;
+		}
 	}
 
 	assert(false);
@@ -1718,7 +1733,7 @@ void LLVMGenerator::visit(TypeDecl &n)
 		for (auto &member : s->dataMembers())
 			elements.push_back(member.decl->cgData<LLVMData>()->divalue);
 
-		cg->ditype = DBuilder->createStructType(scope()->cgData<LLVMData>()->discope, n.name(), nullptr, n.getLoc().line, ty->size(), ty->alignment(), 0, nullptr, DBuilder->getOrCreateArray(elements), 0, nullptr, n.mangledName());
+		cg->discope = cg->ditype = DBuilder->createStructType(scopeCg()->discope, n.name(), scopeCg()->file(), n.getLoc().line, ty->size(), ty->alignment(), 0, nullptr, DBuilder->getOrCreateArray(elements), 0, nullptr, n.mangledName());
 
 		ty->cgData<LLVMData>()->ditype = cg->ditype;
 	}
@@ -1733,17 +1748,22 @@ void LLVMGenerator::visit(ValDecl &n)
 	n.type()->accept(*this);
 	n.value()->accept(*this);
 
-	assert(n.value()->type() == n.type() || n.value()->type()->isVoid()); // is this true?
+	TypeExpr *valueType = n.value()->type();
+	assert(valueType == n.type() || valueType->isVoid()); // is this true?
 
-	if (n.value()->type()->asFunction())
+	if (valueType->asFunction())
 	{
 		llvm::Function *func = (llvm::Function*)n.value()->cgData<LLVMData>()->value;
 		func->setName(n.name());
 //		func->setName(n.mangledName());
 		func->setLinkage(Function::ExternalLinkage);
 		cg->value = func;
+
+		// update function DI with proper names
+		DISubprogram *di = dyn_cast<DISubprogram>(n.value()->cgData<LLVMData>()->divalue);
+		cg->divalue = cg->discope = di;
 	}
-	else if (n.value()->type()->isVoid() && n.type()->asFunction())
+	else if (valueType->isVoid() && n.type()->asFunction())
 	{
 		llvm::FunctionType *sig = (llvm::FunctionType*)n.type()->cgData<LLVMData>()->type;
 
@@ -1757,6 +1777,10 @@ void LLVMGenerator::visit(ValDecl &n)
 		// HACK: WOAH MADHAX!!!! probably need a prototype node, or a generally better way of dealing with prototypes...
 		// since the expression evaluates the declarations value (void), let's just stuff the function proto there...
 		n.value()->cgData<LLVMData>()->value = function;
+
+		DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, n.name(), n.mangledName(), scopeCg()->file(), n.getLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), false, true, 0, 0, false);
+		function->setSubprogram(di);
+		cg->divalue = di;
 	}
 	else
 	{
@@ -1827,6 +1851,8 @@ void LLVMGenerator::visit(VarDecl &n)
 
 			Expr *expr = n.value();
 			expr->accept(*this);
+
+			cg->divalue = DBuilder->createGlobalVariable(s->cgData<LLVMData>()->discope, n.name(), n.mangledName(), s->cgData<LLVMData>()->file(), n.getLoc().line, targetTy->cgData<LLVMData>()->ditype, true, constant);
 		}
 		else if (dynamic_cast<Struct*>(scope()))
 		{
@@ -2006,47 +2032,13 @@ void LLVMGenerator::visit(FunctionDecl &n)
 //	return nullptr;
 //}
 
-/// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
-/// the function.  This is used for mutable variables etc.
-static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName)
-{
-	IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-		TheFunction->getEntryBlock().begin());
-	return TmpB.CreateAlloca(Type::getDoubleTy(getGlobalContext()), nullptr,
-		VarName.c_str());
-}
-
-
-//===----------------------------------------------------------------------===//
-// Debug Info Support
-//===----------------------------------------------------------------------===//
-
 void LLVMGenerator::emitLocation(Node *node)
 {
 	if (!node)
 		return Builder.SetCurrentDebugLocation(DebugLoc());
 
-	DIScope *scope = node->cgData<LLVMData>()->discope;
-//	DIScope *Scope;
-//	if (LexicalBlocks.empty())
-//		Scope = TheCU;
-//	else
-//		Scope = LexicalBlocks.back();
-	Builder.SetCurrentDebugLocation(DebugLoc::get(node->getLine(), node->getCol(), scope));
+	DIScope *s = scopeCg()->discope;
+	Builder.SetCurrentDebugLocation(DebugLoc::get(node->getLine(), node->getCol(), s));
 }
-
-//DISubroutineType *LLVMGenerator::createFunctionType(unsigned NumArgs, DIFile *Unit)
-//{
-//	SmallVector<Metadata *, 8> EltTys;
-//	DIType *DblTy = KSDbgInfo.getDoubleTy(*this);
-//
-//	// Add the result type.
-//	EltTys.push_back(DblTy);
-//
-//	for (unsigned i = 0, e = NumArgs; i != e; ++i)
-//		EltTys.push_back(DblTy);
-//
-//	return DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(EltTys));
-//}
 
 }

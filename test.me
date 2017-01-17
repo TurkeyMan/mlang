@@ -13,14 +13,19 @@
 module test;
 //module x.y.z;
 
+var x : long = 2;
+
+def f = fn a : long => a^2;
+
+def puts : fn(str : char*) : int = void;
+def _putws : fn(str : wchar*) : int = void;
+/+
 struct SS {
 	var x : int;
 	var y : float = 2;
 	def z = 100;
-};
+}
 var S : SS;
-
-var x : long = 2;
 
 fn con() { return int*&*.sizeof; }
 
@@ -35,7 +40,6 @@ fn f(x : int&)
 	arr[x] = 100;
 	arr[0] = [100; 3][2];
 
-
 	x = byte.max;
 	x += 20;
 
@@ -49,16 +53,19 @@ fn f(x : int&)
 
 	return x*5;
 }
-
-fn main(argc : long, poo : float) : int
++/
+fn main(argc : long, argv : [char*; 3]&) : int
 {
+	var str = "hello world!\0";
+	puts(cast(char*)str);
+	puts(str.ptr);
+	puts(argv[0]);
+
 	if(t : int = 1; t) return cast(double)t+10;
 	var s : int = 10;
 	argc/f(s);
 	return (~argc + argc*argc << 2) >= argc%2;
 }
-
-def f = fn a : long => a^2;
 
 /+
 // definitions
