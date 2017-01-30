@@ -1,0 +1,26 @@
+{
+    "name": "mlang",
+    "displayName": "mlang",
+    "description": "M language support",
+    "version": "0.0.1",
+    "publisher": "Manu",
+    "engines": {
+        "vscode": "^1.5.0"
+    },
+    "categories": [
+        "Languages"
+    ],
+    "contributes": {
+        "languages": [{
+            "id": "m",
+            "aliases": ["M", "mlang"],
+            "extensions": [".ms",".me"],
+            "configuration": "./language-configuration.json"
+        }],
+        "grammars": [{
+            "language": "m",
+            "scopeName": "source.mlang",
+            "path": "./syntaxes/mlang.tmLanguage.json"
+        }]
+    }
+}

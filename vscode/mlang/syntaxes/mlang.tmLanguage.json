@@ -1,0 +1,134 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "M",
+	"patterns": [
+		{ "include": "#keywords" },
+		{ "include": "#values" },
+		{ "include": "#types" },
+		{ "include": "#comments" }
+	],
+	"repository": {
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.mlang",
+					"match": "\\b(if|else|for|foreach|do|while|return|break)\\b"
+				},
+				{
+					"name": "keyword.operator.mlang",
+					"match": "\\b(cast|is)\\b"
+				},
+				{
+					"name": "keyword.other.mlang",
+					"match": "\\b(module|import|def|var)\\b"
+				},
+				{
+					"name": "storage.type.mlang",
+					"match": "\\b(fn|struct)\\b"
+				}
+			]
+		},
+		"values": {
+			"patterns": [
+				{ "include": "#constants" },
+				{ "include": "#strings" },
+				{ "include": "#literals" }
+			],
+			"repository": {
+				"constants": {
+					"patterns": [
+						{
+							"name": "constant.language.mlang",
+							"match": "\\b(null|true|false)\\b"
+						}
+					]
+				},
+				"strings": {
+					"patterns": [
+						{
+							"name": "string.quoted.double.mlang",
+							"begin": "\"",
+							"end": "\"[wd]?",
+							"patterns": [
+								{
+									"name": "constant.character.escape.mlang",
+									"match": "\\\\."
+								}
+							]
+						},
+						{
+							"name": "string.quoted.single.mlang",
+							"begin": "'",
+							"end": "'[wd]?",
+							"patterns": [
+								{
+									"name": "constant.character.escape.mlang",
+									"match": "\\\\."
+								}
+							]
+						},
+						{
+							"name": "string.quoted.other.mlang",
+							"begin": "`",
+							"end": "`[wd]?",
+							"patterns": []
+						}
+					]
+				},
+				"literals": {
+					"patterns": [
+						{
+							"name": "constant.numeric.mlang",
+							"match": "0x[0-9a-fA-F]([0-9a-fA-F]|_[0-9a-fA-F])*"
+						},
+						{
+							"name": "constant.numeric.mlang",
+							"match": "0b[01]([01]|_[01])*"
+						},
+						{
+							"name": "constant.numeric.mlang",
+							"match": "[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?"
+						}
+					]
+				}
+			}
+		},
+		"types": {
+			"patterns": [
+				{
+					"name": "storage.type.mlang",
+					"match": "\\b(void|bool|u?byte|u?short|u?int|u?long|u?cent|s?size_t|half|float|double|extended|[wd]?char)\\b"
+				}
+			]
+		},
+		"comments": {
+			"patterns": [
+				{
+					"name": "comment.block.documentation.mlang",
+					"begin": "/\\*\\*",
+					"end": "\\*/",
+					"patterns": []
+				},
+				{
+					"name": "comment.block.mlang",
+					"begin": "/\\*",
+					"end": "\\*/",
+					"patterns": []
+				},
+				{
+					"name": "comment.block.mlang",
+					"begin": "/\\+",
+					"end": "\\+/",
+					"patterns": []
+				},
+				{
+					"name": "comment.line.double-slash.mlang",
+					"begin": "//",
+					"end": "$",
+					"patterns": []
+				}
+			]
+		}
+	},
+	"scopeName": "source.mlang"
+}
