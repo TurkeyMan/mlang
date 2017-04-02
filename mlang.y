@@ -25,10 +25,22 @@ void yyerror(const char *s);
 #include "src/error.h"
 
 
+
 using namespace m;
 
 static StatementList parseTree = StatementList::empty();
-static std::string filename;
+static String filename;
+
+const char *join_strings(const char *s1, const char *s2)
+{
+	size_t sz1 = strlen(s1);
+	size_t sz2 = strlen(s2);
+	char *buffer = (char*)GC_MALLOC(sz1 + sz2 + 2);
+	strcpy_s(buffer, sz1 + sz2 + 2, s1);
+	strcpy_s(buffer + sz1 + 1, sz2 + 1, s2);
+	buffer[sz1] = '.';
+	return buffer;
+}
 
 %}
 
@@ -36,6 +48,7 @@ static std::string filename;
 	int64_t ival;
 	double fval;
 	const char *sval;
+	char32_t cval;
 	m::Node *node;
 	m::NodeList nodeList;
 	m::AmbiguousExpr *ambiguous;
@@ -63,9 +76,12 @@ static std::string filename;
 
 %token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
 
-%token <ival> INTEGER CHARACTER BOOL_T NUL
+%token <ival> INTEGER BOOL_T NUL
 %token <fval> FLOATING
 %token <sval> STRING IDENTIFIER
+%token <cval> CHARACTER
+
+%type <sval> module_name
 
 %type <node> any_postfix
 
@@ -139,6 +155,9 @@ var_decl_assign_list: var_decl_assign							{ $$ = DeclList::empty().append($1);
 //decl_attrs		: decl_attr
 //					| decl_attrs decl_attr
 
+module_name			: IDENTIFIER								{ $$ = $1; }
+					| module_name '.' IDENTIFIER				{ $$ = join_strings($1, $3); }
+
 unknown_list		: unknown									{ $$ = NodeList::empty().append($1); }
 					| unknown_list ',' unknown					{ $$ = $1.append($3); }
 					| unknown_list ',' known_value				{ $$ = $1.append($3); }
@@ -171,7 +190,7 @@ body				: body_block								{ $$ = new ScopeStatement($1, nullptr, SourceLocatio
 /**** STATEMENTS ****/
 
 empty_statement			: ';'																	{ $$ = nullptr; }
-module_statement		: MODULE IDENTIFIER ';'													{ $$ = new ModuleStatement($2, SourceLocation(yylineno)); }
+module_statement		: MODULE module_name ';'												{ $$ = new ModuleStatement($2, SourceLocation(yylineno)); }
 def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
@@ -207,7 +226,7 @@ control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr
 literal		: NUL		{ $$ = new PrimitiveLiteralExpr(SizeT_Type, 0ull, SourceLocation(yylineno)); }
 			| INTEGER	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
 			| FLOATING	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
-			| CHARACTER	{ $$ = new PrimitiveLiteralExpr((char32_t)$1, SourceLocation(yylineno)); }
+			| CHARACTER	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
 			| BOOL_T	{ $$ = new PrimitiveLiteralExpr((bool)$1, SourceLocation(yylineno)); }
 			| STRING	{ $$ = Tuple::makeStringLiteral($1, SourceLocation(yylineno)); }
 
@@ -504,7 +523,7 @@ void yyerror(const char *s)
 }
 
 
-StatementList parse(FILE *file, std::string name)
+StatementList parse(FILE *file, String name)
 {
 	filename = name;
 

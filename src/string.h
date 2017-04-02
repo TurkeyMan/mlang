@@ -1,5 +1,5 @@
 
-#define toHex(c) (((c) >= '0' && (c) <= '9') ? c - '0' : ((c) >= 'a' && (c) <= 'f') ? c - 'a' + 10 : ((c) >= 'A' && (c) <= 'F') ? c - 'A' + 10 : 16)
+#define toHex(c) (((c) >= '0' && (c) <= '9') ? (c) - '0' : ((c) >= 'a' && (c) <= 'f') ? (c) - 'a' + 10 : ((c) >= 'A' && (c) <= 'F') ? (c) - 'A' + 10 : 16)
 
 
 // UTF encode a character
@@ -39,22 +39,22 @@ inline size_t utfEncode(char32_t c, char *pUTF8)
 	}
 	else if (c < 0x800)
 	{
-		pUTF8[1] = c & 0x3f; c >>= 6;
+		pUTF8[1] = c & 0x3f | 0x80; c >>= 6;
 		pUTF8[0] = (c & 0x1f) | 0xc0;
 		return 2;
 	}
 	else if (c < 0x10000)
 	{
-		pUTF8[2] = c & 0x3f; c >>= 6;
-		pUTF8[1] = c & 0x3f; c >>= 6;
+		pUTF8[2] = c & 0x3f | 0x80; c >>= 6;
+		pUTF8[1] = c & 0x3f | 0x80; c >>= 6;
 		pUTF8[0] = (c & 0x0f) | 0xe0;
 		return 3;
 	}
 	else // NOTE: unicode was restricted to 20 bits, so we will stop here. the upper bits of a char32_t are truncated.
 	{
-		pUTF8[3] = c & 0x3f; c >>= 6;
-		pUTF8[2] = c & 0x3f; c >>= 6;
-		pUTF8[1] = c & 0x3f; c >>= 6;
+		pUTF8[3] = c & 0x3f | 0x80; c >>= 6;
+		pUTF8[2] = c & 0x3f | 0x80; c >>= 6;
+		pUTF8[1] = c & 0x3f | 0x80; c >>= 6;
 		pUTF8[0] = (c & 0x07) | 0xf0;
 		return 4;
 	}

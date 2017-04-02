@@ -1,4 +1,9 @@
-#include <string>
+
+#define SLICE_ALLOC(bytes) malloc(bytes)
+#define SLICE_FREE(ptr) free(ptr)
+
+#include "sharedarray.h"
+using namespace beautifulcode;
 
 namespace m {
 
@@ -13,11 +18,11 @@ struct Loc
 	int endLine, endCol;
 };
 
-extern std::string curSrcFile;
+extern SharedString curSrcFile;
 
-inline void emitCompileError(const std::string& message, Loc loc)
+inline void emitCompileError(String message, Loc loc)
 {
-	printf("%s(%d): Error: %s", curSrcFile.c_str(), 0, message.c_str());
+	printf("%s(%d): Error: %s", (const char*)curSrcFile.c_str(), 0, (const char*)message.c_str());
 }
 
 }

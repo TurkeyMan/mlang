@@ -72,8 +72,8 @@ private:
 
 	Module *module;
 
-	std::vector<Scope*> _scope;
-	std::vector<FunctionState> _functionStack;
+	Array<Scope*> _scope;
+	Array<FunctionState> _functionStack;
 
 	LLVMContext &ctx;
 

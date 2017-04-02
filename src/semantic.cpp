@@ -7,7 +7,7 @@ void Semantic::run()
 {
 	for (auto module : compiler.modules)
 	{
-		currentModule = module.second;
+		currentModule = module;
 		currentModule->accept(*this);
 	}
 }
@@ -135,8 +135,6 @@ void Semantic::visit(Module &n)
 void Semantic::visit(ModuleStatement &n)
 {
 	if (n.doneSemantic()) return;
-
-	currentModule->name() = n.name();
 }
 
 void Semantic::visit(ExpressionStatement &n)
@@ -802,7 +800,7 @@ void Semantic::visit(ScopeStatement &n)
 	n._parentScope = scope();
 	n._module = n._parentScope->_module;
 
-	std::vector<VarDecl*> varStack;
+	Array<VarDecl*> varStack;
 
 	pushScope(&n);
 	for (auto s : n._statements)
@@ -910,7 +908,10 @@ void Semantic::visit(TypeDecl &n)
 {
 	if (n.doneSemantic()) return;
 
-	Declaration *decl = scope()->getDecl(n.name(), true);
+	Scope *s = scope();
+	n._owner = s;
+
+	Declaration *decl = s->getDecl(n.name(), true);
 	if (decl)
 	{
 		// already declared!
@@ -919,14 +920,17 @@ void Semantic::visit(TypeDecl &n)
 
 	n._type->accept(*this);
 
-	scope()->addDecl(n.name(), &n);
+	s->addDecl(n.name(), &n);
 }
 
 void Semantic::visit(ValDecl &n)
 {
 	if (n.doneSemantic()) return;
 
-	Declaration *decl = scope()->getDecl(n._name, true);
+	Scope *s = scope();
+	n._owner = s;
+
+	Declaration *decl = s->getDecl(n._name, true);
 	if (decl)
 	{
 		// already declared!
@@ -959,7 +963,7 @@ void Semantic::visit(ValDecl &n)
 		fn->givenName() = n.name();
 	}
 
-	scope()->addDecl(n._name, &n);
+	s->addDecl(n._name, &n);
 }
 
 void Semantic::visit(VarDecl &n)
@@ -970,6 +974,8 @@ void Semantic::visit(VarDecl &n)
 		assert(false);// , "var statement needs either type or init value!");
 
 	Scope *s = scope();
+	n._owner = s;
+
 	if (s)
 	{
 		Declaration *decl = s->getDecl(n._name, true);

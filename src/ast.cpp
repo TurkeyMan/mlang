@@ -5,7 +5,7 @@
 
 namespace m {
 
-std::map<std::string, TypeExpr*> typesUsed;
+std::map<SharedString, TypeExpr*, string_less> typesUsed;
 
 PrimType SizeT_Type = PrimType::i64;
 PrimType SSizeT_Type = PrimType::u64;
@@ -112,7 +112,7 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, So
 }
 
 
-Declaration *Scope::getDecl(const std::string& name, bool onlyLocal)
+Declaration *Scope::getDecl(String name, bool onlyLocal)
 {
 	auto i = _symbols.find(name);
 	if (i != _symbols.end())
@@ -130,9 +130,40 @@ Declaration *Scope::getDecl(const std::string& name, bool onlyLocal)
 	}
 	return nullptr;
 }
-void Scope::addDecl(const std::string& name, Declaration *decl)
+void Scope::addDecl(SharedString name, Declaration *decl)
 {
-	_symbols.insert({ name, decl });
+	_symbolTable.push_back(decl);
+	_symbols.insert({ std::move(name), decl });
+}
+
+MutableString64 Module::stringof() const
+{
+	if (_moduleStatement)
+		return _moduleStatement->name();
+
+	MutableString64 r = _name.length ? String(_name[0]) : String();
+	for (size_t i = 1; i < _name.length; ++i)
+		r.append('.', _name[i]);
+	return r;
+}
+MutableString64 Module::mangleof() const
+{
+	MutableString64 r(Concat, std::to_string(_name[0].length), _name[0]);
+	for (size_t i = 1; i < _name.length; ++i)
+		r.append(std::to_string(_name[i].length), _name[i]);
+	return r;
+}
+
+const SharedString& Declaration::mangledName() const
+{
+	if (_mangledName.empty())
+	{
+		if (this->name().eq("main"))
+			_mangledName = "main";
+		else
+			_mangledName = SharedString(Concat, "_M", mangleof()); // TODO: include scope...
+	}
+	return _mangledName;
 }
 
 raw_ostream &ExpressionStatement::dump(raw_ostream &out, int ind)
@@ -152,15 +183,15 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 }
 
 
-Node *Node::getMember(const std::string &name)
+Node *Node::getMember(String name)
 {
-	if (name == "stringof")
+	if (name.eq("stringof"))
 	{
 		// TODO: need slice + string literals
 		assert(false);
 		return nullptr;
 	}
-	if (name == "mangleof")
+	if (name.eq("mangleof"))
 	{
 		// TODO: need slice + string literals
 		assert(false);
@@ -169,11 +200,11 @@ Node *Node::getMember(const std::string &name)
 	return nullptr;
 }
 
-Node *Expr::getMember(const std::string &name)
+Node *Expr::getMember(String name)
 {
-	if (name == "sizeof")
+	if (name.eq("sizeof"))
 		return new PrimitiveLiteralExpr(SizeT_Type, type()->size(), getLoc());
-	if (name == "alignof")
+	if (name.eq("alignof"))
 		return new PrimitiveLiteralExpr(SizeT_Type, type()->alignment(), getLoc());
 	return Node::getMember(name);
 }
@@ -190,13 +221,13 @@ int TypeExpr::ptrDepth() const
 	return depth;
 }
 
-Node *TypeExpr::getMember(const std::string &name)
+Node *TypeExpr::getMember(String name)
 {
-	if (name == "init")
+	if (name.eq("init"))
 		return init();
-	if (name == "sizeof")
+	if (name.eq("sizeof"))
 		return new PrimitiveLiteralExpr(SizeT_Type, size(), getLoc());
-	if (name == "alignof")
+	if (name.eq("alignof"))
 		return new PrimitiveLiteralExpr(SizeT_Type, alignment(), getLoc());
 	return Node::getMember(name);
 }
@@ -232,7 +263,7 @@ static uint64_t magicNumbers2[][4] =
 	{ 0, 0x3810000000000000ULL, 0x0010000000000000ULL, 0 }, // min_normal
 	{ 0, 0x3E80000000000000ULL, 0x3CB0000000000000ULL, 0 }, // epsilon
 };
-Node *PrimitiveType::getMember(const std::string &name)
+Node *PrimitiveType::getMember(String name)
 {
 	switch (_type)
 	{
@@ -242,72 +273,72 @@ Node *PrimitiveType::getMember(const std::string &name)
 	case PrimType::f32:
 	case PrimType::f64:
 	case PrimType::f128:
-		if (name == "infinity")
+		if (name.eq("infinity"))
 			return new PrimitiveLiteralExpr(_type, magicNumbers2[0][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "nan")
+		if (name.eq("nan"))
 			return new PrimitiveLiteralExpr(_type, magicNumbers2[1][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "max")
+		if (name.eq("max"))
 			return new PrimitiveLiteralExpr(_type, magicNumbers2[2][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "min_normal")
+		if (name.eq("min_normal"))
 			return new PrimitiveLiteralExpr(_type, magicNumbers2[3][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "epsilon")
+		if (name.eq("epsilon"))
 			return new PrimitiveLiteralExpr(_type, magicNumbers2[4][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "dig")
+		if (name.eq("dig"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[0][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "mant_dig")
+		if (name.eq("mant_dig"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[1][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "max_10_exp")
+		if (name.eq("max_10_exp"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[2][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "max_exp")
+		if (name.eq("max_exp"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[3][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "min_10_exp")
+		if (name.eq("min_10_exp"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[4][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "min_exp")
+		if (name.eq("min_exp"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[5][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "exp_bits")
+		if (name.eq("exp_bits"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[6][(int)_type - (int)PrimType::f16], SourceLocation(-1));
-		if (name == "mant_bits")
+		if (name.eq("mant_bits"))
 			return new PrimitiveLiteralExpr(PrimType::i32, (int64_t)magicNumbers[7][(int)_type - (int)PrimType::f16], SourceLocation(-1));
 		break;
 	case PrimType::u8:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFULL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0xFFULL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u16:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFULL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0xFFFFULL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u32:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFULL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFULL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u64:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFFFFFFFFFULL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0xFFFFFFFFFFFFFFFFULL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::u128:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0ULL, SourceLocation(-1));
 		break;
 	case PrimType::i8:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FLL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80LL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0x7FLL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0x80LL, SourceLocation(-1));
 		break;
 	case PrimType::i16:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFLL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000LL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0x7FFFLL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0x8000LL, SourceLocation(-1));
 		break;
 	case PrimType::i32:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFLL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x80000000LL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFLL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0x80000000LL, SourceLocation(-1));
 		break;
 	case PrimType::i64:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFFFFFFFFFLL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0x8000000000000000LL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0x7FFFFFFFFFFFFFFFLL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0x8000000000000000LL, SourceLocation(-1));
 		break;
 	case PrimType::i128:
-		if (name == "max") return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
-		if (name == "min") return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
+		if (name.eq("max")) return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
+		if (name.eq("min")) return new PrimitiveLiteralExpr(_type, 0LL, SourceLocation(-1));
 		break;
 	case PrimType::c8:
 	case PrimType::c16:
@@ -384,20 +415,20 @@ Expr* PrimitiveType::makeConversion(Expr *expr, TypeExpr *targetType, bool impli
 	return nullptr;
 }
 
-std::string PrimitiveType::stringof() const
+MutableString64 PrimitiveType::stringof() const
 {
-	return std::string("@") + primTypeNames[(size_t)type()];
+	return MutableString64(Concat, '@', primTypeNames[(size_t)type()]);
 }
-std::string PrimitiveType::mangleof() const
+MutableString64 PrimitiveType::mangleof() const
 {
 	return primTypeMangle[(size_t)type()];
 }
 raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 {
-	return out << stringof() << '\n';
+	return out << str_ref(stringof()) << '\n';
 }
 
-Node *PointerType::getMember(const std::string &name)
+Node *PointerType::getMember(String name)
 {
 	Node *r = TypeExpr::getMember(name);
 	if (r)
@@ -567,9 +598,14 @@ bool PointerType::canPromote(PtrType to) const
 	return false;
 }
 
-std::string PointerType::stringof() const
+MutableString64 PointerType::stringof() const
 {
-	return _pointerTarget->stringof() + "*";
+	return MutableString64(Concat, _pointerTarget->stringof(), '*');
+}
+MutableString64 PointerType::mangleof() const
+{
+	static const char *ty[] = { "P", "U", "R", "" };
+	return MutableString64(Concat, ty[(int)_type], _pointerTarget->mangleof());
 }
 raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 {
@@ -582,18 +618,18 @@ raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-size_t Struct::memberIndex(const std::string &name)
+size_t Struct::memberIndex(String name)
 {
 	size_t i = 0;
 	for (; i < _dataMembers.size(); ++i)
 	{
-		if (_dataMembers[i].decl->name().compare(name) == 0)
+		if (_dataMembers[i].decl->name().eq(name))
 			break;
 	}
 	return i;
 }
 
-Node *Struct::getMember(const std::string &name)
+Node *Struct::getMember(String name)
 {
 	Node *r = TypeExpr::getMember(name);
 	if (r)
@@ -633,9 +669,9 @@ Expr* Struct::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) co
 }
 
 
-std::string Struct::stringof() const
+MutableString64 Struct::stringof() const
 {
-	std::string s = "{ ";
+	MutableString64 s = "{ ";
 	bool first = true;
 	for (auto &m : _dataMembers)
 	{
@@ -645,7 +681,7 @@ std::string Struct::stringof() const
 		s.append(m.decl->targetType()->stringof());
 	}
 	s.append(" }");
-	return std::move(s);
+	return s;
 }
 raw_ostream &Struct::dump(raw_ostream &out, int ind)
 {
@@ -683,16 +719,16 @@ ConvType FunctionType::convertible(const TypeExpr *target) const
 	return ConvType::NoConversion;
 }
 
-std::string FunctionType::stringof() const
+MutableString64 FunctionType::stringof() const
 {
-	std::string r = _returnType ? _returnType->stringof() : std::string("???");
-	r += "(";
+	MutableString64 r = _returnType ? _returnType->stringof() : MutableString64("???");
+	r.append('(');
 	for (size_t i = 0; i < _argTypes.length; ++i)
-		r += (i > 0 ? std::string(",") : std::string()) + _argTypes[i]->stringof();
-	r += ")";
+		r.append(i > 0 ? "," : "", _argTypes[i]->stringof());
+	r.append(')');
 	return r;
 }
-std::string FunctionType::mangleof() const { assert(false); return ""; }
+MutableString64 FunctionType::mangleof() const { assert(false); return ""; }
 
 raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 {
@@ -717,16 +753,33 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 
 raw_ostream &TypeDecl::dump(raw_ostream &out, int ind)
 {
-	Declaration::dump(out << "type: " << _name, ind) << "\n";
+	Declaration::dump(out << "type: " << str_ref(_name), ind) << "\n";
 	++ind;
 	if (_type)
 		_type->dump(indent(out, ind) << "as: ", ind + 1);
 	return out;
 }
 
+MutableString64 ValDecl::stringof() const
+{
+	return MutableString64(Concat, _owner->module()->stringof(), '.', _name);
+}
+
+MutableString64 ValDecl::mangleof() const
+{
+	MutableString64 m = _owner->module()->mangleof();
+	m.append(std::to_string(_name.size()), _name);
+	FunctionType *fn = _type->asFunction();
+	if (!fn)
+		return m;
+	for (auto &a : fn->argTypes())
+		m.append(a->mangleof());
+	return m;
+}
+
 raw_ostream &ValDecl::dump(raw_ostream &out, int ind)
 {
-	Declaration::dump(out << "def: #" << _name, ind) << "\n";
+	Declaration::dump(out << "def: #" << str_ref(_name), ind) << "\n";
 	++ind;
 	if (_type)
 		_type->dump(indent(out, ind) << "type: ", ind + 1);
@@ -735,9 +788,26 @@ raw_ostream &ValDecl::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+MutableString64 VarDecl::stringof() const
+{
+	return MutableString64(Concat, _owner->module()->stringof(), '.', _name);
+}
+
+MutableString64 VarDecl::mangleof() const
+{
+	MutableString64 m = _owner->module()->mangleof();
+	m.append(std::to_string(_name.size()), _name);
+	FunctionType *fn = _type->asFunction();
+	if (!fn)
+		return m;
+	for (auto &a : fn->argTypes())
+		m.append(a->mangleof());
+	return m;
+}
+
 raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 {
-	Declaration::dump(out << "var: #" << _name, ind) << "\n";
+	Declaration::dump(out << "var: #" << str_ref(_name), ind) << "\n";
 	++ind;
 	if (_valType)
 		_valType->dump(indent(out, ind) << "type: ", ind + 1);
@@ -751,7 +821,7 @@ raw_ostream &VarDecl::dump(raw_ostream &out, int ind)
 //** Expression nodes **
 //**********************
 
-std::string PrimitiveLiteralExpr::stringof() const
+MutableString64 PrimitiveLiteralExpr::stringof() const
 {
 	switch (_type)
 	{
@@ -779,50 +849,53 @@ std::string PrimitiveLiteralExpr::stringof() const
 	case PrimType::c8:
 	case PrimType::c16:
 	case PrimType::c32:
-		return std::to_string(c);
+	{
+		if (c < ' ')
+		{
+			switch (c)
+			{
+				case '\0': return "'\\0'";
+				case '\t': return "'\\t'";
+				case '\r': return "'\\r'";
+				case '\n': return "'\\n'";
+				case '\b': return "'\\b'";
+				default:
+				{
+					static const char hex[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+					char h[9]; h[8] = '\0';
+					size_t start = 7;
+					for (ptrdiff_t i = 0, s = 28; i < 8; ++i, s -= 4)
+					{
+						h[i] = hex[(c >> s) & 0xF];
+						if (start == 7 && h[i] != '0')
+							start = i;
+					}
+					return MutableString64(Concat, "'\\x", h + start, '\'');
+				}
+			}
+		}
+		else
+		{
+			char ch[8];
+			ch[utfEncode(c, ch)] = '\0';
+			return MutableString64(Concat, "\'", ch, '\'');
+		}
+	}
 	default:
-		assert(0); return std::string();
+		assert(0);
+		return nullptr;
 	}
 }
 
 raw_ostream &PrimitiveLiteralExpr::dump(raw_ostream &out, int ind)
 {
-	switch (_type)
-	{
-	case PrimType::v:
-		return Expr::dump(out << "void", ind) << '\n';
-	case PrimType::u1:
-		return Expr::dump(out << (u ? "true" : "false"), ind) << '\n';
-	case PrimType::f16:
-	case PrimType::f32:
-	case PrimType::f64:
-	case PrimType::f128:
-		return Expr::dump(out << f, ind) << '\n';
-	case PrimType::u8:
-	case PrimType::u16:
-	case PrimType::u32:
-	case PrimType::u64:
-	case PrimType::u128:
-		return Expr::dump(out << u, ind) << '\n';
-	case PrimType::i8:
-	case PrimType::i16:
-	case PrimType::i32:
-	case PrimType::i64:
-	case PrimType::i128:
-		return Expr::dump(out << i, ind) << '\n';
-	case PrimType::c8:
-	case PrimType::c16:
-	case PrimType::c32:
-		return Expr::dump(out << "'" << c << "'", ind) << '\n';
-	default:
-		assert(0); return out;
-	}
+	return Expr::dump(out << str_ref(stringof()), ind) << '\n';
 }
 
 raw_ostream &AggregateLiteralExpr::dump(raw_ostream &out, int ind)
 {
 	Expr::dump(out << "aggregate\n", ind);
-	indent(out, ind) << "type: " << _type->stringof() << '\n';
+	indent(out, ind) << "type: " << str_ref(_type->stringof()) << '\n';
 	indent(out, ind) << "values: {\n";
 	for (auto i : _items)
 		i->dump(indent(out, ind + 1), ind + 1);
@@ -830,7 +903,7 @@ raw_ostream &AggregateLiteralExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-Node *RefExpr::getMember(const std::string &name)
+Node *RefExpr::getMember(String name)
 {
 	// base class member?
 	Node *r = Expr::getMember(name);
@@ -856,7 +929,7 @@ Node *RefExpr::getMember(const std::string &name)
 	Tuple *arr = dynamic_cast<Tuple*>(target);
 	if (arr && arr->isSequence())
 	{
-		if (name == "ptr")
+		if (name.eq("ptr"))
 			return makeConversion(new PointerType(PtrType::RawPtr, arr->seqElement()->asType(), SourceLocation(0)), false);
 	}
 
@@ -878,7 +951,7 @@ raw_ostream &RefExpr::dump(raw_ostream &out, int ind)
 	Expr::dump(out << "ref\n", ind);
 	_type->dump(indent(out, ind) << "type: ", ind);
 	if (_target)
-		indent(out, ind) << "target: #" << _target->name() << '\n';
+		indent(out, ind) << "target: #" << str_ref(_target->name()) << '\n';
 	else
 		indent(out, ind) << "target: 0x" << _absolute << '\n';
 	return out;
@@ -926,7 +999,7 @@ raw_ostream &BinaryExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-Node *CallExpr::getMember(const std::string &name)
+Node *CallExpr::getMember(String name)
 {
 	// base class member?
 	Node *r = Expr::getMember(name);
@@ -965,7 +1038,7 @@ raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-Node *Identifier::getMember(const std::string &name)
+Node *Identifier::getMember(String name)
 {
 	// base class member?
 	Node *r = AmbiguousExpr::getMember(name);
@@ -978,10 +1051,10 @@ Node *Identifier::getMember(const std::string &name)
 raw_ostream &Identifier::dump(raw_ostream &out, int ind)
 {
 	const char *ty = _var ? "#" : (_type ? "@" : "");
-	return Node::dump(out << ty << _name << "\n", ind);
+	return Node::dump(out << ty << str_ref(_name) << "\n", ind);
 }
 
-Node *MemberLookup::getMember(const std::string &name)
+Node *MemberLookup::getMember(String name)
 {
 	// base class member?
 	Node *r = AmbiguousExpr::getMember(name);
@@ -994,19 +1067,19 @@ Node *MemberLookup::getMember(const std::string &name)
 raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
 {
 	Node::dump(out << "lookup\n", ind);
-	indent(out, ind) << "member: " << _member << "\n";
+	indent(out, ind) << "member: " << str_ref(_member) << "\n";
 	_node->dump(indent(out, ind) << "node: ", ind + 1);
 	return out;
 }
 
-Tuple* Tuple::makeStringLiteral(const char *str, SourceLocation loc)
+Tuple* Tuple::makeStringLiteral(String str, SourceLocation loc)
 {
 	NodeList s = NodeList::empty();
-	std::vector<size_t> offsets;
+	Array<size_t> offsets;
 
 	PrimType ty = PrimType::c8;
 
-	size_t len = strlen(str) - 1;
+	size_t len = str.length - 1;
 	if (str[len] == 'c')
 		ty = PrimType::c8, --len;
 	else if (str[len] == 'w')
@@ -1021,7 +1094,7 @@ Tuple* Tuple::makeStringLiteral(const char *str, SourceLocation loc)
 	for (size_t i = 1; i < len;)
 	{
 		char32_t c;
-		i += utfDecode(str + i, &c);
+		i += utfDecode(str.ptr + i, &c);
 
 		if (escape && c == '\\')
 		{
@@ -1129,12 +1202,9 @@ void Tuple::analyse()
 		TypeExpr *ty1 = _elements[0]->asType();
 		if (ty1)
 		{
-			bool same = false;
-			if (_elements.length == 1 && ty1)
-				same = true;
-			else
+			bool same = true;
+			if (_elements.length > 1)
 			{
-				same = true;
 				for (size_t i = 1; i < _elements.length; ++i)
 				{
 					TypeExpr *ty2 = _elements[i]->asType();
@@ -1156,35 +1226,41 @@ void Tuple::analyse()
 
 	if (isSequence())
 	{
-		// TODO: attempt to calculate constant shape?
-		//...
-
-		allExpr = false, allTypes = false;
-		Expr *expr = dynamic_cast<Expr*>(_element);
+		allExpr = false;
+		allTypes = false;
+		Expr *expr = _element->asExpr();
 		if (expr)
 		{
 			allExpr = true;
 			_alignment = expr->type()->alignment();
+			_size = expr->type()->size();
 		}
 		else
 		{
-			TypeExpr *type = dynamic_cast<TypeExpr*>(_element);
+			TypeExpr *type = _element->asType();
 			if (type)
 			{
 				allTypes = true;
 				_alignment = type->alignment();
+				_size = type->size();
 			}
 		}
+
+		size_t numElements = 1;
+		for (auto e : _shape)
+			numElements *= e->constEval()->getIntValue();
+		_size *= numElements;
 	}
 	else
 	{
-		allExpr = true, allTypes = _elements.length > 0;
+		allExpr = true;
+		allTypes = _elements.length > 0;
 		for (auto e : _elements)
 		{
 			size_t size = 0;
 			size_t align = 0;
 
-			Expr *expr = dynamic_cast<Expr*>(e);
+			Expr *expr = e->asExpr();
 			if (expr)
 			{
 				size = expr->type()->size();
@@ -1194,7 +1270,7 @@ void Tuple::analyse()
 			}
 			else
 			{
-				TypeExpr *type = dynamic_cast<TypeExpr*>(e);
+				TypeExpr *type = e->asType();
 				if (type)
 				{
 					size = type->size();
@@ -1470,9 +1546,9 @@ Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) con
 	return r;
 }
 
-Node *Tuple::getMember(const std::string &name)
+Node *Tuple::getMember(String name)
 {
-	if (name == "length" && dimensions() == 1)
+	if (name.eq("length") && dimensions() == 1)
 	{
 		if (_element)
 			return _shape[0];
@@ -1480,27 +1556,26 @@ Node *Tuple::getMember(const std::string &name)
 	}
 	if (isType())
 	{
-		if (name == "init")
+		if (name.eq("init"))
 			return init();
 	}
 	if (isType() || isExpr())
 	{
 		// TODO: can we support these properties on mixed tuples?
-		if (name == "sizeof")
+		if (name.eq("sizeof"))
 			return new PrimitiveLiteralExpr(SizeT_Type, size(), getLoc());
-		if (name == "alignof")
+		if (name.eq("alignof"))
 			return new PrimitiveLiteralExpr(SizeT_Type, alignment(), getLoc());
 	}
 	return Node::getMember(name);
 }
 
-std::string Tuple::stringof() const
+MutableString64 Tuple::stringof() const
 {
-	std::string s = "[ ";
+	MutableString64 s = "[ ";
 	if (isSequence())
 	{
-		s.append(_element->stringof());
-		s.append("; ");
+		s.append(_element->stringof(), "; ");
 		bool first = true;
 		for (auto &i : _shape)
 		{
@@ -1524,22 +1599,60 @@ std::string Tuple::stringof() const
 	s.append(" ]");
 	return std::move(s);
 }
+MutableString64 Tuple::mangleof() const
+{
+	MutableString64 m(Concat, 'T', std::to_string(numElements()));
+	if (isSequence())
+	{
+		m.append('S', _element->mangleof());
+	}
+	else
+	{
+		m.append('E');
+		for (auto e : _elements)
+			m.append(e->mangleof());
+	}
+	return m;
+}
 raw_ostream &Tuple::dump(raw_ostream &out, int ind)
 {
-	out << "[\n";
-	for (auto e : _elements)
-		e->dump(indent(out, ind + 1), ind + 1);
-	return indent(out, ind) << "]\n";
+	if (isString())
+	{
+		out << "\"";
+		for (auto e : _elements)
+		{
+			MutableString64 c = e->asExpr()->constEval()->stringof();
+			out << str_ref(c.slice(1, c.length - 1));
+		}
+		return out << "\"\n";
+	}
+	else
+	{
+		out << "[\n";
+		if (isSequence())
+		{
+			_element->dump(indent(out, ind + 1), ind + 1);
+			indent(out, ind + 1) << "...\n";
+			for (auto e : _shape)
+				e->dump(indent(out, ind + 1), ind + 1);
+		}
+		else
+		{
+			for (auto e : _elements)
+				e->dump(indent(out, ind + 1), ind + 1);
+		}
+		return indent(out, ind) << "]\n";
+	}
 }
 
-Node *Index::getMember(const std::string &name)
+Node *Index::getMember(String name)
 {
 	return dynamic_cast<AmbiguousExpr*>(_result)->resolve()->getMember(name);
 }
 
 raw_ostream &Index::dump(raw_ostream &out, int ind)
 {
-	out << "index: " << _node->stringof() << "\n";
+	out << "index: " << str_ref(_node->stringof()) << "\n";
 	indent(out, ind) << "indices: [\n";
 	for (auto &i : _indices)
 		i->dump(indent(out, ind + 1), ind + 1);

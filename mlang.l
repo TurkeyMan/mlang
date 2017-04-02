@@ -1,53 +1,15 @@
 %{
 #include "src/ast.h"
+#include "src/string.h"
 
 #include "mlang.tab.h"
 
-long long htoi(const char *text)
+const char *gc_dup(const char *s)
 {
-	if(text[0] == '0' && text[1] == 'x')
-		text += 2;
-	long long v = 0;
-	while(*text)
-	{
-		if(*text != '_')
-		{
-			v <<= 4;
-			if(*text >= '0' && *text <= '9')
-				v |= *text - '0';
-			else
-				v |= 10 + (*text | 0x20) - 'a';
-		}
-		++text;
-	}
-	return v;
-}
-
-long long btoi(const char *text)
-{
-	if(text[0] == '0' && text[1] == 'b')
-		text += 2;
-	long long v = 0;
-	while(*text)
-	{
-		if(*text != '_')
-		{
-			v <<= 1;
-			v |= *text - '0';
-		}
-		++text;
-	}
-	return v;
-}
-
-long long charval(const char *text)
-{
-	if(text[0] == '\'')
-		++text;
-	long long v = *text;
-	// TODO: decode UTF8...
-	//       handle char sequences? (fourcc?)
-	return v;
+	size_t sz = strlen(s);
+	char *buffer = (char*)GC_MALLOC(sz + 1);
+	strcpy_s(buffer, sz + 1, s);
+	return buffer;
 }
 
 %}
@@ -62,6 +24,7 @@ L			[a-zA-Z_]
 I			[0-9a-zA-Z_]
 H			[a-fA-F0-9]
 B			[01]
+O			[0-7]
 E			[Ee][+-]?{D}+
 
 %%
@@ -162,23 +125,23 @@ is			{ return IS; }
 ">>="		{ return ASREQ; }
 ">>>="		{ return LSREQ; }
 
-\"(\\.|[^\n"])*\"[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
-\`(\\.|[^\n`])*\`[cwd]? { yylval.sval = _strdup(yytext); return STRING; }
-\'(\\.|[^\n'])*\'[cwd]? { yylval.ival = charval(yytext); return CHARACTER; }
+\"(\\.|[^\n"])*\"[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
+\`(\\.|[^\n`])*\`[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
+\'(\\.|[^\n'])*\'[wd]? { yylval.cval = String(yytext).drop_front().front_char(); return CHARACTER; }
 
 null			{ yylval.ival = 0; return NUL; }
 
 true			{ yylval.ival = 1; return BOOL_T; }
 false			{ yylval.ival = 0; return BOOL_T; }
 
-{D}+\.{D}+{E}		{ yylval.fval = atof(yytext); return FLOATING; }
-{D}+\.{D}+			{ yylval.fval = atof(yytext); return FLOATING; }
+{D}+\.{D}+{E}?		{ yylval.fval = atof(yytext); return FLOATING; }
 {D}+{E}				{ yylval.fval = atof(yytext); return FLOATING; }
-{D}+				{ yylval.ival = atoi(yytext); return INTEGER; }
-"0x"{H}({H}|_{H})*	{ yylval.ival = htoi(yytext); return INTEGER; }
-"0b"{B}({B}|_{B})*	{ yylval.ival = btoi(yytext); return INTEGER; }
+{D}+				{ yylval.ival = String(yytext).parse_int(); return INTEGER; }
+"0x"{H}({H}|_{H})*	{ yylval.ival = String(yytext).drop_front(2).parse_int<16>(); return INTEGER; }
+"0b"{B}({B}|_{B})*	{ yylval.ival = String(yytext).drop_front(2).parse_int<2>(); return INTEGER; }
+"0o"{O}({O}|_{O})*	{ yylval.ival = String(yytext).drop_front(2).parse_int<8>(); return INTEGER; }
 
-{L}{I}*			{ yylval.sval = _strdup(yytext); return IDENTIFIER; }
+{L}{I}*			{ yylval.sval = gc_dup(yytext); return IDENTIFIER; }
 
 "/*"			BEGIN(BLOCK_COMMENT);
 <BLOCK_COMMENT>{

@@ -1,0 +1,3 @@
+[submodule "lib/cpp-slice"]
+	path = lib/cpp-slice
+	url = git@github.com:TurkeyMan/cpp-slice.git

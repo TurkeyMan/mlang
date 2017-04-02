@@ -22,30 +22,29 @@ void Link(Compiler &compiler)
 	else
 		link = "link.exe";
 
-	std::string args = "/OUT:\"" + compiler.outFile + "\" /MACHINE:X64 /ERRORREPORT:PROMPT /NOLOGO /DYNAMICBASE /SUBSYSTEM:CONSOLE";
+	MutableString<1024> args(Concat, "/OUT:\"", compiler.outFile, "\" /MACHINE:X64 /ERRORREPORT:PROMPT /NOLOGO /DYNAMICBASE /SUBSYSTEM:CONSOLE");
 
 	if (compiler.debug)
 	{
-		args += " /DEBUG";
-		if (compiler.outFile.substr(compiler.outFile.length() - 4) == ".exe")
-			args += " /PDB:\"" + compiler.outFile.substr(0, compiler.outFile.length() - 4) + ".pdb\"";
+		args.append(" /DEBUG");
+		if (compiler.outFile.ends_with_ic(".exe"))
+			args.append(" /PDB:\"", compiler.outFile.slice(0, compiler.outFile.length - 4), ".pdb\"");
 		else
-			args += " /PDB:\"" + compiler.outFile + ".pdb\"";
+			args.append(" /PDB:\"", compiler.outFile, ".pdb\"");
 	}
 
 	for (auto &libPath : compiler.libPaths)
-		args += " /LIBPATH:" + libPath;
+		args.append(" /LIBPATH:", libPath);
 	for (auto &lib : compiler.libs)
-		args += " " + lib;
+		args.append(" ", lib);
 	if (!compiler.objFile.empty())
-		args += " \"" + compiler.objFile + "\"";
-	std::string cmd = std::string("\"\"") + link + std::string("\"") + " " + args + "\"";
+		args.append(" \"", compiler.objFile, "\"");
+	MutableString<1024> cmd(Concat, "\"\"", link, "\" ", args, "\"");
 
 	int result = system(cmd.c_str());
 	if (result)
 	{
-		// link failed!!
-		//...
+		error(compiler.outFile.c_str(), 0, "Link failed!");
 	}
 }
 

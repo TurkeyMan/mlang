@@ -10,24 +10,26 @@ namespace m {
 class Compiler
 {
 public:
-	std::vector<std::string> srcFiles;
+	Array<SharedString> srcFiles;
 
-	std::string outFile;
-	std::string irFile;
+	SharedString outFile;
+	SharedString irFile;
 
-	std::string objFile;
-	std::vector<std::string> libPaths;
-	std::vector<std::string> libs;
-	std::string runtime = "MD"; // multi-threaded dll - release
+	SharedString objFile;
+	Array<SharedString> libPaths;
+	Array<SharedString> libs;
+	SharedString runtime = "MD"; // multi-threaded dll - release
 
 	Mode mode = Mode::CompileAndLink;
 	int opt = 0;
 
 	bool debug = false;
 
-	std::map<std::string, m::Module*> modules;
+	m::Module *root;
 
-	std::map<std::string, m::TypeExpr*> types;
+	Array<m::Module*> modules;
+
+	std::map<SharedString, m::TypeExpr*, string_less> types;
 };
 
 }

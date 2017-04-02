@@ -6,7 +6,7 @@
 #include <Windows.h>
 #include <stdio.h>
 
-m::StatementList parse(FILE *file, std::string filename);
+m::StatementList parse(FILE *file, String filename);
 
 namespace m {
 
@@ -14,16 +14,10 @@ void InitCodegen();
 void Codegen(Compiler &compiler);
 void Link(Compiler &compiler);
 
-std::string curSrcFile;
-std::string astFile;
+SharedString curSrcFile;
+SharedString astFile;
 
 Compiler mlang;
-
-inline bool ends_with(std::string const & value, std::string const & ending)
-{
-	if (ending.size() > value.size()) return false;
-	return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
-}
 
 extern "C" {
 	int main(int argc, const char *argv[])
@@ -87,7 +81,11 @@ extern "C" {
 					mlang.runtime = argv[arg] + 9;
 			}
 			else
-				mlang.srcFiles.push_back(argv[arg]);
+			{
+				MutableString256 file = argv[arg];
+				file.replace('\\', '/');
+				mlang.srcFiles.push_back(file);
+			}
 
 			++arg;
 		}
@@ -118,10 +116,10 @@ extern "C" {
 
 		if (mlang.mode == Mode::CompileAndLink)
 		{
-			if (ends_with(mlang.outFile, ".exe") || ends_with(mlang.outFile, ".lib") || ends_with(mlang.outFile, ".dll"))
-				mlang.objFile = mlang.outFile.substr(0, mlang.outFile.size() - 4) + ".obj";
+			if (mlang.outFile.ends_with(".exe") || mlang.outFile.ends_with(".lib") || mlang.outFile.ends_with(".dll"))
+				mlang.objFile = SharedString(Concat, mlang.outFile.slice(0, mlang.outFile.length - 4), ".obj");
 			else
-				mlang.objFile = mlang.outFile + ".obj";
+				mlang.objFile = SharedString(Concat, mlang.outFile, ".obj");
 		}
 		else
 			mlang.objFile = mlang.outFile;
@@ -157,25 +155,11 @@ extern "C" {
 			// done with the file
 			fclose(file);
 
-			// HACK?: make default module name from filename without extension
-			std::string moduleName = src;
-			size_t slash = moduleName.find_last_of('/');
-			slash = max(moduleName.find_last_of('\\'), slash);
-			size_t dot = moduleName.find_last_of('.');
-			if (dot > slash)
-				moduleName = moduleName.substr(0, dot);
-			std::replace(moduleName.begin(), moduleName.end(), '/', '.');
-			std::replace(moduleName.begin(), moduleName.end(), '\\', '.');
-
-			m::Module *module = new m::Module(path, pFilePart, std::move(moduleName), statements);
-
-			mlang.modules.insert({ moduleName, module });
-
 			// dump parse tree
 			FILE *ast = nullptr;
 			if (!astFile.empty())
 			{
-				fopen_s(&ast, (src + ".ast").c_str(), "w");
+				fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
 				if (!file)
 				{
 					outputMessage("Can't open ast file: %s", astFile.c_str());
@@ -200,6 +184,76 @@ extern "C" {
 					s->dump(os, 0);
 				os.flush();
 				fclose(ast);
+			}
+
+			// add to module list
+			Array<SharedString> moduleIdentifier;
+
+			ModuleStatement *moduleStatement = nullptr;
+			for (auto pStatement : statements)
+			{
+				ModuleStatement *module = dynamic_cast<ModuleStatement*>(pStatement);
+				if (module)
+				{
+					if (moduleStatement)
+						error(src.c_str(), module->getLine(), "Invalid; multiple 'module' statements.");
+
+					module->name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
+					moduleStatement = module;
+				}
+			}
+
+			if (moduleIdentifier.empty())
+			{
+				// HACK?: make default module name from filename without extension
+				MutableString256 moduleName = src;
+				ptrdiff_t slash = moduleName.find_last('/');
+				if (slash == moduleName.length)
+					slash = -1;
+				ptrdiff_t dot = moduleName.find_last('.');
+				if (dot == moduleName.length)
+					slash = -1;
+				if (dot > slash)
+					moduleName.pop_back(moduleName.length - dot);
+				moduleName.replace('.', '_');
+
+				moduleName.tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, "/");
+			}
+
+			m::Module *module = new m::Module(path, pFilePart, std::move(moduleIdentifier), statements, moduleStatement);
+
+			mlang.modules.push_back(module);
+		}
+
+		// organise modules into tree...
+		mlang.root = new Module(nullptr, nullptr, {}, StatementList::empty(), nullptr);
+		for (auto m : mlang.modules)
+		{
+			Module *sub = mlang.root;
+			for (size_t i = 0; i < m->fullName().size(); ++i)
+			{
+				const SharedString &name = m->fullName()[i];
+				auto it = sub->submodules().find(name);
+
+				if (i < m->fullName().size() - 1)
+				{
+					if (it == sub->submodules().end())
+					{
+						Module *package = new Module(nullptr, nullptr, Array<SharedString>(m->fullName().slice(0, i + 1)), StatementList::empty(), nullptr);
+						sub->submodules().insert({ name, package });
+						sub = sub->submodules()[name];
+					}
+				}
+				else
+				{
+					if (it != sub->submodules().end())
+					{
+						const SharedString &path = sub->path();
+						ModuleStatement *m = sub->getModuleStatement();
+						error(!path.empty() ? (const char*)path.c_str() : "", m ? m->getLine() : 0, "Module '%s' already exists.", (const char*)sub->stringof().c_str());
+					}
+					sub->submodules().insert({ name, m });
+				}
 			}
 		}
 

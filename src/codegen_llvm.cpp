@@ -42,31 +42,33 @@ LLVMGenerator::LLVMGenerator(Compiler &compiler)
 	, ctx(getGlobalContext())
 	, Builder(ctx)
 	, TheJIT(llvm::make_unique<KaleidoscopeJIT>())
-	, TheModule(llvm::make_unique<llvm::Module>(compiler.outFile, ctx))
+	, TheModule(llvm::make_unique<llvm::Module>(str_ref(compiler.outFile), ctx))
 {
 	// Open a new module.
 	TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
 	TheModule->setTargetTriple(sys::getProcessTriple()); // x86_64-pc-windows-msvc18.0.0 ???
 
-	// Add the current debug info version into the module.
-	TheModule->addModuleFlag(llvm::Module::Warning, "Debug Info Version", DEBUG_METADATA_VERSION);
+	if (compiler.debug)
+	{
+		// Add the current debug info version into the module.
+		TheModule->addModuleFlag(llvm::Module::Warning, "Debug Info Version", DEBUG_METADATA_VERSION);
 
-	// Darwin only supports dwarf2.
-	if (Triple(sys::getProcessTriple()).isOSDarwin())
-		TheModule->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
+		// Darwin only supports dwarf2.
+		if (Triple(sys::getProcessTriple()).isOSDarwin())
+			TheModule->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
 
-	// Construct the DIBuilder, we do this here because we need the module.
-	DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
+		// Construct the DIBuilder, we do this here because we need the module.
+		DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
+	}
 
 	for (auto module : compiler.modules)
-		module.second->accept(*this);
+		module->accept(*this);
 }
 
 void LLVMGenerator::pushFunction(FunctionLiteralExpr *f)
 {
 	TypeExpr *rt = f->type()->returnType();
-	_functionStack.push_back(FunctionState{ f, rt->isVoid(), false, _scope.size(), nullptr });
-	FunctionState &cur = _functionStack.back();
+	FunctionState &cur = _functionStack.push_back(FunctionState{ f, rt->isVoid(), false, _scope.size(), nullptr });
 	if (!cur.isVoid)
 	{
 		cur.retval = Builder.CreateAlloca(rt->cgData<LLVMData>()->type, nullptr, "retval");
@@ -143,36 +145,39 @@ void Codegen(Compiler &compiler)
 
 void LLVMGenerator::codegen()
 {
-	// Finalize the debug info.
-	DBuilder->finalize();
+	if (compiler.debug)
+	{
+		// Finalize the debug info.
+		DBuilder->finalize();
+	}
 
 	std::vector<std::string> linkOptions;
 
-	if (compiler.runtime.compare("MT") == 0)
+	if (compiler.runtime.eq("MT"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MT_StaticRelease");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (compiler.runtime.compare("MTd") == 0)
+	else if (compiler.runtime.eq("MTd"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MTd_StaticDebug");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (compiler.runtime.compare("MD") == 0)
+	else if (compiler.runtime.eq("MD"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MD_DynamicRelease");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (compiler.runtime.compare("MDd") == 0)
+	else if (compiler.runtime.eq("MDd"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
-	else if (compiler.runtime.compare("none") != 0)
+	else if (!compiler.runtime.eq("none"))
 	{
 		// bad runtime!
 		assert(false);
@@ -204,7 +209,7 @@ void LLVMGenerator::codegen()
 			fopen_s(&file, compiler.irFile.c_str(), "w");
 			if (!file)
 			{
-				printf("Can't open file for output: %s\n", compiler.irFile.c_str());
+				printf("Can't open file for output: %s\n", (const char*)compiler.irFile.c_str());
 				return;
 			}
 			fwrite(ir.c_str(), 1, ir.size(), file);
@@ -282,7 +287,7 @@ void LLVMGenerator::codegen()
 		sys::fs::OpenFlags OpenFlags = sys::fs::F_None;
 		if (fileType == TargetMachine::CGFT_AssemblyFile)
 			OpenFlags |= sys::fs::F_Text;
-		auto Out = std::make_unique<tool_output_file>(compiler.mode == Mode::CompileAndLink ? compiler.objFile : compiler.outFile, EC, OpenFlags);
+		auto Out = std::make_unique<tool_output_file>(compiler.mode == Mode::CompileAndLink ? str_ref(compiler.objFile) : str_ref(compiler.outFile), EC, OpenFlags);
 //		std::unique_ptr<tool_output_file> Out =
 //			GetOutputStream(TheTarget->getName(), targetTriple.getOS(), outFile);
 		assert(Out);
@@ -306,7 +311,7 @@ void LLVMGenerator::codegen()
 		setFunctionAttributes(CPUStr, FeaturesStr, *TheModule);
 
 		if (RelaxAll.getNumOccurrences() > 0 && fileType != TargetMachine::CGFT_ObjectFile)
-			errs() << compiler.outFile << ": warning: ignoring -mc-relax-all because filetype != obj";
+			errs() << str_ref(compiler.outFile) << ": warning: ignoring -mc-relax-all because filetype != obj";
 
 		{
 			raw_pwrite_stream *OS = &Out->os();
@@ -328,13 +333,13 @@ void LLVMGenerator::codegen()
 			const PassRegistry *PR = PassRegistry::getPassRegistry();
 			if (!RunPass.empty()) {
 				if (!StartAfter.empty() || !StopAfter.empty()) {
-					errs() << compiler.outFile << ": start-after and/or stop-after passes are "
+					errs() << str_ref(compiler.outFile) << ": start-after and/or stop-after passes are "
 						"redundant when run-pass is specified.\n";
 					assert(false);
 				}
 				const PassInfo *PI = PR->getPassInfo(RunPass);
 				if (!PI) {
-					errs() << compiler.outFile << ": run-pass pass is not registered.\n";
+					errs() << str_ref(compiler.outFile) << ": run-pass pass is not registered.\n";
 					assert(false);
 				}
 				StopAfterID = StartBeforeID = PI->getTypeInfo();
@@ -343,7 +348,7 @@ void LLVMGenerator::codegen()
 				if (!StartAfter.empty()) {
 					const PassInfo *PI = PR->getPassInfo(StartAfter);
 					if (!PI) {
-						errs() << compiler.outFile << ": start-after pass is not registered.\n";
+						errs() << str_ref(compiler.outFile) << ": start-after pass is not registered.\n";
 						assert(false);
 					}
 					StartAfterID = PI->getTypeInfo();
@@ -351,7 +356,7 @@ void LLVMGenerator::codegen()
 				if (!StopAfter.empty()) {
 					const PassInfo *PI = PR->getPassInfo(StopAfter);
 					if (!PI) {
-						errs() << compiler.outFile << ": stop-after pass is not registered.\n";
+						errs() << str_ref(compiler.outFile) << ": stop-after pass is not registered.\n";
 						assert(false);
 					}
 					StopAfterID = PI->getTypeInfo();
@@ -363,7 +368,7 @@ void LLVMGenerator::codegen()
 //				StartAfterID, StopAfterID, MIR.get())) {
 			if (Target->addPassesToEmitFile(PM, *OS, fileType, true, StartBeforeID,
 				StartAfterID, StopAfterID, nullptr)) {
-				errs() << compiler.outFile << ": target does not support generation of this file type!\n";
+				errs() << str_ref(compiler.outFile) << ": target does not support generation of this file type!\n";
 				assert(false);
 			}
 
@@ -395,13 +400,16 @@ void LLVMGenerator::visit(Module &n)
 
 	LLVMData *cg = n.cgData<LLVMData>();
 
-	DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, n.filename(), n.directory(), "M-Lang Compiler", compiler.opt > 0, "", 0);
-	cg->divalue = cg->discope = cu;
+	if (compiler.debug)
+	{
+		DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, str_ref(n.filename()), str_ref(n.directory()), "M-Lang Compiler", compiler.opt > 0, "", 0);
+		cg->divalue = cg->discope = cu;
+	}
 
 	pushScope(&n);
 
 	for (auto &s : n.symbols())
-		s.second->accept(*this);
+		s->accept(*this);
 
 	popScope();
 }
@@ -604,75 +612,93 @@ void LLVMGenerator::visit(PrimitiveType &n)
 		break;
 	case PrimType::u1:
 		cg->type = Type::getInt1Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("bool", 1, 1, dwarf::DW_ATE_boolean);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("bool", 1, 1, dwarf::DW_ATE_boolean);
 		break;
 	case PrimType::i8:
 		cg->type = Type::getInt8Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("byte", 8, 8, dwarf::DW_ATE_signed);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("byte", 8, 8, dwarf::DW_ATE_signed);
 		break;
 	case PrimType::u8:
 		cg->type = Type::getInt8Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("ubyte", 8, 8, dwarf::DW_ATE_unsigned);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("ubyte", 8, 8, dwarf::DW_ATE_unsigned);
 		break;
 	case PrimType::c8:
 		cg->type = Type::getInt8Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("char", 8, 8, dwarf::DW_ATE_UTF);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("char", 8, 8, dwarf::DW_ATE_UTF);
 		break;
 	case PrimType::i16:
 		cg->type = Type::getInt16Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("short", 16, 16, dwarf::DW_ATE_signed);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("short", 16, 16, dwarf::DW_ATE_signed);
 		break;
 	case PrimType::u16:
 		cg->type = Type::getInt16Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("ushort", 16, 16, dwarf::DW_ATE_unsigned);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("ushort", 16, 16, dwarf::DW_ATE_unsigned);
 		break;
 	case PrimType::c16:
 		cg->type = Type::getInt16Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("wchar", 16, 16, dwarf::DW_ATE_UTF);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("wchar", 16, 16, dwarf::DW_ATE_UTF);
 		break;
 	case PrimType::i32:
 		cg->type = Type::getInt32Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("int", 32, 32, dwarf::DW_ATE_signed);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("int", 32, 32, dwarf::DW_ATE_signed);
 		break;
 	case PrimType::u32:
 		cg->type = Type::getInt32Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("uint", 32, 32, dwarf::DW_ATE_unsigned);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("uint", 32, 32, dwarf::DW_ATE_unsigned);
 		break;
 	case PrimType::c32:
 		cg->type = Type::getInt32Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("dchar", 32, 32, dwarf::DW_ATE_UTF);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("dchar", 32, 32, dwarf::DW_ATE_UTF);
 		break;
 	case PrimType::i64:
 		cg->type = Type::getInt64Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("long", 64, 64, dwarf::DW_ATE_signed);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("long", 64, 64, dwarf::DW_ATE_signed);
 		break;
 	case PrimType::u64:
 		cg->type = Type::getInt64Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("ulong", 64, 64, dwarf::DW_ATE_unsigned);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("ulong", 64, 64, dwarf::DW_ATE_unsigned);
 		break;
 	case PrimType::i128:
 		cg->type = Type::getInt128Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("cent", 128, 128, dwarf::DW_ATE_signed);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("cent", 128, 128, dwarf::DW_ATE_signed);
 		break;
 	case PrimType::u128:
 		cg->type = Type::getInt128Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("ucent", 128, 128, dwarf::DW_ATE_unsigned);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("ucent", 128, 128, dwarf::DW_ATE_unsigned);
 		break;
 	case PrimType::f16:
 		cg->type = Type::getHalfTy(ctx);
-		cg->ditype = DBuilder->createBasicType("half", 16, 16, dwarf::DW_ATE_float);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("half", 16, 16, dwarf::DW_ATE_float);
 		break;
 	case PrimType::f32:
 		cg->type = Type::getFloatTy(ctx);
-		cg->ditype = DBuilder->createBasicType("float", 632, 32, dwarf::DW_ATE_float);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("float", 632, 32, dwarf::DW_ATE_float);
 		break;
 	case PrimType::f64:
 		cg->type = Type::getDoubleTy(ctx);
-		cg->ditype = DBuilder->createBasicType("double", 64, 64, dwarf::DW_ATE_float);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("double", 64, 64, dwarf::DW_ATE_float);
 		break;
 	case PrimType::f128:
 		cg->type = Type::getFP128Ty(ctx);
-		cg->ditype = DBuilder->createBasicType("extended", 128, 128, dwarf::DW_ATE_float);
+		if (compiler.debug)
+			cg->ditype = DBuilder->createBasicType("extended", 128, 128, dwarf::DW_ATE_float);
 		break;
 //		cg->type = Type::getX86_FP80Ty(ctx); break;
 //		cg->type = Type::getPPC_FP128Ty(ctx); break;
@@ -691,7 +717,8 @@ void LLVMGenerator::visit(PointerType &n)
 	LLVMData *targetCg = n.targetType()->cgData<LLVMData>();
 
 	cg->type = llvm::PointerType::getUnqual(targetCg->type);
-	cg->ditype = DBuilder->createPointerType(targetCg->ditype, 64); // TODO: machine pointer size? 32bit?
+	if (compiler.debug)
+		cg->ditype = DBuilder->createPointerType(targetCg->ditype, 64); // TODO: machine pointer size? 32bit?
 }
 
 void LLVMGenerator::visit(Struct &n)
@@ -707,14 +734,21 @@ void LLVMGenerator::visit(Struct &n)
 	for (auto &m : n.dataMembers())
 	{
 		m.decl->accept(*this);
-		Type *t = m.decl->cgData<LLVMData>()->type;
-		elements.push_back(t);
+		elements.push_back(m.decl->cgData<LLVMData>()->type);
 	}
+
+	popScope();
 
 	// make LLVM struct
 	cg->type = StructType::get(ctx, elements);
 
-	popScope();
+	if (compiler.debug)
+	{
+		SmallVector<Metadata*, 8> dielements;
+		for (auto &m : n.dataMembers())
+			dielements.push_back(m.decl->cgData<LLVMData>()->divalue);
+		cg->discope = cg->ditype = DBuilder->createStructType(scopeCg()->discope, str_ref(n.givenName()), scopeCg()->file(), n.defLoc().line, n.size(), n.alignment(), 0, nullptr, DBuilder->getOrCreateArray(dielements), 0, nullptr/*, n.mangledName()*/);
+	}
 }
 
 void LLVMGenerator::visit(FunctionType &n)
@@ -728,20 +762,27 @@ void LLVMGenerator::visit(FunctionType &n)
 
 	TypeExprList argList = n.argTypes();
 	SmallVector<llvm::Type*, 8> args;
-	SmallVector<Metadata*, 8> types;
-
-	if (!n.returnType()->isVoid())
-		types.push_back(n.returnType()->cgData<LLVMData>()->ditype);
 
 	for (auto a : argList)
 	{
 		a->accept(*this);
 		args.push_back(a->cgData<LLVMData>()->type);
-		types.push_back(a->cgData<LLVMData>()->ditype);
 	}
 
 	cg->type = llvm::FunctionType::get(r, args, false);
-	cg->ditype = DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(types));
+
+	if (compiler.debug)
+	{
+		SmallVector<Metadata*, 8> types;
+
+		if (!n.returnType()->isVoid())
+			types.push_back(n.returnType()->cgData<LLVMData>()->ditype);
+
+		for (auto a : argList)
+			types.push_back(a->cgData<LLVMData>()->ditype);
+
+		cg->ditype = DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(types));
+	}
 }
 
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
@@ -827,6 +868,8 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 {
 	if (n.doneCodegen()) return;
 
+	BasicBlock *curFunc = Builder.GetInsertBlock();
+
 	LLVMData *cg = n.cgData<LLVMData>();
 
 	n.type()->accept(*this);
@@ -842,20 +885,23 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 //	function->addFnAttr(Attribute::AttrKind::UWTable);
 	cg->value = function;
 
-	DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, n.givenName(), n.givenName(), scopeCg()->file(), n.defLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), true, true, n.getLoc().line, 0, compiler.opt > 0);
-	function->setSubprogram(di);
-	cg->divalue = cg->discope = di;
-
 	// Create a new basic block to start insertion into.
 	BasicBlock *block = BasicBlock::Create(ctx, "entry", function);
 	Builder.SetInsertPoint(block);
 
+	if (compiler.debug)
+	{
+		DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, str_ref(n.givenName()), str_ref(n.givenName()), scopeCg()->file(), n.defLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), true, true, n.getLoc().line, 0, compiler.opt > 0);
+		function->setSubprogram(di);
+		cg->divalue = cg->discope = di;
+
+		// unset current location (begin as prologue)
+		emitLocation(nullptr);
+	}
+
 	pushScope(&n);
 	pushFunction(&n);
 	FunctionState &funcState = _functionStack.back();
-
-	// unset current location (begin as prologue)
-	emitLocation(nullptr);
 
 	// create stack storage and store all the args
 	DeclList args = n.args();
@@ -865,13 +911,16 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 		VarDecl *arg = (VarDecl*)args[i];
 		arg->accept(*this);
 
-		a.setName(arg->name());
+		a.setName(str_ref(arg->name()));
 
 		AllocaInst *alloc = (AllocaInst*)arg->cgData<LLVMData>()->value;
 
-		// TODO: i + i assumed i == 0 is return value?? void return should not +1 ??
-		DILocalVariable *diarg = DBuilder->createParameterVariable(cg->discope, arg->name(), i + 1, scopeCg()->file(), n.getLoc().line, arg->type()->cgData<LLVMData>()->ditype, true, 0);
-		DBuilder->insertDeclare(alloc, diarg, DBuilder->createExpression(), DebugLoc::get(n.getLoc().line, 0, cg->discope), Builder.GetInsertBlock());
+		if (compiler.debug)
+		{
+			// TODO: i + i assumed i == 0 is return value?? void return should not +1 ??
+			DILocalVariable *diarg = DBuilder->createParameterVariable(cg->discope, str_ref(arg->name()), i + 1, scopeCg()->file(), n.getLoc().line, arg->type()->cgData<LLVMData>()->ditype, true, 0);
+			DBuilder->insertDeclare(alloc, diarg, DBuilder->createExpression(), DebugLoc::get(n.getLoc().line, 0, cg->discope), Builder.GetInsertBlock());
+		}
 
 		StoreInst *store = Builder.CreateStore(&a, alloc);
 		store->setAlignment(arg->targetType()->alignment());
@@ -884,7 +933,8 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 	bool bDidReturn = false;
 	for (auto &s : n.statements())
 	{
-		emitLocation(s);
+		if (compiler.debug)
+			emitLocation(s);
 
 		s->accept(*this);
 
@@ -934,6 +984,11 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 //	// Pop off the lexical block for the function since we added it
 //	// unconditionally.
 //	KSDbgInfo.LexicalBlocks.pop_back();
+
+	if (curFunc)
+		Builder.SetInsertPoint(curFunc);
+	else
+		Builder.ClearInsertionPoint();
 }
 
 // none=0, trunc=1, se=2, ze=3, fup=4, fdown=5, f2u=6, f2i=7, u2f=8, i2f=9, inez=10, fnez=11, invalid=-1
@@ -1722,20 +1777,20 @@ void LLVMGenerator::visit(TypeDecl &n)
 
 	TypeExpr *ty = n.type();
 
-	ty->accept(*this);
-
 	Struct *s = ty->asStruct();
 	if (s)
 	{
+		s->givenName() = n.name();
+		s->defLoc() = n.getLoc();
+	}
+
+	ty->accept(*this);
+
+	if (s && compiler.debug)
+	{
+		// TODO: is this necessary?
 		LLVMData *cg = n.cgData<LLVMData>();
-
-		SmallVector<llvm::Metadata*, 8> elements;
-		for (auto &member : s->dataMembers())
-			elements.push_back(member.decl->cgData<LLVMData>()->divalue);
-
-		cg->discope = cg->ditype = DBuilder->createStructType(scopeCg()->discope, n.name(), scopeCg()->file(), n.getLoc().line, ty->size(), ty->alignment(), 0, nullptr, DBuilder->getOrCreateArray(elements), 0, nullptr, n.mangledName());
-
-		ty->cgData<LLVMData>()->ditype = cg->ditype;
+		cg->discope = cg->ditype = ty->cgData<LLVMData>()->ditype;
 	}
 }
 
@@ -1754,21 +1809,24 @@ void LLVMGenerator::visit(ValDecl &n)
 	if (valueType->asFunction())
 	{
 		llvm::Function *func = (llvm::Function*)n.value()->cgData<LLVMData>()->value;
-		func->setName(n.name());
-//		func->setName(n.mangledName());
+//		func->setName(str_ref(n.name()));
+		func->setName(str_ref(n.mangledName()));
 		func->setLinkage(Function::ExternalLinkage);
 		cg->value = func;
 
-		// update function DI with proper names
-		DISubprogram *di = dyn_cast<DISubprogram>(n.value()->cgData<LLVMData>()->divalue);
-		cg->divalue = cg->discope = di;
+		if (compiler.debug)
+		{
+			// update function DI with proper names
+			DISubprogram *di = dyn_cast<DISubprogram>(n.value()->cgData<LLVMData>()->divalue);
+			cg->divalue = cg->discope = di;
+		}
 	}
 	else if (valueType->isVoid() && n.type()->asFunction())
 	{
 		llvm::FunctionType *sig = (llvm::FunctionType*)n.type()->cgData<LLVMData>()->type;
 
-		// TODO: use n.mangledName()
-		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, n.name(), TheModule.get());
+		// HACK: use n.mangledName()
+		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, str_ref(n.name()), TheModule.get());
 //		function->setCallingConv(CallingConv::X86_VectorCall)
 		function->addFnAttr(Attribute::AttrKind::NoUnwind);
 //		function->addFnAttr(Attribute::AttrKind::UWTable);
@@ -1778,9 +1836,12 @@ void LLVMGenerator::visit(ValDecl &n)
 		// since the expression evaluates the declarations value (void), let's just stuff the function proto there...
 		n.value()->cgData<LLVMData>()->value = function;
 
-		DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, n.name(), n.mangledName(), scopeCg()->file(), n.getLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), false, true, 0, 0, false);
-		function->setSubprogram(di);
-		cg->divalue = di;
+		if (compiler.debug)
+		{
+			DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, str_ref(n.name()), str_ref(n.mangledName()), scopeCg()->file(), n.getLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), false, true, 0, 0, false);
+			function->setSubprogram(di);
+			cg->divalue = di;
+		}
 	}
 	else
 	{
@@ -1812,7 +1873,7 @@ void LLVMGenerator::visit(VarDecl &n)
 
 		if (dynamic_cast<Module*>(s))
 		{
-			GlobalVariable *global = TheModule->getGlobalVariable(n.name());
+			GlobalVariable *global = TheModule->getGlobalVariable(str_ref(n.mangledName()));
 			if (global != nullptr)
 			{
 				// already exists!!
@@ -1821,8 +1882,8 @@ void LLVMGenerator::visit(VarDecl &n)
 
 			TypeExpr *targetTy = n.targetType();
 
-			cg->value = TheModule->getOrInsertGlobal(n.name(), typeCg);
-			global = TheModule->getGlobalVariable(n.name());
+			cg->value = TheModule->getOrInsertGlobal(str_ref(n.mangledName()), typeCg);
+			global = TheModule->getGlobalVariable(str_ref(n.mangledName()));
 			global->setAlignment(targetTy->alignment());
 			global->setLinkage(GlobalValue::LinkageTypes::InternalLinkage);
 
@@ -1852,7 +1913,8 @@ void LLVMGenerator::visit(VarDecl &n)
 			Expr *expr = n.value();
 			expr->accept(*this);
 
-			cg->divalue = DBuilder->createGlobalVariable(s->cgData<LLVMData>()->discope, n.name(), n.mangledName(), s->cgData<LLVMData>()->file(), n.getLoc().line, targetTy->cgData<LLVMData>()->ditype, true, constant);
+			if (compiler.debug)
+				cg->divalue = DBuilder->createGlobalVariable(s->cgData<LLVMData>()->discope, str_ref(n.name()), str_ref(n.mangledName()), s->cgData<LLVMData>()->file(), n.getLoc().line, targetTy->cgData<LLVMData>()->ditype, true, constant);
 		}
 		else if (dynamic_cast<Struct*>(scope()))
 		{
@@ -1868,7 +1930,7 @@ void LLVMGenerator::visit(VarDecl &n)
 				arrayLen->accept(*this);
 			}
 
-			AllocaInst *alloc = Builder.CreateAlloca(typeCg, arrayLen ? arrayLen->cgData<LLVMData>()->value : nullptr, n.name() + ".addr");
+			AllocaInst *alloc = Builder.CreateAlloca(typeCg, arrayLen ? arrayLen->cgData<LLVMData>()->value : nullptr, llvm::Twine(str_ref(n.name()), ".addr"));
 			alloc->setAlignment(n.targetType()->alignment());
 
 			cg->value = alloc;

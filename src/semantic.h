@@ -14,8 +14,8 @@ private:
 	Compiler &compiler;
 	Module *currentModule;
 
-	std::vector<Scope*> _scope;
-	std::vector<FunctionLiteralExpr*> _function;
+	Array<Scope*> _scope;
+	Array<FunctionLiteralExpr*> _function;
 
 public:
 	Semantic(Compiler &compiler)
@@ -35,6 +35,7 @@ public:
 	void pushFunction(FunctionLiteralExpr *f) { _function.push_back(f); }
 	void popFunction() { _function.pop_back(); }
 
+private:
 	void visit(Declaration &n) override;
 	void visit(Module &n) override;
 	void visit(ModuleStatement &n) override;
