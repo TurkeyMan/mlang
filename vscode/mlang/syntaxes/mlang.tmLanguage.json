@@ -1,11 +1,10 @@
 {
 	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
 	"name": "M",
-	"patterns": [
-		{ "include": "#keywords" },
-		{ "include": "#values" },
-		{ "include": "#types" },
-		{ "include": "#comments" }
+	"scopeName": "source.mlang",
+	"fileTypes": [
+		"me",
+		"ms"
 	],
 	"repository": {
 		"keywords": {
@@ -83,6 +82,10 @@
 						},
 						{
 							"name": "constant.numeric.mlang",
+							"match": "0o[0-7]([0-7]|_[0-7])*"
+						},
+						{
+							"name": "constant.numeric.mlang",
 							"match": "0b[01]([01]|_[01])*"
 						},
 						{
@@ -130,5 +133,10 @@
 			]
 		}
 	},
-	"scopeName": "source.mlang"
+	"patterns": [
+		{ "include": "#keywords" },
+		{ "include": "#values" },
+		{ "include": "#types" },
+		{ "include": "#comments" }
+	]
 }
