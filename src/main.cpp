@@ -252,7 +252,7 @@ extern "C" {
 					{
 						const SharedString &path = sub->path();
 						ModuleStatement *m = sub->getModuleStatement();
-						error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "Module '%s' already exists.", (const char*)sub->stringof().c_str());
+						error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "module '%s' already exists", (const char*)sub->stringof().c_str());
 					}
 					m->setParent(sub);
 					sub->submodules().insert({ name, m });

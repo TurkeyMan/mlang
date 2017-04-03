@@ -44,7 +44,7 @@ void Link(Compiler &compiler)
 	int result = system(cmd.c_str());
 	if (result)
 	{
-		error(compiler.outFile.c_str(), 0, "Link failed!");
+		infoError("%s: link failed", compiler.outFile.c_str());
 	}
 }
 

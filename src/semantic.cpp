@@ -316,7 +316,7 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	for (auto a : n.args())
 	{
 		VarDecl *decl = dynamic_cast<VarDecl*>(a);
-		assert(decl);
+		iceAssert(decl, "var declaration expected!");
 
 		decl->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, n.getLoc());
 		decl->accept(*this);
@@ -324,18 +324,23 @@ void Semantic::visit(FunctionLiteralExpr &n)
 		n.argTypes = n.argTypes.append(decl->targetType());
 	}
 
-	bool bDidReturn = false;
+	bool didReturn = false;
+	bool didWarnUnreachable = false;
 	for (auto s : n.statements())
 	{
-		if (bDidReturn)
+		if (didReturn)
 		{
-			// statement unreachable warning!
+			if (!didWarnUnreachable)
+			{
+				emitWarning(scopeFilename().c_str(), s->getLine(), "statement unreachable");
+				didWarnUnreachable = true;
+			}
 		}
 
 		s->accept(*this);
 
 		if (s->didReturn())
-			bDidReturn = true;
+			didReturn = true;
 	}
 
 	popFunction();
@@ -347,11 +352,8 @@ void Semantic::visit(FunctionLiteralExpr &n)
 	n._type = new FunctionType(n.returnType, n.argTypes, n.getLoc());
 	n._type->accept(*this);
 
-	if (!bDidReturn && !n.type()->returnType()->isVoid())
-	{
-		// function did not return a value!
-		assert(false);
-	}
+	if (!didReturn && !n.type()->returnType()->isVoid())
+		error(scopeFilename().c_str(), n.getLine(), "function must return a value");
 }
 
 void Semantic::visit(RefExpr &n)
@@ -616,7 +618,8 @@ void Semantic::visit(MemberLookup &n)
 		// find _member(typeof(_expr) arg, ...) function.
 	}
 
-	assert(n._result);
+	if (!n._result)
+		error(scopeFilename().c_str(), n.getLine(), "expression '%s' has no member or property '%s'", n._node->stringof().c_str(), n._member.c_str());
 
 	n._result->accept(*this);
 }
@@ -671,7 +674,7 @@ void Semantic::visit(Index &n)
 			val = dynamic_cast<TypeExpr*>(n._node);
 	}
 	if (!val)
-		error(scopeFilename().c_str(), n.getLine(), "Can't index expression %s.", n._node->stringof().c_str());
+		error(scopeFilename().c_str(), n.getLine(), "can't index expression: %s", n._node->stringof().c_str());
 
 	Tuple *tup = dynamic_cast<Tuple*>(val);
 	if (tup)
@@ -680,7 +683,7 @@ void Semantic::visit(Index &n)
 		{
 			// validate index
 			if (n._indices.length != tup->dimensions())
-				error(scopeFilename().c_str(), n.getLine(), "Array index has incorrect number of dimensions.");
+				error(scopeFilename().c_str(), n.getLine(), "array index has incorrect number of dimensions");
 			for (size_t i = 0; i < n._indices.length; ++i)
 			{
 				Expr *index = n._indices[i];
@@ -690,11 +693,11 @@ void Semantic::visit(Index &n)
 //				i->accept(*this);
 
 				if (!index->type()->isIntegral())
-					error(scopeFilename().c_str(), n.getLine(), "Array index must be integral type.");
+					error(scopeFilename().c_str(), n.getLine(), "array index must be integral type");
 
 				int64_t offset = index->getIntValue();
 				if (offset < 0 || (ptrdiff_t)offset >= tup->numElements(i))
-					error(scopeFilename().c_str(), n.getLine(), "Array index out of bounds.");
+					error(scopeFilename().c_str(), n.getLine(), "array index out of bounds");
 			}
 
 			// get array element
@@ -704,13 +707,13 @@ void Semantic::visit(Index &n)
 		{
 			// validate index
 			if (n._indices.length != 1)
-				error(scopeFilename().c_str(), n.getLine(), "Invalid tuple index.");
+				error(scopeFilename().c_str(), n.getLine(), "invalid tuple index");
 			if (!n._indices[0]->type()->isIntegral())
-				error(scopeFilename().c_str(), n.getLine(), "Tuple index must be integral type.");
+				error(scopeFilename().c_str(), n.getLine(), "tuple index must be integral type");
 
 			int64_t i = n._indices[0]->getIntValue();
 			if (i < 0 || (size_t)i >= tup->elements().length)
-				error(scopeFilename().c_str(), n.getLine(), "Tuple index out of bounds.");
+				error(scopeFilename().c_str(), n.getLine(), "tuple index out of bounds");
 
 			// get tuple element
 			n._result = tup->elements()[i];
@@ -743,7 +746,7 @@ void Semantic::visit(Index &n)
 			{
 				// validate index
 				if (n._indices.length != tup->_shape.length)
-					error(scopeFilename().c_str(), n.getLine(), "Array index has incorrect number of dimensions.");
+					error(scopeFilename().c_str(), n.getLine(), "array index has incorrect number of dimensions");
 				for (auto &i : n._indices)
 				{
 					// HACK: REMOVE ME!!! cast all indices to size_t in semantic!
@@ -751,7 +754,7 @@ void Semantic::visit(Index &n)
 					i->accept(*this);
 
 					if (!i->type()->isIntegral())
-						error(scopeFilename().c_str(), n.getLine(), "Array index must be integral type.");
+						error(scopeFilename().c_str(), n.getLine(), "array index must be integral type");
 				}
 
 				// generate array offset
@@ -778,15 +781,15 @@ void Semantic::visit(Index &n)
 			{
 				// validate index
 				if (n._indices.length != 1)
-					error(scopeFilename().c_str(), n.getLine(), "Expected 1-dimensional index.");
+					error(scopeFilename().c_str(), n.getLine(), "expected 1-dimensional index");
 				Expr *e = n._indices[0]->constEval();
 				if (!e)
-					error(scopeFilename().c_str(), n.getLine(), "Tuple index must be constant.");
+					error(scopeFilename().c_str(), n.getLine(), "tuple index must be constant");
 				if (!e->type()->isIntegral())
-					error(scopeFilename().c_str(), n.getLine(), "Tuple index must be integral type.");
+					error(scopeFilename().c_str(), n.getLine(), "tuple index must be integral type");
 				int64_t i = e->getIntValue();
 				if (i < 0 || (size_t)i >= tup->elements().length)
-					error(scopeFilename().c_str(), n.getLine(), "Tuple index out of bounds.");
+					error(scopeFilename().c_str(), n.getLine(), "tuple index out of bounds");
 
 				// create tuple ref...
 				n._result = new RefExpr(ptr, i, n.getLoc());
@@ -795,13 +798,13 @@ void Semantic::visit(Index &n)
 		}
 		else
 		{
-			error(scopeFilename().c_str(), n.getLine(), "Can't index expression of type %s.", ty->stringof().c_str());
+			error(scopeFilename().c_str(), n.getLine(), "can't index expression of type: %s", ty->stringof().c_str());
 		}
 
 		return;
 	}
 
-	error(scopeFilename().c_str(), n.getLine(), "Invalid index...");
+	error(scopeFilename().c_str(), n.getLine(), "invalid index...");
 }
 
 void Semantic::visit(ScopeStatement &n)
@@ -814,11 +817,16 @@ void Semantic::visit(ScopeStatement &n)
 	Array<VarDecl*> varStack;
 
 	pushScope(&n);
+	bool didWarnUnreachable = false;
 	for (auto s : n._statements)
 	{
 		if (n._didReturn)
 		{
-			// statement unreachable warning!
+			if (!didWarnUnreachable)
+			{
+				emitWarning(scopeFilename().c_str(), s->getLine(), "statement unreachable");
+				didWarnUnreachable = true;
+			}
 		}
 
 		s->accept(*this);
@@ -901,6 +909,7 @@ void Semantic::visit(LoopStatement &n)
 	{
 		// warn: unreachable statements!
 		// returning from loop should happen in an if/else??
+		emitWarning(scopeFilename().c_str(), n._body->getLine(), "statement unreachable");
 	}
 
 	for (auto i : n._increments)

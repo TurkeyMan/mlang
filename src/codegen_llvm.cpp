@@ -15,6 +15,11 @@ using namespace llvm::orc;
 
 namespace m {
 
+const char *llvmTypes[(size_t)PrimType::__NumTypes] =
+{
+	"v", "i1", "i8", "i8", "i8", "i16", "i16", "i16", "i32", "i32", "i32", "i64", "i64", "i128", "i128", "half", "float", "double", "fp128"
+};
+
 class MemStream : public llvm::raw_ostream
 {
 public:
@@ -179,8 +184,7 @@ void LLVMGenerator::codegen()
 	}
 	else if (!compiler.runtime.eq("none"))
 	{
-		// bad runtime!
-		assert(false);
+		infoError("'%s': invalid runtime", compiler.runtime.c_str());
 	}
 
 	std::vector<Metadata*> linkOpts;
@@ -1338,13 +1342,13 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			PrimType rh = rhpt->type();
 			if (isFloat(rh))
 			{
-				llvm::Function *pow = TheModule->getFunction(std::string("llvm.pow.").append(primTypeNames[(int)lh]));
+				llvm::Function *pow = TheModule->getFunction(std::string("llvm.pow.").append(llvmTypes[(int)lh]));
 				llvm::Value* args[2] = { lhCg->value, rhCg->value };
 				cg->value = Builder.CreateCall(pow, args, "pow");
 			}
 			else if (isInt(rh))
 			{
-				llvm::Function *pow = TheModule->getFunction(std::string("llvm.powi.").append(primTypeNames[(int)lh]));
+				llvm::Function *pow = TheModule->getFunction(std::string("llvm.powi.").append(llvmTypes[(int)lh]));
 				llvm::Value* args[2] = { lhCg->value, rhCg->value };
 				cg->value = Builder.CreateCall(pow, args, "powi");
 			}

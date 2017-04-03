@@ -122,7 +122,6 @@ enum TypeFlags { TF_Unsigned = 1, TF_Signed = 2, TF_Char = 4, TF_Float = 8, TF_B
 extern uint8_t typeFlags[];
 extern uint8_t typeWidth[];
 extern uint8_t typeBytes[];
-extern const char *primTypeNames[];
 
 #define isFloat(pt) (typeFlags[(int)pt] & TF_Float)
 #define isNotFloat(pt) (typeFlags[(int)pt] & ~TF_Float)

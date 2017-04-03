@@ -613,7 +613,7 @@ value_assign	: value							{ $$ = $1; }
 
 void yyerror(const char *s)
 {
-	error(filename.c_str(), yylineno, "Syntax error while parsing: %s", s);
+	error(filename.c_str(), yylineno, "parse error: %s", s);
 }
 
 

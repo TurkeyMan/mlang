@@ -145,17 +145,15 @@ false			{ yylval.ival = 0; return BOOL_T; }
 "/*"			BEGIN(BLOCK_COMMENT);
 <BLOCK_COMMENT>{
 	"*/"		BEGIN(INITIAL);
-	[^*\n]+		// eat comment in chunks
+	[^*]+		// eat comment in chunks
 	"*"			// eat the lone star
-	\n			yylineno++;
 }
 
 "/+"			BEGIN(BLOCK_DISABLE);
 <BLOCK_DISABLE>{
 	"\+/"		BEGIN(INITIAL);
-	[^\+\n]+	// eat comment in chunks
+	[^\+]+	// eat comment in chunks
 	"\+"		// eat the lone star
-	\n			yylineno++;
 }
 
 "//".*			;
