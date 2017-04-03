@@ -19,7 +19,7 @@
 				},
 				{
 					"name": "keyword.other.mlang",
-					"match": "\\b(module|import|def|var)\\b"
+					"match": "\\b(module|import|def|var|pragma)\\b"
 				},
 				{
 					"name": "storage.type.mlang",
@@ -51,7 +51,7 @@
 							"patterns": [
 								{
 									"name": "constant.character.escape.mlang",
-									"match": "\\\\."
+									"match": "(\\\\[^xuU]|\\\\x[0-9a-fA-F][0-9a-fA-F]|\\\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|\\\\U[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])"
 								}
 							]
 						},
@@ -62,7 +62,7 @@
 							"patterns": [
 								{
 									"name": "constant.character.escape.mlang",
-									"match": "\\\\."
+									"match": "(\\\\[^xuU]|\\\\x[0-9a-fA-F][0-9a-fA-F]|\\\\u[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|\\\\U[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])"
 								}
 							]
 						},
@@ -131,12 +131,21 @@
 					"patterns": []
 				}
 			]
+		},
+		"attributes": {
+			"patterns": [
+				{
+					"name": "entity.other.attribute-name.mlang",
+					"match": "@(([_a-zA-Z][_a-zA-Z0-9]*)|\\[[_a-zA-Z][_a-zA-Z0-9]*(,[ \t\r\n]*[_a-zA-Z][_a-zA-Z0-9]*)*\\])"
+				}
+			]
 		}
 	},
 	"patterns": [
 		{ "include": "#keywords" },
 		{ "include": "#values" },
 		{ "include": "#types" },
-		{ "include": "#comments" }
+		{ "include": "#comments" },
+		{ "include": "#attributes" }
 	]
 }
