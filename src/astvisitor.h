@@ -31,6 +31,7 @@ public:
 	virtual void visit(CallExpr &n) {}
 	virtual void visit(AssignExpr &n) {}
 	virtual void visit(BindExpr &n) {}
+	virtual void visit(UnknownExpr &n) {}
 	virtual void visit(Identifier &n) {}
 	virtual void visit(MemberLookup &n) {}
 	virtual void visit(Tuple &n) {}

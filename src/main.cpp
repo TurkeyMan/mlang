@@ -11,6 +11,7 @@ m::StatementList parse(FILE *file, String filename);
 namespace m {
 
 void InitCodegen();
+void PopulateIntrinsics(Module *module);
 void Codegen(Compiler &compiler);
 void Link(Compiler &compiler);
 
@@ -240,6 +241,7 @@ extern "C" {
 					if (it == sub->submodules().end())
 					{
 						Module *package = new Module(nullptr, nullptr, Array<SharedString>(m->fullName().slice(0, i + 1)), StatementList::empty(), nullptr);
+						package->setParent(sub);
 						sub->submodules().insert({ name, package });
 						sub = sub->submodules()[name];
 					}
@@ -250,12 +252,16 @@ extern "C" {
 					{
 						const SharedString &path = sub->path();
 						ModuleStatement *m = sub->getModuleStatement();
-						error(!path.empty() ? (const char*)path.c_str() : "", m ? m->getLine() : 0, "Module '%s' already exists.", (const char*)sub->stringof().c_str());
+						error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "Module '%s' already exists.", (const char*)sub->stringof().c_str());
 					}
+					m->setParent(sub);
 					sub->submodules().insert({ name, m });
 				}
 			}
 		}
+
+		// populate the root namespace with intrinsics
+		PopulateIntrinsics(mlang.root);
 
 		// semantic
 		m::Semantic semantic(mlang);
@@ -271,6 +277,15 @@ extern "C" {
 
 		return 0;
 	}
+}
+
+void PopulateIntrinsics(Module *module)
+{
+	TypeDecl *xtern = new TypeDecl("extern", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	module->addDecl(xtern->name(), xtern);
+
+	TypeDecl *xternc = new TypeDecl("extern_c", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	module->addDecl(xternc->name(), xternc);
 }
 
 }

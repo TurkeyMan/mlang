@@ -1,7 +1,6 @@
 #include "ast.h"
 #include "astvisitor.h"
 #include "error.h"
-#include "string.h"
 
 namespace m {
 
@@ -24,7 +23,7 @@ uint8_t typeBytes[(size_t)PrimType::__NumTypes] =
 };
 const char *primTypeNames[(size_t)PrimType::__NumTypes] =
 {
-	"void", "u1", "i8", "u8", "c8", "i16", "u16", "c16", "i32", "u32", "c32", "i64", "u64", "i128", "u128", "f16", "f32", "f64", "f128"
+	"void", "bool", "byte", "ubyte", "char", "short", "ushort", "wchar", "int", "uint", "dchar", "long", "ulong", "cent", "ucent", "half", "float", "double", "extended"
 };
 const char *primTypeMangle[(size_t)PrimType::__NumTypes] =
 { // unused lower case chars: aegknrz
@@ -55,6 +54,7 @@ void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AssignExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void UnknownExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void Identifier::accept(ASTVisitor &v) { v.visit(*this); }
 void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
 void Tuple::accept(ASTVisitor &v) { v.visit(*this); }
@@ -87,7 +87,7 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, So
 	for (auto &i : iterators)
 		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, loc);
 
-	VarDecl *r = new VarDecl("__loop_range", nullptr, range, loc);
+	VarDecl *r = new VarDecl("__loop_range", nullptr, range, NodeList::empty(), loc);
 	iterators.prepend(r);
 
 	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
@@ -111,6 +111,11 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, So
 	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body, loc);
 }
 
+Node* makePragma(String identifier, NodeList args)
+{
+	error(nullptr, 0, "Unknown: pragma(%s, ...)", (const char*)identifier.c_str());
+	return nullptr;
+}
 
 Declaration *Scope::getDecl(String name, bool onlyLocal)
 {
@@ -158,12 +163,25 @@ const SharedString& Declaration::mangledName() const
 {
 	if (_mangledName.empty())
 	{
-		if (this->name().eq("main"))
-			_mangledName = "main";
-		else
-			_mangledName = SharedString(Concat, "_M", mangleof()); // TODO: include scope...
+		for (auto a : _attributes)
+		{
+			Identifier *i = dynamic_cast<Identifier*>(a);
+			if (i && i->getName().eq("extern_c"))
+			{
+				_mangledName = name();
+				return _mangledName;
+			}
+		}
+		_mangledName = SharedString(Concat, "_M", mangleof()); // TODO: include scope...
 	}
 	return _mangledName;
+}
+
+Node *Declaration::getMember(String name)
+{
+	if (name.eq("mangleof"))
+		return Tuple::makeStringLiteral(mangledName(), PrimType::c8, false, SourceLocation(0));
+	return Statement::getMember(name);
 }
 
 raw_ostream &ExpressionStatement::dump(raw_ostream &out, int ind)
@@ -186,17 +204,9 @@ raw_ostream &ReturnStatement::dump(raw_ostream &out, int ind)
 Node *Node::getMember(String name)
 {
 	if (name.eq("stringof"))
-	{
-		// TODO: need slice + string literals
-		assert(false);
-		return nullptr;
-	}
+		return Tuple::makeStringLiteral(stringof(), PrimType::c8, false, SourceLocation(0));
 	if (name.eq("mangleof"))
-	{
-		// TODO: need slice + string literals
-		assert(false);
-		return nullptr;
-	}
+		return Tuple::makeStringLiteral(mangleof(), PrimType::c8, false, SourceLocation(0));
 	return nullptr;
 }
 
@@ -417,7 +427,7 @@ Expr* PrimitiveType::makeConversion(Expr *expr, TypeExpr *targetType, bool impli
 
 MutableString64 PrimitiveType::stringof() const
 {
-	return MutableString64(Concat, '@', primTypeNames[(size_t)type()]);
+	return primTypeNames[(size_t)type()];
 }
 MutableString64 PrimitiveType::mangleof() const
 {
@@ -850,36 +860,40 @@ MutableString64 PrimitiveLiteralExpr::stringof() const
 	case PrimType::c16:
 	case PrimType::c32:
 	{
-		if (c < ' ')
+		MutableString64 s;
+		if (c < ' ' || c == '\'' || c == '\\')
 		{
 			switch (c)
 			{
-				case '\0': return "'\\0'";
-				case '\t': return "'\\t'";
-				case '\r': return "'\\r'";
-				case '\n': return "'\\n'";
-				case '\b': return "'\\b'";
+				case '\'': s = "'\\\''"; break;
+				case '\\': s = "'\\\\'"; break;
+				case '\0': s = "'\\0'"; break;
+				case '\a': s = "'\\a'"; break;
+				case '\b': s = "'\\b'"; break;
+				case '\f': s = "'\\f'"; break;
+				case '\n': s = "'\\n'"; break;
+				case '\r': s = "'\\r'"; break;
+				case '\t': s = "'\\t'"; break;
+				case '\v': s = "'\\v'"; break;
 				default:
 				{
 					static const char hex[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
-					char h[9]; h[8] = '\0';
-					size_t start = 7;
-					for (ptrdiff_t i = 0, s = 28; i < 8; ++i, s -= 4)
-					{
-						h[i] = hex[(c >> s) & 0xF];
-						if (start == 7 && h[i] != '0')
-							start = i;
-					}
-					return MutableString64(Concat, "'\\x", h + start, '\'');
+					char h[2];
+					h[0] = hex[c >> 4];
+					h[1] = hex[c & 0xF];
+					s.append("'\\x", Slice<char>(h, 2), '\'');
 				}
 			}
 		}
 		else
-		{
-			char ch[8];
-			ch[utfEncode(c, ch)] = '\0';
-			return MutableString64(Concat, "\'", ch, '\'');
-		}
+			s.append('\'', c, '\'');
+
+		if (_type == PrimType::c16)
+			s.append('w');
+		else if (_type == PrimType::c32)
+			s.append('d');
+
+		return s;
 	}
 	default:
 		assert(0);
@@ -1038,6 +1052,11 @@ raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
 	return out;
 }
 
+raw_ostream &UnknownExpr::dump(raw_ostream &out, int ind)
+{
+	return _node->dump(out, ind);
+}
+
 Node *Identifier::getMember(String name)
 {
 	// base class member?
@@ -1072,38 +1091,47 @@ raw_ostream &MemberLookup::dump(raw_ostream &out, int ind)
 	return out;
 }
 
-Tuple* Tuple::makeStringLiteral(String str, SourceLocation loc)
+Tuple* Tuple::makeStringLiteralQuoted(String str, SourceLocation loc)
+{
+	assert(str[0] == '"' || str[0] == '`');
+
+	bool escaped = str[0] == '"';
+
+	PrimType type = PrimType::c8;
+	if (str[str.length - 1] == 'w')
+	{
+		type = PrimType::c16;
+		str.pop_back();
+	}
+	else if (str[str.length - 1] == 'd')
+	{
+		type = PrimType::c32;
+		str.pop_back();
+	}
+
+	assert(str[str.length - 1] == (escaped ? '"' : '`'));
+
+	return makeStringLiteral(str.slice(1, str.length - 1), type, escaped, loc);
+}
+
+Tuple* Tuple::makeStringLiteral(String str, PrimType type, bool unescape, SourceLocation loc)
 {
 	NodeList s = NodeList::empty();
 	Array<size_t> offsets;
 
-	PrimType ty = PrimType::c8;
+	offsets.reserve(str.length);
+	size_t offset = 0;
 
-	size_t len = str.length - 1;
-	if (str[len] == 'c')
-		ty = PrimType::c8, --len;
-	else if (str[len] == 'w')
-		ty = PrimType::c16, --len;
-	else if (str[len] == 'd')
-		ty = PrimType::c32, --len;
-
-	offsets.reserve(len);
-
-	bool escape = str[0] == '\"';
-
-	for (size_t i = 1; i < len;)
+	while (!str.empty())
 	{
-		char32_t c;
-		i += utfDecode(str.ptr + i, &c);
+		char32_t c = str.pop_front_char();
 
-		if (escape && c == '\\')
+		if (unescape && c == '\\')
 		{
-			switch (str[i++])
+			c = str.pop_front_char();
+
+			switch (c)
 			{
-				case '\'':	c = '\'';	break;
-				case '"':	c = '\"';	break;
-				case '?':	c = '\?';	break;
-				case '\\':	c = '\\';	break;
 				case '0':	c = '\0';	break;
 				case 'a':	c = '\a';	break;
 				case 'b':	c = '\b';	break;
@@ -1114,74 +1142,73 @@ Tuple* Tuple::makeStringLiteral(String str, SourceLocation loc)
 				case 'v':	c = '\v';	break;
 				case 'x':
 				{
-					char h = toHex(str[i]); ++i;
-					char l = toHex(str[i]); ++i;
-					if (h >= 16 || l >= 16)
+					if (!detail::is_hex(str[0]) || !detail::is_hex(str[1]))
 						error("file", loc.line, "Invalid hexadecimal character.");
-					c = (h << 4) | l;
+					c = (char32_t)str.pop_front(2).parse_int<16>();
 					break;
 				}
 				case 'u':
 				{
-					char16_t hh = toHex(str[i]); ++i; char16_t hl = toHex(str[i]); ++i;
-					char16_t lh = toHex(str[i]); ++i; char16_t ll = toHex(str[i]); ++i;
-					if (hh >= 16 || hl >= 16 || lh >= 16 || ll >= 16)
+					if (!detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]))
 						error("file", loc.line, "Invalid hexadecimal character.");
-					c = (hh << 12) | (hl << 8) | (lh << 4) | ll;
+					c = (char32_t)str.pop_front(4).parse_int<16>();
 					break;
 				}
 				case 'U':
 				{
-					char16_t hhh = toHex(str[i]); ++i; char16_t hhl = toHex(str[i]); ++i;
-					char16_t hlh = toHex(str[i]); ++i; char16_t hll = toHex(str[i]); ++i;
-					char16_t lhh = toHex(str[i]); ++i; char16_t lhl = toHex(str[i]); ++i;
-					char16_t llh = toHex(str[i]); ++i; char16_t lll = toHex(str[i]); ++i;
-					if (hhh >= 16 || hhl >= 16 || hlh >= 16 || hll >= 16 || lhh >= 16 || lhl >= 16 || llh >= 16 || lll >= 16)
+					if (!detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]) ||
+						!detail::is_hex(str[4]) || !detail::is_hex(str[5]) || !detail::is_hex(str[6]) || !detail::is_hex(str[7]))
 						error("file", loc.line, "Invalid hexadecimal character.");
-					c = (hhh << 28) | (hhl << 24) | (hlh << 20) | (hll << 16) | (lhh << 12) | (lhl << 8) | (llh << 4) | lll;
+					c = (char32_t)str.pop_front(8).parse_int<16>();
 					break;
 				}
+				default:
+					break;
 			}
 		}
 
-		if (ty == PrimType::c8)
+		if (type == PrimType::c8)
 		{
 			char buffer[6];
-			size_t count = utfEncode(c, buffer);
-			for (size_t j = 0; j < count; ++j)
+			size_t l = detail::utf_encode(c, buffer);
+			for (size_t j = 0; j < l; ++j)
 			{
-				offsets.push_back(s.length);
-				s = s.append(new PrimitiveLiteralExpr(ty, (char32_t)buffer[j], loc));
+				offsets.push_back(offset);
+				offset += 1;
+				s = s.append(new PrimitiveLiteralExpr(type, (char32_t)buffer[j], loc));
 			}
 		}
-		else if (ty == PrimType::c16)
+		else if (type == PrimType::c16)
 		{
 			char16_t buffer[3];
-			size_t count = utfEncode(c, buffer);
-			for (size_t j = 0; j < count; ++j)
+			size_t l = detail::utf_encode(c, buffer);
+			for (size_t j = 0; j < l; ++j)
 			{
-				offsets.push_back(s.length);
-				s = s.append(new PrimitiveLiteralExpr(ty, (char32_t)buffer[j], loc));
+				offsets.push_back(offset);
+				offset += 2;
+				s = s.append(new PrimitiveLiteralExpr(type, (char32_t)buffer[j], loc));
 			}
 		}
-		else if (ty == PrimType::c32)
+		else if (type == PrimType::c32)
 		{
-			offsets.push_back(s.length);
-			s = s.append(new PrimitiveLiteralExpr(ty, c, loc));
+			offsets.push_back(offset);
+			offset += 4;
+			s = s.append(new PrimitiveLiteralExpr(type, c, loc));
 		}
 		else
 			assert(false);
 	}
-	len = s.length;
+
+	PrimitiveType *ty = PrimitiveType::get(type, loc);
 
 	Tuple *r = new Tuple(s, loc);
 
-	r->_size = len;
-	r->_alignment = 1;
+	r->_size = ty->size() * s.length;
+	r->_alignment = ty->alignment();
 	r->allExpr = true;
 	r->_offsets = std::move(offsets);
 
-	r->_type = new Tuple(PrimitiveType::get(ty, loc), ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, len, loc)), loc);
+	r->_type = new Tuple(ty, ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, s.length, loc)), loc);
 
 	return r;
 }
@@ -1572,32 +1599,54 @@ Node *Tuple::getMember(String name)
 
 MutableString64 Tuple::stringof() const
 {
-	MutableString64 s = "[ ";
-	if (isSequence())
+	MutableString64 s;
+	if (isString())
 	{
-		s.append(_element->stringof(), "; ");
-		bool first = true;
-		for (auto &i : _shape)
+		s = "\"";
+		for (auto e : _elements)
 		{
-			if (!first)
-				s.append(", ");
-			first = false;
-			s.append(i->stringof());
+			MutableString64 c = e->asExpr()->constEval()->stringof();
+			if (c[c.length - 1] == 'w' || c[c.length - 1] == 'd')
+				c.pop_back();
+			s.append(c.slice(1, c.length - 1));
 		}
+
+		PrimType pt = dynamic_cast<const PrimitiveType*>(_type->_element)->type();
+		if (pt != PrimType::c8)
+			s.append(pt == PrimType::c16 ? "\"w" : "\"d");
+		else
+			s.append('"');
+		return s;
 	}
 	else
 	{
-		bool first = true;
-		for (auto &e : _elements)
+		s = "[ ";
+		if (isSequence())
 		{
-			if (!first)
-				s.append(", ");
-			first = false;
-			s.append(e->stringof());
+			s.append(_element->stringof(), "; ");
+			bool first = true;
+			for (auto &i : _shape)
+			{
+				if (!first)
+					s.append(", ");
+				first = false;
+				s.append(i->stringof());
+			}
 		}
+		else
+		{
+			bool first = true;
+			for (auto &e : _elements)
+			{
+				if (!first)
+					s.append(", ");
+				first = false;
+				s.append(e->stringof());
+			}
+		}
+		s.append(" ]");
 	}
-	s.append(" ]");
-	return std::move(s);
+	return s;
 }
 MutableString64 Tuple::mangleof() const
 {
@@ -1618,13 +1667,7 @@ raw_ostream &Tuple::dump(raw_ostream &out, int ind)
 {
 	if (isString())
 	{
-		out << "\"";
-		for (auto e : _elements)
-		{
-			MutableString64 c = e->asExpr()->constEval()->stringof();
-			out << str_ref(c.slice(1, c.length - 1));
-		}
-		return out << "\"\n";
+		return out << str_ref(stringof()) << '\n';
 	}
 	else
 	{

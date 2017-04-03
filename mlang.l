@@ -1,6 +1,5 @@
 %{
 #include "src/ast.h"
-#include "src/string.h"
 
 #include "mlang.tab.h"
 
@@ -31,10 +30,10 @@ E			[Ee][+-]?{D}+
 
 [ \t\r\n]	;
 
+pragma		{ return PRAGMA; }
+
 module		{ return MODULE; }
 static		{ return STATIC; }
-
-extern		{ return EXTERN; }
 
 def			{ return DEF; }
 var			{ return VAR; }
@@ -127,7 +126,7 @@ is			{ return IS; }
 
 \"(\\.|[^\n"])*\"[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
 \`(\\.|[^\n`])*\`[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
-\'(\\.|[^\n'])*\'[wd]? { yylval.cval = String(yytext).drop_front().front_char(); return CHARACTER; }
+\'(\\.|[^\n'])*\'[wd]? { yylval.sval = gc_dup(yytext); return CHARACTER; }
 
 null			{ yylval.ival = 0; return NUL; }
 

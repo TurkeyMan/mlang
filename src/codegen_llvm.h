@@ -144,6 +144,7 @@ public:
 	void visit(CallExpr &n) override;
 	void visit(AssignExpr &n) override;
 	void visit(BindExpr &n) override;
+	void visit(UnknownExpr &n) override;
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &v) override;

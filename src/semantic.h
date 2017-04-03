@@ -30,6 +30,7 @@ public:
 	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
 	void pushScope(Scope *s) { _scope.push_back(s); }
 	void popScope() { _scope.pop_back(); }
+	const SharedString &scopeFilename() const { return scope()->module()->filename(); }
 
 	FunctionLiteralExpr* function() const { return _function.size() ? _function.back() : nullptr; }
 	void pushFunction(FunctionLiteralExpr *f) { _function.push_back(f); }
@@ -59,6 +60,7 @@ private:
 	void visit(CallExpr &n) override;
 	void visit(AssignExpr &n) override;
 	void visit(BindExpr &n) override;
+	void visit(UnknownExpr &n) override;
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &n) override;

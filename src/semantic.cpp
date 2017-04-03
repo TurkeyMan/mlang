@@ -115,7 +115,8 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *
 
 void Semantic::visit(Declaration &n)
 {
-	if (n.doneSemantic()) return;
+	for (auto attr : n._attributes)
+		attr->accept(*this);
 }
 
 void Semantic::visit(Module &n)
@@ -386,7 +387,7 @@ void Semantic::visit(RefExpr &n)
 		}
 
 		if (!n._type)
-			error("file", n.getLine(), "Couldn't deduce type for expression %s.", n.stringof().c_str());
+			error(scopeFilename().c_str(), n.getLine(), "Couldn't deduce type for expression %s.", n.stringof().c_str());
 	}
 	else
 		n._type->accept(*this);
@@ -580,11 +581,21 @@ void Semantic::visit(BindExpr &n)
 	assert(false);
 }
 
+void Semantic::visit(UnknownExpr &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._node->accept(*this);
+}
+
 void Semantic::visit(Identifier &n)
 {
 	if (n.doneSemantic()) return;
 
 	Declaration *_target = scope()->getDecl(n.getName());
+
+	if (!_target)
+		error(scopeFilename().c_str(), n.getLine(), "'%s': undeclared identifier", n.getName().c_str());
 
 	_target->accept(*this);
 
@@ -660,7 +671,7 @@ void Semantic::visit(Index &n)
 			val = dynamic_cast<TypeExpr*>(n._node);
 	}
 	if (!val)
-		error("file", n.getLine(), "Can't index expression %s.", n._node->stringof().c_str());
+		error(scopeFilename().c_str(), n.getLine(), "Can't index expression %s.", n._node->stringof().c_str());
 
 	Tuple *tup = dynamic_cast<Tuple*>(val);
 	if (tup)
@@ -669,7 +680,7 @@ void Semantic::visit(Index &n)
 		{
 			// validate index
 			if (n._indices.length != tup->dimensions())
-				error("file", n.getLine(), "Array index has incorrect number of dimensions.");
+				error(scopeFilename().c_str(), n.getLine(), "Array index has incorrect number of dimensions.");
 			for (size_t i = 0; i < n._indices.length; ++i)
 			{
 				Expr *index = n._indices[i];
@@ -679,11 +690,11 @@ void Semantic::visit(Index &n)
 //				i->accept(*this);
 
 				if (!index->type()->isIntegral())
-					error("file", n.getLine(), "Array index must be integral type.");
+					error(scopeFilename().c_str(), n.getLine(), "Array index must be integral type.");
 
 				int64_t offset = index->getIntValue();
 				if (offset < 0 || (ptrdiff_t)offset >= tup->numElements(i))
-					error("file", n.getLine(), "Array index out of bounds.");
+					error(scopeFilename().c_str(), n.getLine(), "Array index out of bounds.");
 			}
 
 			// get array element
@@ -693,13 +704,13 @@ void Semantic::visit(Index &n)
 		{
 			// validate index
 			if (n._indices.length != 1)
-				error("file", n.getLine(), "Invalid tuple index.");
+				error(scopeFilename().c_str(), n.getLine(), "Invalid tuple index.");
 			if (!n._indices[0]->type()->isIntegral())
-				error("file", n.getLine(), "Tuple index must be integral type.");
+				error(scopeFilename().c_str(), n.getLine(), "Tuple index must be integral type.");
 
 			int64_t i = n._indices[0]->getIntValue();
 			if (i < 0 || (size_t)i >= tup->elements().length)
-				error("file", n.getLine(), "Tuple index out of bounds.");
+				error(scopeFilename().c_str(), n.getLine(), "Tuple index out of bounds.");
 
 			// get tuple element
 			n._result = tup->elements()[i];
@@ -722,7 +733,7 @@ void Semantic::visit(Index &n)
 
 		if (ty->asStruct())
 		{
-			error("file", n.getLine(), "TODO: struct can provide index operator...");
+			error(scopeFilename().c_str(), n.getLine(), "TODO: struct can provide index operator...");
 		}
 		else if (ty->asTuple())
 		{
@@ -732,7 +743,7 @@ void Semantic::visit(Index &n)
 			{
 				// validate index
 				if (n._indices.length != tup->_shape.length)
-					error("file", n.getLine(), "Array index has incorrect number of dimensions.");
+					error(scopeFilename().c_str(), n.getLine(), "Array index has incorrect number of dimensions.");
 				for (auto &i : n._indices)
 				{
 					// HACK: REMOVE ME!!! cast all indices to size_t in semantic!
@@ -740,7 +751,7 @@ void Semantic::visit(Index &n)
 					i->accept(*this);
 
 					if (!i->type()->isIntegral())
-						error("file", n.getLine(), "Array index must be integral type.");
+						error(scopeFilename().c_str(), n.getLine(), "Array index must be integral type.");
 				}
 
 				// generate array offset
@@ -767,15 +778,15 @@ void Semantic::visit(Index &n)
 			{
 				// validate index
 				if (n._indices.length != 1)
-					error("file", n.getLine(), "Expected 1-dimensional index.");
+					error(scopeFilename().c_str(), n.getLine(), "Expected 1-dimensional index.");
 				Expr *e = n._indices[0]->constEval();
 				if (!e)
-					error("file", n.getLine(), "Tuple index must be constant.");
+					error(scopeFilename().c_str(), n.getLine(), "Tuple index must be constant.");
 				if (!e->type()->isIntegral())
-					error("file", n.getLine(), "Tuple index must be integral type.");
+					error(scopeFilename().c_str(), n.getLine(), "Tuple index must be integral type.");
 				int64_t i = e->getIntValue();
 				if (i < 0 || (size_t)i >= tup->elements().length)
-					error("file", n.getLine(), "Tuple index out of bounds.");
+					error(scopeFilename().c_str(), n.getLine(), "Tuple index out of bounds.");
 
 				// create tuple ref...
 				n._result = new RefExpr(ptr, i, n.getLoc());
@@ -784,13 +795,13 @@ void Semantic::visit(Index &n)
 		}
 		else
 		{
-			error("file", n.getLine(), "Can't index expression of type %s.", ty->stringof().c_str());
+			error(scopeFilename().c_str(), n.getLine(), "Can't index expression of type %s.", ty->stringof().c_str());
 		}
 
 		return;
 	}
 
-	error("file", n.getLine(), "Invalid index...");
+	error(scopeFilename().c_str(), n.getLine(), "Invalid index...");
 }
 
 void Semantic::visit(ScopeStatement &n)
@@ -908,6 +919,8 @@ void Semantic::visit(TypeDecl &n)
 {
 	if (n.doneSemantic()) return;
 
+	visit((Declaration&)n);
+
 	Scope *s = scope();
 	n._owner = s;
 
@@ -926,6 +939,8 @@ void Semantic::visit(TypeDecl &n)
 void Semantic::visit(ValDecl &n)
 {
 	if (n.doneSemantic()) return;
+
+	visit((Declaration&)n);
 
 	Scope *s = scope();
 	n._owner = s;
@@ -969,6 +984,8 @@ void Semantic::visit(ValDecl &n)
 void Semantic::visit(VarDecl &n)
 {
 	if (n.doneSemantic()) return;
+
+	visit((Declaration&)n);
 
 	if (!n._valType && !n._init)
 		assert(false);// , "var statement needs either type or init value!");

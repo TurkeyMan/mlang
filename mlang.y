@@ -42,13 +42,91 @@ const char *join_strings(const char *s1, const char *s2)
 	return buffer;
 }
 
+char32_t parse_char(const char *s, PrimType &type)
+{
+	Slice<const char> str(s);
+
+	type = PrimType::v;
+	if (str[str.length - 1] == 'w')
+	{
+		type = PrimType::c16;
+		str.pop_back();
+	}
+	else if (str[str.length - 1] == 'd')
+	{
+		type = PrimType::c32;
+		str.pop_back();
+	}
+
+	assert(str[0] == '\'' && str[str.length - 1] == '\'');
+
+	str = str.slice(1, str.length - 1);
+
+	char32_t c = str.pop_front_char();
+	if (c == '\\')
+	{
+		c = str.pop_front_char();
+		switch (c)
+		{
+			case '0':	c = '\0';	break;
+			case 'a':	c = '\a';	break;
+			case 'b':	c = '\b';	break;
+			case 'f':	c = '\f';	break;
+			case 'n':	c = '\n';	break;
+			case 'r':	c = '\r';	break;
+			case 't':	c = '\t';	break;
+			case 'v':	c = '\v';	break;
+			case 'x':
+			{
+				if (str.length < 2 || !detail::is_hex(str[0]) || !detail::is_hex(str[1]))
+					yyerror("Invalid hexadecimal character.");
+				c = (char32_t)str.pop_front(2).parse_int<16>();
+				break;
+			}
+			case 'u':
+			{
+				if (str.length < 4 || !detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]))
+					yyerror("Invalid hexadecimal character.");
+				c = (char32_t)str.pop_front(4).parse_int<16>();
+				break;
+			}
+			case 'U':
+			{
+				if (str.length < 8 ||
+					!detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]) ||
+					!detail::is_hex(str[4]) || !detail::is_hex(str[5]) || !detail::is_hex(str[6]) || !detail::is_hex(str[7]))
+					yyerror("Invalid hexadecimal character.");
+				c = (char32_t)str.pop_front(8).parse_int<16>();
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	if (!str.empty())
+		yyerror("Invalid character literal.");
+	if (type == PrimType::c16 && c >= 0x10000)
+		yyerror("Character can not be encoded by wchar.");
+	if (type == PrimType::v)
+	{
+		if (c >= 0x10000)
+			type = PrimType::c32;
+		else if (c >= 0x80)
+			type = PrimType::c16;
+		else
+			type = PrimType::c8;
+	}
+
+	return c;
+}
+
 %}
 
 %union {
 	int64_t ival;
 	double fval;
 	const char *sval;
-	char32_t cval;
 	m::Node *node;
 	m::NodeList nodeList;
 	m::AmbiguousExpr *ambiguous;
@@ -65,8 +143,8 @@ const char *join_strings(const char *s1, const char *s2)
 	m::PtrType ptrType;
 }
 
+%token PRAGMA
 %token MODULE STATIC
-%token EXTERN
 %token DEF VAR
 %token FN STRUCT
 %token CONST
@@ -78,14 +156,13 @@ const char *join_strings(const char *s1, const char *s2)
 
 %token <ival> INTEGER BOOL_T NUL
 %token <fval> FLOATING
-%token <sval> STRING IDENTIFIER
-%token <cval> CHARACTER
+%token <sval> STRING CHARACTER IDENTIFIER
 
 %type <sval> module_name
 
-%type <node> any_postfix
+%type <node> any_postfix any
 
-%type <nodeList> unknown_list
+%type <nodeList> unknown_list attribs attributes
 
 %type <ambiguous> member
 %type <ambiguous> unknown unknown_primary unknown_postfix unknown_prefix unknown_infix1 unknown_infix2 unknown_infix3 unknown_infix4 unknown_infix5 unknown_infix6 unknown_infix7 unknown_infix8 unknown_infix9 unknown_infix10 unknown_infix11 unknown_infix12
@@ -135,13 +212,13 @@ code_stmnt			: def_statement						{ $$ = $1; }
 					| control_statement					{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
 
-var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, SourceLocation(yylineno)); }
-					| IDENTIFIER ':' type						{ $$ = new VarDecl($1, $3, nullptr, SourceLocation(yylineno)); }
+var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, NodeList::empty(), SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type						{ $$ = new VarDecl($1, $3, nullptr, NodeList::empty(), SourceLocation(yylineno)); }
 var_decl_assign		: var_decl									{ $$ = $1; }
-					| IDENTIFIER ':' type '=' value				{ $$ = new VarDecl($1, $3, $5, SourceLocation(yylineno)); }
-					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3, SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type '=' value				{ $$ = new VarDecl($1, $3, $5, NodeList::empty(), SourceLocation(yylineno)); }
+					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3, NodeList::empty(), SourceLocation(yylineno)); }
 var_decl_assign_void: var_decl_assign							{ $$ = $1; }
-					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }
 
 var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 					| var_decl_list ',' var_decl				{ $$ = $1.append($3); }
@@ -154,6 +231,14 @@ var_decl_assign_list: var_decl_assign							{ $$ = DeclList::empty().append($1);
 //					| EXTERN '(' IDENTIFIER ')'
 //decl_attrs		: decl_attr
 //					| decl_attrs decl_attr
+
+
+attribs				: any										{ $$ = NodeList::empty().append($1); }
+					| attribs ',' any							{ $$ = $1.append($3); }
+attributes			: '@' IDENTIFIER							{ $$ = NodeList::empty().append(new Identifier($2, SourceLocation(yylineno))); }
+					| '@' '[' attribs ']'						{ $$ = $3; }
+					| attributes '@' IDENTIFIER					{ $$ = $1.append(new Identifier($3, SourceLocation(yylineno))); }
+					| attributes '@' '[' attribs ']'			{ $$ = $1.append($4); }
 
 module_name			: IDENTIFIER								{ $$ = $1; }
 					| module_name '.' IDENTIFIER				{ $$ = join_strings($1, $3); }
@@ -191,13 +276,20 @@ body				: body_block								{ $$ = new ScopeStatement($1, nullptr, SourceLocatio
 
 empty_statement			: ';'																	{ $$ = nullptr; }
 module_statement		: MODULE module_name ';'												{ $$ = new ModuleStatement($2, SourceLocation(yylineno)); }
-def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, SourceLocation(yylineno)); }
-						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, SourceLocation(yylineno)); }
-						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), SourceLocation(yylineno)); }
-						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, SourceLocation(yylineno)); }
-						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, SourceLocation(yylineno)); }
-						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, SourceLocation(yylineno)); }
+def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, NodeList::empty(), SourceLocation(yylineno)); }
+						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, NodeList::empty(), SourceLocation(yylineno)); }
+						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }
+						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, NodeList::empty(), SourceLocation(yylineno)); }
+						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, NodeList::empty(), SourceLocation(yylineno)); }
+						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, NodeList::empty(), SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type ';'								{ $$ = new TypeDecl($3, $5, $1, SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type '=' value ';'						{ $$ = new ValDecl($3, $5, $7, $1, SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type '=' VOID ';'						{ $$ = new ValDecl($3, $5, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), $1, SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER '=' value ';'								{ $$ = new ValDecl($3, nullptr, $5, $1, SourceLocation(yylineno)); }
+						| attributes FN IDENTIFIER function_literal_inner						{ $$ = new ValDecl($3, nullptr, $4, $1, SourceLocation(yylineno)); }
+						| attributes STRUCT IDENTIFIER struct_def								{ $$ = new TypeDecl($3, $4, $1, SourceLocation(yylineno)); }
 var_statement			: VAR var_decl_assign_void ';'											{ $$ = $2; }
+						| attributes VAR var_decl_assign_void ';'								{ $3->appendAttributes($1); $$ = $3; }
 expression_statement	: value_assign ';'														{ $$ = new ExpressionStatement($1, SourceLocation(yylineno)); }
 control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr, SourceLocation(yylineno)); }
 						| RETURN value ';'														{ $$ = new ReturnStatement($2, SourceLocation(yylineno)); }
@@ -226,9 +318,9 @@ control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr
 literal		: NUL		{ $$ = new PrimitiveLiteralExpr(SizeT_Type, 0ull, SourceLocation(yylineno)); }
 			| INTEGER	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
 			| FLOATING	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
-			| CHARACTER	{ $$ = new PrimitiveLiteralExpr($1, SourceLocation(yylineno)); }
+			| CHARACTER	{ PrimType pt; char32_t c = parse_char($1, pt); $$ = new PrimitiveLiteralExpr(pt, c, SourceLocation(yylineno)); }
 			| BOOL_T	{ $$ = new PrimitiveLiteralExpr((bool)$1, SourceLocation(yylineno)); }
-			| STRING	{ $$ = Tuple::makeStringLiteral($1, SourceLocation(yylineno)); }
+			| STRING	{ $$ = Tuple::makeStringLiteralQuoted($1, SourceLocation(yylineno)); }
 
 primitive	: VOID		{ $$ = PrimitiveType::get(PrimType::v, SourceLocation(yylineno)); }
 			| U1		{ $$ = PrimitiveType::get(PrimType::u1, SourceLocation(yylineno)); }
@@ -325,21 +417,23 @@ unary	: unary_op value_prefix					{ $$ = new UnaryExpr($1, $2, SourceLocation(yy
 
 /*** primaries ***/
 
-unknown_primary		: IDENTIFIER						{ $$ = new Identifier($1, SourceLocation(yylineno)); }
-					| '[' unknown_list ']'				{ $$ = new Tuple($2, SourceLocation(yylineno)); }
-					| '[' unknown ';' value_list ']'	{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
-					| '(' unknown ')'					{ $$ = $2; }
-known_value_primary	: literal							{ $$ = $1; }
-					| function_literal					{ $$ = $1; }
-					| '[' known_value_list ']'			{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '[' known_value ';' value_list ']'{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
-					| '(' known_value ')'				{ $$ = $2; }
-known_type_primary	: primitive							{ $$ = $1; }
-					| struct							{ $$ = $1; }
-					| function							{ $$ = $1; }
-					| '[' known_type_list ']'			{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '[' known_type ';' value_list ']'	{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
-					| '(' known_type ')'				{ $$ = $2; }
+unknown_primary		: IDENTIFIER									{ $$ = new Identifier($1, SourceLocation(yylineno)); }
+					| PRAGMA '(' IDENTIFIER ')'						{ $$ = new UnknownExpr(makePragma($3, NodeList::empty()), SourceLocation(yylineno)); }
+					| PRAGMA '(' IDENTIFIER ',' unknown_list ')'	{ $$ = new UnknownExpr(makePragma($3, $5), SourceLocation(yylineno)); }
+					| '[' unknown_list ']'							{ $$ = new Tuple($2, SourceLocation(yylineno)); }
+					| '[' unknown ';' value_list ']'				{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' unknown ')'								{ $$ = $2; }
+known_value_primary	: literal										{ $$ = $1; }
+					| function_literal								{ $$ = $1; }
+					| '[' known_value_list ']'						{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
+					| '[' known_value ';' value_list ']'			{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' known_value ')'							{ $$ = $2; }
+known_type_primary	: primitive										{ $$ = $1; }
+					| struct										{ $$ = $1; }
+					| function										{ $$ = $1; }
+					| '[' known_type_list ']'						{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
+					| '[' known_type ';' value_list ']'				{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '(' known_type ')'							{ $$ = $2; }
 
 
 /*** postfix ***/
@@ -505,9 +599,9 @@ value			: known_value					{ $$ = $1; }
 				| unknown						{ $$ = $1; /* Check/fix category */ }
 type			: known_type					{ $$ = $1; }
 				| unknown						{ $$ = $1; /* Check/fix category */ }
-//any_expr		: known_value					{ $$ = $1; }
-//				| known_type					{ $$ = $1; }
-//				| unknown						{ $$ = $1; }
+any				: known_value					{ $$ = $1; }
+				| known_type					{ $$ = $1; }
+				| unknown						{ $$ = $1; }
 
 /*** assign ***/
 
@@ -519,7 +613,7 @@ value_assign	: value							{ $$ = $1; }
 
 void yyerror(const char *s)
 {
-	error(filename.c_str(), yylineno, "Syntax error while parsing!");
+	error(filename.c_str(), yylineno, "Syntax error while parsing: %s", s);
 }
 
 

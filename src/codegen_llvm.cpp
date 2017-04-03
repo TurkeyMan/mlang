@@ -209,7 +209,7 @@ void LLVMGenerator::codegen()
 			fopen_s(&file, compiler.irFile.c_str(), "w");
 			if (!file)
 			{
-				printf("Can't open file for output: %s\n", (const char*)compiler.irFile.c_str());
+				printf("Can't open file for output: %s\n", compiler.irFile.c_str());
 				return;
 			}
 			fwrite(ir.c_str(), 1, ir.size(), file);
@@ -1624,6 +1624,21 @@ void LLVMGenerator::visit(BindExpr &n)
 	int x = 0;
 }
 
+void LLVMGenerator::visit(UnknownExpr &n)
+{
+	if (n.doneCodegen()) return;
+
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	n.node()->accept(*this);
+
+	LLVMData *declCg = n.node()->cgData<LLVMData>();
+	if (n.isExpr())
+		cg->value = declCg->value;
+	else if (n.isType())
+		cg->type = declCg->type;
+}
+
 void LLVMGenerator::visit(Identifier &n)
 {
 	if (n.doneCodegen()) return;
@@ -1825,8 +1840,7 @@ void LLVMGenerator::visit(ValDecl &n)
 	{
 		llvm::FunctionType *sig = (llvm::FunctionType*)n.type()->cgData<LLVMData>()->type;
 
-		// HACK: use n.mangledName()
-		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, str_ref(n.name()), TheModule.get());
+		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, str_ref(n.mangledName()), TheModule.get());
 //		function->setCallingConv(CallingConv::X86_VectorCall)
 		function->addFnAttr(Attribute::AttrKind::NoUnwind);
 //		function->addFnAttr(Attribute::AttrKind::UWTable);

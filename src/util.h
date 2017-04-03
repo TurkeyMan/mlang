@@ -1,6 +1,6 @@
 
-#define SLICE_ALLOC(bytes) malloc(bytes)
-#define SLICE_FREE(ptr) free(ptr)
+//#define SLICE_ALLOC(bytes) GC_MALLOC(bytes)
+//#define SLICE_FREE(ptr) do{}while(false)
 
 #include "sharedarray.h"
 using namespace beautifulcode;

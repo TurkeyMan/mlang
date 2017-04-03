@@ -39,7 +39,7 @@ void emitError(const char *file, int line, const char *message, ...)
 	va_list args;
 	va_start(args, message);
 	vsprintf_s(buffer, message, args);
-	outputMessage("%s(%d): error: %s", file, line, message);
+	outputMessage("%s(%d): error: %s", file, line, buffer);
 	va_end(args);
 }
 
@@ -49,6 +49,6 @@ void emitICE(const char *file, int line, const char *message, ...)
 	va_list args;
 	va_start(args, message);
 	vsprintf_s(buffer, message, args);
-	outputMessage("%s(%d): internal compiler error: %s", file, line, message);
+	outputMessage("%s(%d): internal compiler error: %s", file, line, buffer);
 	va_end(args);
 }

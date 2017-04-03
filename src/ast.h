@@ -272,6 +272,8 @@ public:
 	Declaration *getDecl(String name, bool onlyLocal = false);
 	void addDecl(SharedString name, Declaration *decl);
 	const auto& symbols() const { return _symbolTable; }
+
+	void setParent(Scope *parent) { _parentScope = parent; }
 };
 
 extern std::map<SharedString, TypeExpr*, string_less> typesUsed;
@@ -355,7 +357,7 @@ public:
 	bool isFloatingPoint() const;
 	bool isSomeChar() const;
 
-	Node *getMember(String name);
+	Node *getMember(String name) override;
 
 //	raw_ostream &dump(raw_ostream &out, int ind) override {}
 };
@@ -457,6 +459,8 @@ class Declaration : public Statement
 	friend class Semantic;
 protected:
 
+	NodeList _attributes;
+
 	SharedString _name;
 	mutable SharedString _mangledName;
 
@@ -466,11 +470,15 @@ public:
 	const SharedString& name() const { return _name; }
 	const SharedString& mangledName() const;
 
-	Declaration(SharedString name, SourceLocation loc)
-		: Statement(loc), _name(std::move(name))
+	Declaration(SharedString name, NodeList attrs, SourceLocation loc)
+		: Statement(loc), _attributes(std::move(attrs)), _name(std::move(name))
 	{}
 
+	void appendAttributes(NodeList attrs) { _attributes.append(attrs); }
+
 	bool didReturn() const override { return false; }
+
+	Node *getMember(String name) override;
 
 	void accept(ASTVisitor &v) override;
 };
@@ -830,8 +838,8 @@ protected:
 	TypeExpr *_type;
 
 public:
-	TypeDecl(SharedString name, TypeExpr *type, SourceLocation loc) // TODO: template args
-		: Node(loc), Declaration(std::move(name), loc), _type(type)
+	TypeDecl(SharedString name, TypeExpr *type, NodeList attrs, SourceLocation loc) // TODO: template args
+		: Node(loc), Declaration(std::move(name), std::move(attrs), loc), _type(type)
 	{}
 
 	TypeExpr* type() { return _type; }
@@ -852,8 +860,8 @@ protected:
 	Expr *_value;
 
 public:
-	ValDecl(SharedString name, TypeExpr *type, Expr *value, SourceLocation loc)
-		: Node(loc), Declaration(std::move(name), loc), _type(type), _value(value)
+	ValDecl(SharedString name, TypeExpr *type, Expr *value, NodeList attrs, SourceLocation loc)
+		: Node(loc), Declaration(std::move(name), std::move(attrs), loc), _type(type), _value(value)
 	{}
 
 	TypeExpr* type() { return _type; }
@@ -875,8 +883,8 @@ protected:
 	Expr *_init;
 
 public:
-	VarDecl(SharedString name, TypeExpr *type, Expr *init, SourceLocation loc)
-		: Node(loc), ValDecl(std::move(name), nullptr, nullptr, loc), _valType(type), _init(init)
+	VarDecl(SharedString name, TypeExpr *type, Expr *init, NodeList attrs, SourceLocation loc)
+		: Node(loc), ValDecl(std::move(name), nullptr, nullptr, std::move(attrs), loc), _valType(type), _init(init)
 	{}
 
 	TypeExpr* targetType() { return _valType; }
@@ -1265,6 +1273,47 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+class UnknownExpr : public AmbiguousExpr
+{
+	friend class Semantic;
+
+	Node *_node;
+
+public:
+	UnknownExpr(Node *node, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _node(node) {}
+
+	Node *node() const { return _node; }
+
+	bool isType() const override { return dynamic_cast<TypeExpr*>(_node) != nullptr; }
+	bool isExpr() const override { return dynamic_cast<Expr*>(_node) != nullptr; }
+
+	MutableString64 stringof() const override { return _node->stringof(); }
+	MutableString64 mangleof() const override { return _node->mangleof(); }
+
+	Node *getMember(String name) override { return _node->getMember(name); }
+
+	// expr overrides
+	TypeExpr* type() override { return dynamic_cast<Expr*>(_node)->type(); }
+	Expr* constEval() override { return dynamic_cast<Expr*>(_node)->constEval(); };
+
+	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_node); }
+	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_node); }
+
+	// type overrides
+	Expr* init() const override { return dynamic_cast<TypeExpr*>(_node)->init(); }
+
+	size_t size() const override { return dynamic_cast<TypeExpr*>(_node)->size(); }
+	size_t alignment() const override { return dynamic_cast<TypeExpr*>(_node)->alignment(); }
+
+	bool isSame(const TypeExpr *other) const override { return dynamic_cast<TypeExpr*>(_node)->isSame(other); }
+	ConvType convertible(const TypeExpr *target) const override { return dynamic_cast<TypeExpr*>(_node)->convertible(target); }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { return dynamic_cast<TypeExpr*>(_node)->makeConversion(expr, targetType, implicit); }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
 
 class Identifier : public AmbiguousExpr
 {
@@ -1406,7 +1455,8 @@ public:
 		: Node(loc), AmbiguousExpr(loc), _element(element), _shape(shape)
 	{}
 
-	static Tuple* makeStringLiteral(String str, SourceLocation loc);
+	static Tuple* makeStringLiteralQuoted(String str, SourceLocation loc);
+	static Tuple* makeStringLiteral(String str, PrimType type, bool unescape, SourceLocation loc);
 
 	NodeList elements() const { return _elements; }
 
@@ -1585,6 +1635,8 @@ public:
 */
 
 Statement* makeForEach(DeclList iterators, Expr *range, StatementList body, SourceLocation loc);
+
+Node* makePragma(String identifier, NodeList args);
 
 template <typename TypeNode, typename... Args>
 struct MakeTypeHelper
