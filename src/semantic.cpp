@@ -125,17 +125,14 @@ void Semantic::visit(Module &n)
 
 	n._module = &n;
 
+	n._declaration->accept(*this);
+
 	pushScope(&n);
 
 	for (auto s : n.statements())
 		s->accept(*this);
 
 	popScope();
-}
-
-void Semantic::visit(ModuleStatement &n)
-{
-	if (n.doneSemantic()) return;
 }
 
 void Semantic::visit(ExpressionStatement &n)
@@ -603,6 +600,7 @@ void Semantic::visit(Identifier &n)
 
 	n._var = dynamic_cast<ValDecl*>(_target);
 	n._type = dynamic_cast<TypeDecl*>(_target);
+	n._module = dynamic_cast<ModuleDecl*>(_target);
 }
 
 void Semantic::visit(MemberLookup &n)
@@ -922,6 +920,13 @@ void Semantic::visit(LoopStatement &n)
 
 		popScope();
 	}
+}
+
+void Semantic::visit(ModuleDecl &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._module->accept(*this);
 }
 
 void Semantic::visit(TypeDecl &n)

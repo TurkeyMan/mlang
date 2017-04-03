@@ -85,6 +85,7 @@ private:
 	IRBuilder<> Builder;
 
 	std::unique_ptr<DIBuilder> DBuilder;
+	DICompileUnit* DCU;
 //	std::vector<DIScope *> LexicalBlocks;
 
 	void emitLocation(Node *node);
@@ -123,7 +124,6 @@ public:
 
 	void visit(Declaration &n) override;
 	void visit(Module &n) override;
-	void visit(ModuleStatement &n) override;
 	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
 	void visit(ScopeStatement &n) override;
@@ -149,6 +149,7 @@ public:
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &v) override;
 	void visit(Index &n) override;
+	void visit(ModuleDecl &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;

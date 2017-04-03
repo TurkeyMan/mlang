@@ -275,7 +275,8 @@ body				: body_block								{ $$ = new ScopeStatement($1, nullptr, SourceLocatio
 /**** STATEMENTS ****/
 
 empty_statement			: ';'																	{ $$ = nullptr; }
-module_statement		: MODULE module_name ';'												{ $$ = new ModuleStatement($2, SourceLocation(yylineno)); }
+module_statement		: MODULE module_name ';'												{ $$ = new ModuleDecl($2, NodeList::empty(), SourceLocation(yylineno)); }
+						| attributes MODULE module_name ';'										{ $$ = new ModuleDecl($3, $1, SourceLocation(yylineno)); }
 def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, NodeList::empty(), SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, NodeList::empty(), SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }

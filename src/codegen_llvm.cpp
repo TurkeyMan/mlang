@@ -64,6 +64,9 @@ LLVMGenerator::LLVMGenerator(Compiler &compiler)
 
 		// Construct the DIBuilder, we do this here because we need the module.
 		DBuilder = llvm::make_unique<DIBuilder>(*TheModule);
+
+		// TODO: get output dir and give it to CU...
+		DCU = DBuilder->createCompileUnit(dwarf::DW_LANG_C, str_ref(compiler.outFile), StringRef(), "M-Lang Compiler", compiler.opt > 0, "", 0);
 	}
 
 	for (auto module : compiler.modules)
@@ -402,12 +405,14 @@ void LLVMGenerator::visit(Module &n)
 {
 	if (n.doneCodegen()) return;
 
+	n.getModuleDecl()->accept(*this);
+
 	LLVMData *cg = n.cgData<LLVMData>();
 
 	if (compiler.debug)
 	{
-		DICompileUnit *cu = DBuilder->createCompileUnit(dwarf::DW_LANG_C, str_ref(n.filename()), str_ref(n.directory()), "M-Lang Compiler", compiler.opt > 0, "", 0);
-		cg->divalue = cg->discope = cu;
+		cg->divalue = DCU;
+		cg->discope = DBuilder->createFile(str_ref(n.filename()), str_ref(n.directory()));
 	}
 
 	pushScope(&n);
@@ -416,12 +421,6 @@ void LLVMGenerator::visit(Module &n)
 		s->accept(*this);
 
 	popScope();
-}
-
-void LLVMGenerator::visit(ModuleStatement &n)
-{
-	if (n.doneCodegen()) return;
-
 }
 
 void LLVMGenerator::visit(ExpressionStatement &n)
@@ -884,7 +883,7 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 	llvm::FunctionType *sig = (llvm::FunctionType*)fn->cgData<LLVMData>()->type;
 
 	Function *function = Function::Create(sig, Function::InternalLinkage, "", TheModule.get());
-//	function->setCallingConv(CallingConv::X86_VectorCall)
+//	function->setCallingConv(CallingConv::X86_VectorCall);
 	function->addFnAttr(Attribute::AttrKind::NoUnwind);
 //	function->addFnAttr(Attribute::AttrKind::UWTable);
 	cg->value = function;
@@ -1790,6 +1789,13 @@ void LLVMGenerator::visit(Index &n)
 	cg->type = n.expr()->cgData<LLVMData>()->type;
 }
 
+void LLVMGenerator::visit(ModuleDecl &n)
+{
+	if (n.doneCodegen()) return;
+
+	n.module()->accept(*this);
+}
+
 void LLVMGenerator::visit(TypeDecl &n)
 {
 	if (n.doneCodegen()) return;
@@ -1828,9 +1834,20 @@ void LLVMGenerator::visit(ValDecl &n)
 	if (valueType->asFunction())
 	{
 		llvm::Function *func = (llvm::Function*)n.value()->cgData<LLVMData>()->value;
-//		func->setName(str_ref(n.name()));
+
 		func->setName(str_ref(n.mangledName()));
 		func->setLinkage(Function::ExternalLinkage);
+
+		for (auto a : n.attributes())
+		{
+			Identifier *i = dynamic_cast<Identifier*>(a);
+			if (i && i->getName().eq("extern_c"))
+			{
+				func->setCallingConv(CallingConv::C);
+				break;
+			}
+		}
+
 		cg->value = func;
 
 		if (compiler.debug)
@@ -1845,9 +1862,21 @@ void LLVMGenerator::visit(ValDecl &n)
 		llvm::FunctionType *sig = (llvm::FunctionType*)n.type()->cgData<LLVMData>()->type;
 
 		Function *function = Function::Create(sig, Function::AvailableExternallyLinkage, str_ref(n.mangledName()), TheModule.get());
+
 //		function->setCallingConv(CallingConv::X86_VectorCall)
 		function->addFnAttr(Attribute::AttrKind::NoUnwind);
 //		function->addFnAttr(Attribute::AttrKind::UWTable);
+
+		for (auto a : n.attributes())
+		{
+			Identifier *i = dynamic_cast<Identifier*>(a);
+			if (i && i->getName().eq("extern_c"))
+			{
+				function->setCallingConv(CallingConv::C);
+				break;
+			}
+		}
+
 		cg->value = function;
 
 		// HACK: WOAH MADHAX!!!! probably need a prototype node, or a generally better way of dealing with prototypes...

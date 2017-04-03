@@ -32,7 +32,6 @@ const char *primTypeMangle[(size_t)PrimType::__NumTypes] =
 
 
 void Declaration::accept(ASTVisitor &v) { v.visit(*this); }
-void ModuleStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ExpressionStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ReturnStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void ScopeStatement::accept(ASTVisitor &v) { v.visit(*this); }
@@ -59,6 +58,7 @@ void Identifier::accept(ASTVisitor &v) { v.visit(*this); }
 void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
 void Tuple::accept(ASTVisitor &v) { v.visit(*this); }
 void Index::accept(ASTVisitor &v) { v.visit(*this); }
+void ModuleDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
@@ -143,8 +143,8 @@ void Scope::addDecl(SharedString name, Declaration *decl)
 
 MutableString64 Module::stringof() const
 {
-	if (_moduleStatement)
-		return _moduleStatement->name();
+	if (_declaration)
+		return _declaration->name();
 
 	MutableString64 r = _name.length ? String(_name[0]) : String();
 	for (size_t i = 1; i < _name.length; ++i)
@@ -761,6 +761,14 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 //** Declaration nodes **
 //***********************
 
+Node *ModuleDecl::getMember(String name)
+{
+	Declaration *decl = _module->getDecl(name, true);
+	if (decl)
+		return decl;
+	return Declaration::getMember(name);
+}
+
 raw_ostream &TypeDecl::dump(raw_ostream &out, int ind)
 {
 	Declaration::dump(out << "type: " << str_ref(_name), ind) << "\n";
@@ -1059,6 +1067,9 @@ raw_ostream &UnknownExpr::dump(raw_ostream &out, int ind)
 
 Node *Identifier::getMember(String name)
 {
+	if (_module)
+		return _module->getMember(name);
+
 	// base class member?
 	Node *r = AmbiguousExpr::getMember(name);
 	if (r)
@@ -1073,8 +1084,53 @@ raw_ostream &Identifier::dump(raw_ostream &out, int ind)
 	return Node::dump(out << ty << str_ref(_name) << "\n", ind);
 }
 
+bool MemberLookup::isType() const
+{
+	return dynamic_cast<TypeExpr*>(_result) != nullptr || dynamic_cast<TypeDecl*>(_result) != nullptr;
+}
+bool MemberLookup::isExpr() const
+{
+	return dynamic_cast<Expr*>(_result) != nullptr || dynamic_cast<ValDecl*>(_result);
+}
+
+TypeExpr* MemberLookup::type()
+{
+	ValDecl *val = dynamic_cast<ValDecl*>(_result);
+	if (val)
+		return val->type();
+	Expr *expr = dynamic_cast<Expr*>(_result);
+	if (expr)
+		return expr->type();
+	return nullptr;
+}
+
+Expr* MemberLookup::resolveExpr()
+{
+	Expr *expr = dynamic_cast<Expr*>(_result);
+	if (expr)
+		return expr;
+	ValDecl *val = dynamic_cast<ValDecl*>(_result);
+	if (val)
+		return val->value();
+	return nullptr;
+}
+TypeExpr* MemberLookup::resolveType() const
+{
+	TypeExpr *type = dynamic_cast<TypeExpr*>(_result);
+	if (type)
+		return type;
+	TypeDecl *typedecl = dynamic_cast<TypeDecl*>(_result);
+	if (typedecl)
+		return typedecl->type();
+	return nullptr;
+}
+
 Node *MemberLookup::getMember(String name)
 {
+	ModuleDecl *mod = dynamic_cast<ModuleDecl*>(_result);
+	if (mod)
+		return mod->getMember(name);
+
 	// base class member?
 	Node *r = AmbiguousExpr::getMember(name);
 	if (r)

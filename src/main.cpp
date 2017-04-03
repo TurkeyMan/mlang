@@ -190,21 +190,21 @@ extern "C" {
 			// add to module list
 			Array<SharedString> moduleIdentifier;
 
-			ModuleStatement *moduleStatement = nullptr;
+			ModuleDecl *moduleDecl = nullptr;
 			for (auto pStatement : statements)
 			{
-				ModuleStatement *module = dynamic_cast<ModuleStatement*>(pStatement);
-				if (module)
+				ModuleDecl *decl = dynamic_cast<ModuleDecl*>(pStatement);
+				if (decl)
 				{
-					if (moduleStatement)
-						error(src.c_str(), module->getLine(), "Invalid; multiple 'module' statements.");
+					if (moduleDecl)
+						error(src.c_str(), decl->getLine(), "Invalid; multiple 'module' statements.");
 
-					module->name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
-					moduleStatement = module;
+					decl->name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
+					moduleDecl = decl;
 				}
 			}
 
-			if (moduleIdentifier.empty())
+			if (!moduleDecl)
 			{
 				// HACK?: make default module name from filename without extension
 				MutableString256 moduleName = src;
@@ -219,9 +219,12 @@ extern "C" {
 				moduleName.replace('.', '_');
 
 				moduleName.tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, "/");
+
+				moduleDecl = new ModuleDecl(moduleName, NodeList::empty(), SourceLocation(0));
 			}
 
-			m::Module *module = new m::Module(path, pFilePart, std::move(moduleIdentifier), statements, moduleStatement);
+			m::Module *module = new m::Module(path, pFilePart, std::move(moduleIdentifier), statements, moduleDecl);
+			moduleDecl->setModule(module);
 
 			mlang.modules.push_back(module);
 		}
@@ -240,9 +243,13 @@ extern "C" {
 				{
 					if (it == sub->submodules().end())
 					{
-						Module *package = new Module(nullptr, nullptr, Array<SharedString>(m->fullName().slice(0, i + 1)), StatementList::empty(), nullptr);
+						ModuleDecl *moduleDecl = new ModuleDecl(nullptr, NodeList::empty(), SourceLocation(0));
+						Module *package = new Module(nullptr, nullptr, Array<SharedString>(m->fullName().slice(0, i + 1)), StatementList::empty(), moduleDecl);
+						moduleDecl->setModule(package);
+
 						package->setParent(sub);
 						sub->submodules().insert({ name, package });
+						sub->addDecl(name, moduleDecl);
 						sub = sub->submodules()[name];
 					}
 				}
@@ -251,11 +258,12 @@ extern "C" {
 					if (it != sub->submodules().end())
 					{
 						const SharedString &path = sub->path();
-						ModuleStatement *m = sub->getModuleStatement();
+						ModuleDecl *m = sub->getModuleDecl();
 						error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "module '%s' already exists", (const char*)sub->stringof().c_str());
 					}
 					m->setParent(sub);
 					sub->submodules().insert({ name, m });
+					sub->addDecl(name, m->getModuleDecl());
 				}
 			}
 		}

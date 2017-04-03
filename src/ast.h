@@ -5,6 +5,7 @@
 
 #include "sourceloc.h"
 #include "util.h"
+#include "error.h"
 
 #include <map>
 
@@ -158,7 +159,7 @@ class PointerType;
 class Struct;
 class Tuple;
 
-class ModuleStatement;
+class ModuleDecl;
 
 using NodeList = List<Node*>;
 using ExprList = List<Expr*>;
@@ -421,11 +422,11 @@ class Module : public virtual Node, public Scope
 
 	StatementList moduleStatements;
 
-	ModuleStatement *_moduleStatement;
+	ModuleDecl *_declaration;
 
 public:
-	Module(SharedString path, SharedString filename, Array<SharedString> moduleName, StatementList moduleStatements, ModuleStatement *moduleStatement)
-		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(std::move(moduleName)), _path(std::move(path)), _filename(std::move(filename)), moduleStatements(moduleStatements), _moduleStatement(moduleStatement)
+	Module(SharedString path, SharedString filename, Array<SharedString> moduleName, StatementList moduleStatements, ModuleDecl *moduleDecl)
+		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(std::move(moduleName)), _path(std::move(path)), _filename(std::move(filename)), moduleStatements(moduleStatements), _declaration(moduleDecl)
 	{}
 
 	MutableString64 stringof() const override;
@@ -443,7 +444,7 @@ public:
 
 	StatementList statements() { return moduleStatements; }
 
-	ModuleStatement *getModuleStatement() const { return _moduleStatement; }
+	ModuleDecl *getModuleDecl() const { return _declaration; }
 
 	void accept(ASTVisitor &v) override;
 };
@@ -473,6 +474,7 @@ public:
 		: Statement(loc), _attributes(std::move(attrs)), _name(std::move(name))
 	{}
 
+	NodeList attributes() const { return _attributes; }
 	void appendAttributes(NodeList attrs) { _attributes.append(attrs); }
 
 	bool didReturn() const override { return false; }
@@ -480,32 +482,6 @@ public:
 	Node *getMember(String name) override;
 
 	void accept(ASTVisitor &v) override;
-};
-
-class ModuleStatement : public Statement
-{
-	friend class Semantic;
-
-	SharedString _name;
-
-public:
-	ModuleStatement(SharedString name, SourceLocation loc)
-		: Node(loc), Statement(loc), _name(std::move(name))
-	{
-	}
-
-	const SharedString& name() const { return _name; }
-
-	bool didReturn() const override { return false; }
-
-	MutableString64 stringof() const override { return _name; assert(false); } // TODO: test me!
-	MutableString64 mangleof() const override { return MutableString64(Concat, "_M", _name); assert(false); } // TODO: test me!
-
-	void accept(ASTVisitor &v) override;
-
-	raw_ostream &dump(raw_ostream &out, int ind) override {
-		return Statement::dump(out << "module: #" << str_ref(_name) << '\n', ind);
-	}
 };
 
 class ExpressionStatement : public Statement
@@ -829,6 +805,35 @@ public:
 //***********************
 //** Declaration nodes **
 //***********************
+
+class ModuleDecl : public Declaration
+{
+	friend class Semantic;
+
+	Module *_module = nullptr;
+
+public:
+	ModuleDecl(SharedString name, NodeList attrs, SourceLocation loc)
+		: Node(loc), Declaration(name, std::move(attrs), loc)
+	{
+	}
+
+	bool didReturn() const override { return false; }
+
+	MutableString64 stringof() const override { return _name; assert(false); } // TODO: test me!
+	MutableString64 mangleof() const override { return MutableString64(Concat, "_M", _name); assert(false); } // TODO: test me!
+
+	Node *getMember(String name) override;
+
+	Module* module() { return _module; }
+	void setModule(Module *module) { _module = module; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override {
+		return Statement::dump(out << "module: #" << str_ref(_name) << '\n', ind);
+	}
+};
 
 class TypeDecl : public Declaration
 {
@@ -1322,6 +1327,7 @@ class Identifier : public AmbiguousExpr
 
 	ValDecl *_var = nullptr;
 	TypeDecl *_type = nullptr;
+	ModuleDecl *_module = nullptr;
 
 public:
 	Identifier(SharedString name, SourceLocation loc)
@@ -1331,6 +1337,7 @@ public:
 
 	Declaration* target() const { return _var ? (Declaration*)_var : (Declaration*)_type; }
 
+	bool isExpr() const override { return _var != nullptr; }
 	bool isType() const override { return _type != nullptr; }
 
 	// expr overrides
@@ -1345,6 +1352,8 @@ public:
 	{
 		if (isType())
 			return _type->stringof();
+		else if (_module)
+			return _module->stringof();
 		return _name;
 	}
 	MutableString64 mangleof() const override
@@ -1352,6 +1361,8 @@ public:
 		if (isType())
 			return _type->mangleof();
 		assert(false); // TODO: what is the scope of the symbol?
+		if (_module)
+			return _module->mangleof();
 		return _var->mangleof();
 	}
 
@@ -1386,14 +1397,16 @@ public:
 
 	Node* expr() const { return _result; }
 
-	bool isType() const override { return dynamic_cast<TypeExpr*>(_result) != nullptr; }
+	bool isType() const override;
+	bool isExpr() const override;
 
 	// expr overrides
-	TypeExpr* type() override { return resolveExpr()->type(); }
+	TypeExpr* type() override;
 	Expr* constEval() override { return resolveExpr()->constEval(); };
 
-	Expr* resolveExpr() override { return dynamic_cast<Expr*>(_result); }
-	TypeExpr* resolveType() override { return dynamic_cast<TypeExpr*>(_result); }
+	Expr* resolveExpr() override;
+	TypeExpr* resolveType() override { return ((const MemberLookup*)this)->resolveType(); }
+	TypeExpr* resolveType() const;
 
 	// type overrides
 	MutableString64 stringof() const override
@@ -1410,14 +1423,14 @@ public:
 		return nullptr;
 	}
 
-	Expr* init() const override { return dynamic_cast<TypeExpr*>(_result)->init(); }
+	Expr* init() const override { return resolveType()->init(); }
 
-	size_t size() const override { return dynamic_cast<TypeExpr*>(_result)->size(); }
-	size_t alignment() const override { return dynamic_cast<TypeExpr*>(_result)->alignment(); }
+	size_t size() const override { return resolveType()->size(); }
+	size_t alignment() const override { return resolveType()->alignment(); }
 
-	bool isSame(const TypeExpr *other) const override { return dynamic_cast<TypeExpr*>(_result)->isSame(other); }
-	ConvType convertible(const TypeExpr *target) const override { return dynamic_cast<TypeExpr*>(_result)->convertible(target); }
-	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { return dynamic_cast<TypeExpr*>(_result)->makeConversion(expr, targetType, implicit); }
+	bool isSame(const TypeExpr *other) const override { return resolveType()->isSame(other); }
+	ConvType convertible(const TypeExpr *target) const override { return resolveType()->convertible(target); }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { return resolveType()->makeConversion(expr, targetType, implicit); }
 
 	Node *getMember(String name) override;
 

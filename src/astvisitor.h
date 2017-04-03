@@ -10,7 +10,6 @@ class ASTVisitor : public gc_cleanup
 public:
 	virtual void visit(Declaration &n) {}
 	virtual void visit(Module &n) {}
-	virtual void visit(ModuleStatement &n) {}
 	virtual void visit(ExpressionStatement &n) {}
 	virtual void visit(ReturnStatement &n) {}
 	virtual void visit(ScopeStatement &n) {}
@@ -36,6 +35,7 @@ public:
 	virtual void visit(MemberLookup &n) {}
 	virtual void visit(Tuple &n) {}
 	virtual void visit(Index &n) {}
+	virtual void visit(ModuleDecl &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}
