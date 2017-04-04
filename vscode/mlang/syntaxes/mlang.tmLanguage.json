@@ -23,7 +23,7 @@
 				},
 				{
 					"name": "storage.type.mlang",
-					"match": "\\b(fn|struct)\\b"
+					"match": "\\b(fn|struct|const)\\b"
 				}
 			]
 		},
