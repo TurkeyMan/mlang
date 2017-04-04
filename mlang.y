@@ -630,9 +630,9 @@ StatementList parse(FILE *file, String name)
 
 	// set lex to read from it instead of defaulting to STDIN:
 	yyin = file;
+	yylineno = 1;
 
 	// parse through the input until there is no more:
-
 	do {
 		yyparse();
 	} while (!feof(yyin));

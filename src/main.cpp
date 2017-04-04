@@ -13,6 +13,7 @@ namespace m {
 void LoadConfig();
 void InitCodegen();
 void PopulateIntrinsics(Module *module);
+Module* LoadModule(String filename, String path, bool errorOnFail);
 void Codegen(Compiler &compiler);
 void Link(Compiler &compiler);
 
@@ -132,147 +133,14 @@ extern "C" {
 		LoadConfig();
 		InitCodegen();
 
+		// create root module
+		mlang.root = new Module(nullptr, nullptr, {}, StatementList::empty(), nullptr);
+
+		// load source modules
 		for (auto &src : mlang.srcFiles)
 		{
-			char path[260];
-			char *pFilePart;
-			DWORD len = GetFullPathNameA(src.c_str(), sizeof(path), path, &pFilePart);
-			if (len == 0)
-			{
-				outputMessage("Source file %s does not exist\n", src.c_str());
-				return -1;
-			}
-			if (!pFilePart)
-			{
-				outputMessage("Source filename is a directory: %s\n", src.c_str());
-				return -1;
-			}
-
-			// open source file
-			FILE *file;
-			fopen_s(&file, src.c_str(), "r");
-			if (!file)
-			{
-				outputMessage("Can't open source file: %s\n", src.c_str());
-				return -1;
-			}
-
-			// parse the source
-			m::StatementList statements = parse(file, src);
-
-			// done with the file
-			fclose(file);
-
-			// dump parse tree
-			FILE *ast = nullptr;
-			if (!astFile.empty())
-			{
-				fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
-				if (!file)
-				{
-					outputMessage("Can't open ast file: %s", astFile.c_str());
-					return -1;
-				}
-				class OS : public llvm::raw_ostream
-				{
-					FILE *ast;
-					uint64_t offset = 0;
-				public:
-					OS(FILE *ast) : ast(ast) {}
-					void write_impl(const char *Ptr, size_t Size) override
-					{
-						if (ast)
-							fwrite(Ptr, 1, Size, ast);
-						offset += Size;
-					}
-					uint64_t current_pos() const override { return offset; }
-				};
-				OS os(ast);
-				for (auto s : statements)
-					s->dump(os, 0);
-				os.flush();
-				fclose(ast);
-			}
-
-			// add to module list
-			Array<SharedString> moduleIdentifier;
-
-			ModuleDecl *moduleDecl = nullptr;
-			for (auto pStatement : statements)
-			{
-				ModuleDecl *decl = dynamic_cast<ModuleDecl*>(pStatement);
-				if (decl)
-				{
-					if (moduleDecl)
-						error(src.c_str(), decl->getLine(), "Invalid; multiple 'module' statements.");
-
-					decl->name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
-					moduleDecl = decl;
-				}
-			}
-
-			if (!moduleDecl)
-			{
-				// HACK?: make default module name from filename without extension
-				MutableString256 moduleName = src;
-				ptrdiff_t slash = moduleName.find_last('/');
-				if (slash == moduleName.length)
-					slash = -1;
-				ptrdiff_t dot = moduleName.find_last('.');
-				if (dot == moduleName.length)
-					slash = -1;
-				if (dot > slash)
-					moduleName.pop_back(moduleName.length - dot);
-				moduleName.replace('.', '_');
-
-				moduleName.tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, "/");
-
-				moduleDecl = new ModuleDecl(moduleName, NodeList::empty(), SourceLocation(0));
-			}
-
-			m::Module *module = new m::Module(path, pFilePart, std::move(moduleIdentifier), statements, moduleDecl);
-			moduleDecl->setModule(module);
-
+			m::Module *module = LoadModule(src, nullptr, true);
 			mlang.modules.push_back(module);
-		}
-
-		// organise modules into tree...
-		mlang.root = new Module(nullptr, nullptr, {}, StatementList::empty(), nullptr);
-		for (auto m : mlang.modules)
-		{
-			Module *sub = mlang.root;
-			for (size_t i = 0; i < m->fullName().size(); ++i)
-			{
-				const SharedString &name = m->fullName()[i];
-				auto it = sub->submodules().find(name);
-
-				if (i < m->fullName().size() - 1)
-				{
-					if (it == sub->submodules().end())
-					{
-						ModuleDecl *moduleDecl = new ModuleDecl(nullptr, NodeList::empty(), SourceLocation(0));
-						Module *package = new Module(nullptr, nullptr, Array<SharedString>(m->fullName().slice(0, i + 1)), StatementList::empty(), moduleDecl);
-						moduleDecl->setModule(package);
-
-						package->setParent(sub);
-						sub->submodules().insert({ name, package });
-						sub->addDecl(name, moduleDecl);
-						sub = sub->submodules()[name];
-					}
-				}
-				else
-				{
-					if (it != sub->submodules().end())
-					{
-						const SharedString &path = sub->path();
-						ModuleDecl *m = sub->getModuleDecl();
-						error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "module '%s' already exists", (const char*)sub->stringof().c_str());
-					}
-					m->setParent(sub);
-					sub->submodules().insert({ name, m });
-					sub->addDecl(name, m->getModuleDecl());
-				}
-			}
 		}
 
 		// populate the root namespace with intrinsics
@@ -345,6 +213,141 @@ void PopulateIntrinsics(Module *module)
 
 	TypeDecl *xternc = new TypeDecl("extern_c", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
 	module->addDecl(xternc->name(), xternc);
+}
+
+Module* LoadModule(String filename, String searchPath, bool errorOnFail)
+{
+	MutableString256 src(Concat, searchPath, searchPath && searchPath.back() != '/' && searchPath.back() != '\\' ? "/" : "", filename);
+
+	src.replace('\\', '/');
+	String filePart = src.get_right_at_last('/', false);
+	if (!filePart)
+		filePart = src;
+
+	// open source file
+	FILE *file;
+	fopen_s(&file, src.c_str(), "r");
+	if (!file)
+	{
+		if (errorOnFail)
+			infoError("'%s': can't open source file", src.c_str());
+		return nullptr;
+	}
+
+	// parse the source
+	m::StatementList statements = parse(file, src);
+
+	// done with the file
+	fclose(file);
+
+	// dump parse tree
+	FILE *ast = nullptr;
+	if (!astFile.empty())
+	{
+		fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
+		if (!file)
+		{
+			if (errorOnFail)
+				infoError("'%s': can't open ast file", astFile.c_str());
+			return nullptr;
+		}
+		class OS : public llvm::raw_ostream
+		{
+			FILE *ast;
+			uint64_t offset = 0;
+		public:
+			OS(FILE *ast) : ast(ast) {}
+			void write_impl(const char *Ptr, size_t Size) override
+			{
+				if (ast)
+					fwrite(Ptr, 1, Size, ast);
+				offset += Size;
+			}
+			uint64_t current_pos() const override { return offset; }
+		};
+		OS os(ast);
+		for (auto s : statements)
+			s->dump(os, 0);
+		os.flush();
+		fclose(ast);
+	}
+
+	// add to module list
+	Array<SharedString> moduleIdentifier;
+
+	ModuleDecl *moduleDecl = nullptr;
+	for (auto statement : statements)
+	{
+		ModuleDecl *decl = dynamic_cast<ModuleDecl*>(statement);
+		if (decl)
+		{
+			if (moduleDecl)
+				error(src.c_str(), decl->getLine(), "invalid: multiple 'module' statements");
+
+			decl->name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
+			moduleDecl = decl;
+		}
+	}
+
+	if (!moduleDecl)
+	{
+		// HACK?: make default module name from filename without extension
+		MutableString256 moduleName = filename;
+		ptrdiff_t slash = moduleName.find_last('/');
+		if (slash == moduleName.length)
+			slash = -1;
+		ptrdiff_t dot = moduleName.find_last('.');
+		if (dot == moduleName.length)
+			slash = -1;
+		if (dot > slash)
+			moduleName.pop_back(moduleName.length - dot);
+		moduleName.replace('.', '_');
+		moduleName.replace('/', '.');
+
+		moduleName.tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
+
+		moduleDecl = new ModuleDecl(moduleName, NodeList::empty(), SourceLocation(0));
+	}
+
+	m::Module *module = new m::Module(src, filePart, moduleIdentifier, statements, moduleDecl);
+	moduleDecl->setModule(module);
+
+	// insert it into the tree...
+	Module *sub = mlang.root;
+	for (size_t i = 0; i < moduleIdentifier.length; ++i)
+	{
+		const SharedString &name = moduleIdentifier[i];
+		auto it = sub->submodules().find(name);
+
+		if (i < moduleIdentifier.length - 1)
+		{
+			if (it == sub->submodules().end())
+			{
+				ModuleDecl *moduleDecl = new ModuleDecl(nullptr, NodeList::empty(), SourceLocation(0));
+				Module *package = new Module(nullptr, nullptr, Array<SharedString>(moduleIdentifier.slice(0, i + 1)), StatementList::empty(), moduleDecl);
+				moduleDecl->setModule(package);
+
+				package->setParent(sub);
+				sub->submodules().insert({ name, package });
+				sub->addDecl(name, moduleDecl);
+				sub = sub->submodules()[name];
+			}
+		}
+		else
+		{
+			if (it != sub->submodules().end())
+			{
+				const SharedString &path = sub->path();
+				ModuleDecl *m = sub->getModuleDecl();
+				error(!path.empty() ? path.c_str() : "", m ? m->getLine() : 0, "module '%s' already exists", (const char*)sub->stringof().c_str());
+			}
+			module->setParent(sub);
+			sub->submodules().insert({ name, module });
+			sub->addDecl(name, module->getModuleDecl());
+		}
+	}
+
+	return module;
 }
 
 }

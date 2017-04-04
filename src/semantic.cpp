@@ -5,6 +5,8 @@
 
 namespace m {
 
+Module* LoadModule(String filename, String searchPath, bool errorOnFail);
+
 extern Compiler mlang;
 
 void Semantic::run()
@@ -980,7 +982,29 @@ void Semantic::visit(ImportDecl &n)
 
 	if (!module)
 	{
-		// load module...
+		// attempt to load module...
+		String extensions[] = { ".me", ".ms" };
+		MutableString256 name = n.name();
+		name.replace('.', '/');
+		for (auto path : mlang.impPaths)
+		{
+			for (auto ext : extensions)
+			{
+				name.append(ext);
+				module = LoadModule(name, path, false);
+				name.pop_back(ext.length);
+				if (module)
+					goto got_it;
+			}
+		}
+	got_it:
+
+		if (!module)
+			error(scopeFilename().c_str(), n.getLine(), "'%s': couldn't import module; file does not exist", n.name().c_str());
+
+		ModuleDecl *decl = module->getModuleDecl();
+		if (!n.name().eq(decl->name()))
+			error(module->path().c_str(), decl->getLine(), "'%s': module name does not match file name", decl->name().c_str());
 	}
 
 	n._owner->_imports.insert(module);

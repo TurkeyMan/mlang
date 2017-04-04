@@ -130,13 +130,13 @@ Declaration *Scope::getDecl(String name, bool onlyLocal)
 		for (auto import : _imports)
 		{
 			Declaration *d = import->getDecl(name, true);
-			if (d && decl)
+			if (d)
 			{
-				// multiple resolved!
-				error(nullptr, 0, "'%s': ambiguous lookup", (const char*)name.c_str());
+				if (decl)
+					error(nullptr, 0, "'%s': ambiguous lookup", (const char*)name.c_str());
+				else
+					decl = d;
 			}
-			else
-				decl = d;
 		}
 		if (decl)
 			return decl;

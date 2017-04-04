@@ -12,7 +12,7 @@ class Compiler
 public:
 	Array<SharedString> srcFiles;
 
-	Array<SharedString> impPaths;
+	Array<SharedString> impPaths = { "" };
 	Array<SharedString> libPaths;
 	Array<SharedString> libs;
 
