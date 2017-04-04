@@ -144,10 +144,10 @@ char32_t parse_char(const char *s, PrimType &type)
 }
 
 %token PRAGMA
-%token MODULE STATIC
+%token MODULE IMPORT
 %token DEF VAR
 %token FN STRUCT
-%token CONST
+%token STATIC CONST
 %token IF THEN ELSE FOR FOREACH DO WHILE MATCH RETURN BREAK CAST
 %token ELIPSIS IS ISNOT ARROW IMPLY SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW BIND
 %token MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
@@ -175,7 +175,7 @@ char32_t parse_char(const char *s, PrimType &type)
 %type <type> known_type type known_type_primary known_type_postfix type_postfix known_type_prefix known_type_infix1 known_type_infix2 known_type_infix3 known_type_infix4 known_type_infix5 known_type_infix6 known_type_infix7 known_type_infix8 known_type_infix9 known_type_infix10 known_type_infix11 known_type_infix12
 %type <typeExprList> known_type_list  // type_list
 
-%type <statement> module_stmnt struct_stmnt code_stmnt module_statement def_statement var_statement expression_statement empty_statement control_statement body
+%type <statement> module_stmnt struct_stmnt code_stmnt module_statement import_statement def_statement var_statement expression_statement empty_statement control_statement body
 %type <statementList> module_statemtnts struct_statements code_statements body_block
 
 %type <decl> var_decl var_decl_assign var_decl_assign_void
@@ -196,6 +196,7 @@ mlang	: module_statemtnts								{ parseTree = $1; }
 module_statemtnts	: module_stmnt						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| module_statemtnts module_stmnt	{ $$ = $2 ? $1.append($2) : $1; }
 module_stmnt		: module_statement					{ $$ = $1; }
+					| import_statement					{ $$ = $1; }
 					| def_statement						{ $$ = $1; }
 					| var_statement						{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
@@ -203,6 +204,7 @@ struct_statements	: struct_stmnt						{ $$ = StatementList::empty(); if ($1) $$ 
 					| struct_statements struct_stmnt	{ $$ = $2 ? $1.append($2) : $1; }
 struct_stmnt		: def_statement						{ $$ = $1; }
 					| var_statement						{ $$ = $1; }
+					| import_statement					{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
 code_statements		: code_stmnt						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| code_statements code_stmnt		{ $$ = $2 ? $1.append($2) : $1; }
@@ -210,6 +212,7 @@ code_stmnt			: def_statement						{ $$ = $1; }
 					| var_statement						{ $$ = $1; }
 					| expression_statement				{ $$ = $1; }
 					| control_statement					{ $$ = $1; }
+					| import_statement					{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
 
 var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, NodeList::empty(), SourceLocation(yylineno)); }
@@ -277,6 +280,8 @@ body				: body_block								{ $$ = new ScopeStatement($1, nullptr, SourceLocatio
 empty_statement			: ';'																	{ $$ = nullptr; }
 module_statement		: MODULE module_name ';'												{ $$ = new ModuleDecl($2, NodeList::empty(), SourceLocation(yylineno)); }
 						| attributes MODULE module_name ';'										{ $$ = new ModuleDecl($3, $1, SourceLocation(yylineno)); }
+import_statement		: IMPORT module_name ';'												{ $$ = new ImportDecl($2, NodeList::empty(), SourceLocation(yylineno)); }
+						| attributes IMPORT module_name ';'										{ $$ = new ImportDecl($3, $1, SourceLocation(yylineno)); }
 def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, NodeList::empty(), SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, NodeList::empty(), SourceLocation(yylineno)); }
 						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }
@@ -430,6 +435,7 @@ known_value_primary	: literal										{ $$ = $1; }
 					| '[' known_value ';' value_list ']'			{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
 					| '(' known_value ')'							{ $$ = $2; }
 known_type_primary	: primitive										{ $$ = $1; }
+					| CONST '(' type ')'							{ $$ = ModifiedType::makeModified(TypeMod::Const, $3, SourceLocation(yylineno)); }
 					| struct										{ $$ = $1; }
 					| function										{ $$ = $1; }
 					| '[' known_type_list ']'						{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }

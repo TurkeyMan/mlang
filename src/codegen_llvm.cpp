@@ -710,6 +710,18 @@ void LLVMGenerator::visit(PrimitiveType &n)
 	}
 }
 
+void LLVMGenerator::visit(ModifiedType &n)
+{
+	if (n.doneCodegen()) return;
+
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	n.innerType()->accept(*this);
+
+	LLVMData *innerCg = n.innerType()->cgData<LLVMData>();
+	cg->type = innerCg->type;
+}
+
 void LLVMGenerator::visit(PointerType &n)
 {
 	if (n.doneCodegen()) return;
@@ -1790,6 +1802,13 @@ void LLVMGenerator::visit(Index &n)
 }
 
 void LLVMGenerator::visit(ModuleDecl &n)
+{
+	if (n.doneCodegen()) return;
+
+	n.module()->accept(*this);
+}
+
+void LLVMGenerator::visit(ImportDecl &n)
 {
 	if (n.doneCodegen()) return;
 

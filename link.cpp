@@ -8,21 +8,13 @@
 
 namespace m {
 
+extern Compiler mlang;
+
 void Link(Compiler &compiler)
 {
-	const char *link = "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\bin\\link.exe";
-	FILE *f = NULL; fopen_s(&f, link, "r");
-	if (f)
-	{
-		fclose(f);
-		compiler.libPaths.push_back("\"C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\lib\\amd64\"");
-		compiler.libPaths.push_back("\"C:\\Program Files (x86)\\Windows Kits\\8.1\\Lib\\winv6.3\\um\\x64\"");
-		compiler.libPaths.push_back("\"C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.10240.0\\ucrt\\x64\"");
-	}
-	else
-		link = "link.exe";
-
-	MutableString<1024> args(Concat, "/OUT:\"", compiler.outFile, "\" /MACHINE:X64 /ERRORREPORT:PROMPT /NOLOGO /DYNAMICBASE /SUBSYSTEM:CONSOLE");
+	MutableString<1024> args(Concat, "/OUT:\"", compiler.outFile, "\" /MACHINE:X64");
+	if (mlang.linkArgs)
+		args.append(' ', mlang.linkArgs);
 
 	if (compiler.debug)
 	{
@@ -34,12 +26,12 @@ void Link(Compiler &compiler)
 	}
 
 	for (auto &libPath : compiler.libPaths)
-		args.append(" /LIBPATH:", libPath);
+		args.append(" /LIBPATH:\"", libPath, '"');
 	for (auto &lib : compiler.libs)
 		args.append(" ", lib);
 	if (!compiler.objFile.empty())
 		args.append(" \"", compiler.objFile, "\"");
-	MutableString<1024> cmd(Concat, "\"\"", link, "\" ", args, "\"");
+	MutableString<1024> cmd(Concat, "\"\"", mlang.linkCmd, "\" ", args, "\"");
 
 	int result = system(cmd.c_str());
 	if (result)

@@ -33,7 +33,7 @@ E			[Ee][+-]?{D}+
 pragma		{ return PRAGMA; }
 
 module		{ return MODULE; }
-static		{ return STATIC; }
+import		{ return IMPORT; }
 
 def			{ return DEF; }
 var			{ return VAR; }
@@ -41,6 +41,7 @@ var			{ return VAR; }
 fn			{ return FN; }
 struct		{ return STRUCT; }
 
+static		{ return STATIC; }
 const		{ return CONST; }
 
 if			{ return IF; }

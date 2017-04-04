@@ -12,12 +12,17 @@ class Compiler
 public:
 	Array<SharedString> srcFiles;
 
+	Array<SharedString> impPaths;
+	Array<SharedString> libPaths;
+	Array<SharedString> libs;
+
+	SharedString linkCmd;
+	SharedString linkArgs;
+
+	SharedString objFile;
 	SharedString outFile;
 	SharedString irFile;
 
-	SharedString objFile;
-	Array<SharedString> libPaths;
-	Array<SharedString> libs;
 	SharedString runtime = "MD"; // multi-threaded dll - release
 
 	Mode mode = Mode::CompileAndLink;

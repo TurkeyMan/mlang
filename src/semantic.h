@@ -45,6 +45,7 @@ private:
 	void visit(IfStatement &n) override;
 	void visit(LoopStatement &n) override;
 	void visit(PrimitiveType &n) override;
+	void visit(ModifiedType &v) override;
 	void visit(PointerType &v) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
@@ -65,6 +66,7 @@ private:
 	void visit(Tuple &n) override;
 	void visit(Index &n) override;
 	void visit(ModuleDecl &n) override;
+	void visit(ImportDecl &n) override;
 	void visit(TypeDecl &n) override;
 	void visit(ValDecl &n) override;
 	void visit(VarDecl &n) override;

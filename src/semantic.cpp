@@ -1,7 +1,11 @@
 #include "semantic.h"
 #include "error.h"
 
+#include <cstdio>
+
 namespace m {
+
+extern Compiler mlang;
 
 void Semantic::run()
 {
@@ -181,6 +185,16 @@ void Semantic::visit(PrimitiveType &n)
 	if (n.doneSemantic()) return;
 
 	n._init = new PrimitiveLiteralExpr(n._type, (uint64_t)0, n.getLoc());
+	n._init->accept(*this);
+}
+
+void Semantic::visit(ModifiedType &n)
+{
+	if (n.doneSemantic()) return;
+
+	n.innerType()->accept(*this);
+
+	n._init = new TypeConvertExpr(n.innerType()->init(), &n, true, n.getLoc());
 	n._init->accept(*this);
 }
 
@@ -925,6 +939,52 @@ void Semantic::visit(LoopStatement &n)
 void Semantic::visit(ModuleDecl &n)
 {
 	if (n.doneSemantic()) return;
+
+	visit((Declaration&)n);
+
+//	Scope *s = scope();
+//	n._owner = s;
+
+	n._module->accept(*this);
+}
+
+void Semantic::visit(ImportDecl &n)
+{
+	if (n.doneSemantic()) return;
+
+	visit((Declaration&)n);
+
+	Scope *s = scope();
+	n._owner = s;
+
+	Array<SharedString> moduleIdentifier;
+	n.name().tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
+
+	// find module if it's already loaded
+	Module *module = mlang.root;
+	auto name = moduleIdentifier.slice();
+	while (!name.empty())
+	{
+		auto i = module->submodules().find(name[0]);
+		if (i != module->submodules().end())
+		{
+			module = i->second;
+			name.pop_front();
+		}
+		else
+		{
+			module = nullptr;
+			break;
+		}
+	}
+
+	if (!module)
+	{
+		// load module...
+	}
+
+	n._owner->_imports.insert(module);
+	n._module = module;
 
 	n._module->accept(*this);
 }

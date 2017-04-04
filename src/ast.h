@@ -8,6 +8,7 @@
 #include "error.h"
 
 #include <map>
+#include <set>
 
 #include "common_llvm.h"
 #include <llvm/Support/raw_ostream.h>
@@ -154,6 +155,7 @@ class TypeExpr;
 class AmbiguousExpr;
 
 class PrimitiveType;
+class ModifiedType;
 class FunctionType;
 class PointerType;
 class Struct;
@@ -254,7 +256,7 @@ class Scope : public virtual Node
 
 	Array<Declaration*> _symbolTable;
 	std::map<SharedString, Declaration*, string_less> _symbols;
-	std::map<SharedString, Scope*, string_less> _imports;
+	std::set<Module*> _imports;
 
 	Scope *_parentScope = nullptr; // parent scope
 	Module *_module = nullptr;
@@ -342,6 +344,8 @@ public:
 
 	PrimitiveType* asPrimitive();
 	const PrimitiveType* asPrimitive() const;
+	ModifiedType* asModified();
+	const ModifiedType* asModified() const;
 	FunctionType* asFunction();
 	const FunctionType* asFunction() const;
 	PointerType* asPointer();
@@ -356,6 +360,7 @@ public:
 	bool isIntegral() const;
 	bool isFloatingPoint() const;
 	bool isSomeChar() const;
+	bool isConst() const;
 
 	Node *getMember(String name) override;
 
@@ -672,6 +677,46 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+enum TypeMod : uint32_t
+{
+	Const = 1
+};
+class ModifiedType : public TypeExpr
+{
+	friend class Semantic;
+
+	TypeMod _mod;
+	TypeExpr *_type;
+	Expr *_init = nullptr;
+
+public:
+	ModifiedType(TypeMod mods, TypeExpr *type, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _mod(mods), _type(type) {}
+	~ModifiedType() {}
+
+	static ModifiedType* makeModified(TypeMod mods, TypeExpr *type, SourceLocation loc);
+
+	TypeMod mod() const { return _mod; }
+	TypeExpr *innerType() const { return _type; }
+	Expr* init() const override { return _type->init(); }
+
+	size_t size() const override { return _type->size(); }
+	size_t alignment() const override { return _type->alignment(); }
+
+	Node *getMember(String name) override;
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override;
+
+	void accept(ASTVisitor &v) override;
+
+	MutableString64 stringof() const override;
+	MutableString64 mangleof() const override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 enum class PtrType
 {
 	RawPtr,
@@ -832,6 +877,35 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override {
 		return Statement::dump(out << "module: #" << str_ref(_name) << '\n', ind);
+	}
+};
+
+class ImportDecl : public Declaration
+{
+	friend class Semantic;
+
+	Module *_module = nullptr;
+
+public:
+	ImportDecl(SharedString name, NodeList attrs, SourceLocation loc)
+		: Node(loc), Declaration(name, std::move(attrs), loc)
+	{
+	}
+
+	bool didReturn() const override { return false; }
+
+	MutableString64 stringof() const override { return _name; assert(false); } // TODO: test me!
+	MutableString64 mangleof() const override { return MutableString64(Concat, "_M", _name); assert(false); } // TODO: test me!
+
+	Node *getMember(String name) override;
+
+	Module* module() { return _module; }
+	void setModule(Module *module) { _module = module; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override {
+		return Statement::dump(out << "import: #" << str_ref(_name) << '\n', ind);
 	}
 };
 
@@ -1719,6 +1793,8 @@ inline TypeExpr* TypeExpr::evalType()
 
 inline PrimitiveType* TypeExpr::asPrimitive() { return dynamic_cast<PrimitiveType*>(this); }
 inline const PrimitiveType* TypeExpr::asPrimitive() const { return dynamic_cast<const PrimitiveType*>(this); }
+inline ModifiedType* TypeExpr::asModified() { return dynamic_cast<ModifiedType*>(this); }
+inline const ModifiedType* TypeExpr::asModified() const { return dynamic_cast<const ModifiedType*>(this); }
 inline FunctionType* TypeExpr::asFunction() { return dynamic_cast<FunctionType*>(this); }
 inline const FunctionType* TypeExpr::asFunction() const { return dynamic_cast<const FunctionType*>(this); }
 inline PointerType* TypeExpr::asPointer() { return dynamic_cast<PointerType*>(this); }
@@ -1732,5 +1808,6 @@ inline bool TypeExpr::isBoolean() const { const PrimitiveType *pt = dynamic_cast
 inline bool TypeExpr::isIntegral() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isInt(pt->type()); }
 inline bool TypeExpr::isFloatingPoint() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isFloat(pt->type()); }
 inline bool TypeExpr::isSomeChar() const { const PrimitiveType *pt = dynamic_cast<const PrimitiveType*>(this); return pt && isChar(pt->type()); }
+inline bool TypeExpr::isConst() const { const ModifiedType *mod = dynamic_cast<const ModifiedType*>(this); return mod && mod->mod() == TypeMod::Const; }
 
 }

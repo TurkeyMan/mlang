@@ -16,6 +16,7 @@ public:
 	virtual void visit(IfStatement &n) {}
 	virtual void visit(LoopStatement &n) {}
 	virtual void visit(PrimitiveType &n) {}
+	virtual void visit(ModifiedType &n) {}
 	virtual void visit(PointerType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(FunctionType &n) {}
@@ -36,6 +37,7 @@ public:
 	virtual void visit(Tuple &n) {}
 	virtual void visit(Index &n) {}
 	virtual void visit(ModuleDecl &n) {}
+	virtual void visit(ImportDecl &n) {}
 	virtual void visit(TypeDecl &n) {}
 	virtual void visit(ValDecl &n) {}
 	virtual void visit(VarDecl &n) {}

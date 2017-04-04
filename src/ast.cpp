@@ -39,6 +39,7 @@ void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
+void ModifiedType::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
@@ -59,6 +60,7 @@ void MemberLookup::accept(ASTVisitor &v) { v.visit(*this); }
 void Tuple::accept(ASTVisitor &v) { v.visit(*this); }
 void Index::accept(ASTVisitor &v) { v.visit(*this); }
 void ModuleDecl::accept(ASTVisitor &v) { v.visit(*this); }
+void ImportDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ValDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void VarDecl::accept(ASTVisitor &v) { v.visit(*this); }
@@ -124,12 +126,20 @@ Declaration *Scope::getDecl(String name, bool onlyLocal)
 		return i->second;
 	if (!onlyLocal)
 	{
+		Declaration *decl = nullptr;
 		for (auto import : _imports)
 		{
-			Declaration *decl = import.second->getDecl(name);
-			if (decl)
-				return decl;
+			Declaration *d = import->getDecl(name, true);
+			if (d && decl)
+			{
+				// multiple resolved!
+				error(nullptr, 0, "'%s': ambiguous lookup", (const char*)name.c_str());
+			}
+			else
+				decl = d;
 		}
+		if (decl)
+			return decl;
 		if (!onlyLocal && _parentScope)
 			return _parentScope->getDecl(name, false);
 	}
@@ -221,12 +231,21 @@ Node *Expr::getMember(String name)
 
 int TypeExpr::ptrDepth() const
 {
+	const TypeExpr *type = this;
+
+	// ignore const on pointers
+	while (type->isConst())
+		type = type->asModified()->innerType();
+
+	const PointerType *ptr = type->asPointer();
 	int depth = 0;
-	const PointerType *ptr = asPointer();
 	while (ptr)
 	{
 		++depth;
-		ptr = ptr->targetType()->asPointer();
+		type = ptr->targetType();
+		while (type->isConst())
+			type = type->asModified()->innerType();
+		ptr = type->asPointer();
 	}
 	return depth;
 }
@@ -369,6 +388,14 @@ bool PrimitiveType::isSame(const TypeExpr *other) const
 }
 ConvType PrimitiveType::convertible(const TypeExpr *target) const
 {
+	// primitive types can convert to const
+	bool targetConst = false;
+	while (target->isConst())
+	{
+		targetConst = true;
+		target = target->asModified()->innerType();
+	}
+
 	const PrimitiveType *primt = target->asPrimitive();
 	if (primt)
 	{
@@ -437,6 +464,67 @@ raw_ostream &PrimitiveType::dump(raw_ostream &out, int ind)
 {
 	return out << str_ref(stringof()) << '\n';
 }
+
+ModifiedType* ModifiedType::makeModified(TypeMod mods, TypeExpr *type, SourceLocation loc)
+{
+	// if the type is already modified, we don't want to over-mod it.
+	ModifiedType *m = type->asModified();
+	if (m)
+	{
+		if ((m->_mod & mods) == mods)
+			return type->asModified();
+		return new ModifiedType((TypeMod)(m->_mod | mods), m->innerType(), loc);
+	}
+	return new ModifiedType(mods, type, loc);
+}
+
+Node *ModifiedType::getMember(String name)
+{
+	// TODO: data members need to be promoted...
+	return _type->getMember(name);
+}
+
+bool ModifiedType::isSame(const TypeExpr *other) const
+{
+	const ModifiedType *t = dynamic_cast<const ModifiedType*>(other);
+	if (!t)
+		return false;
+	return _mod == t->_mod && _type->isSame(t->_type);
+}
+ConvType ModifiedType::convertible(const TypeExpr *target) const
+{
+	const ModifiedType *mod = target->asModified();
+	if (mod && _mod == mod->mod())
+		return ConvType::Convertible;
+	return ConvType::NoConversion;
+}
+Expr* ModifiedType::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	return new TypeConvertExpr(expr, targetType, implicit, SourceLocation(0));
+}
+MutableString64 ModifiedType::stringof() const
+{
+	if (_mod == TypeMod::Const)
+		return MutableString64(Concat, "const(", _type->stringof(), ')');
+	return _type->stringof();
+}
+MutableString64 ModifiedType::mangleof() const
+{
+	if (_mod == TypeMod::Const)
+		return MutableString64(Concat, 'C', _type->stringof());
+	return _type->stringof();
+}
+raw_ostream &ModifiedType::dump(raw_ostream &out, int ind)
+{
+	TypeExpr::dump(out << (_mod == TypeMod::Const ? "const" : "modify none"), ind) << "\n";
+	++ind;
+	if (_type)
+		_type->dump(indent(out, ind) << "inner: ", ind);
+	if (_init)
+		_init->dump(indent(out, ind) << "init: ", ind);
+	return out;
+}
+
 
 Node *PointerType::getMember(String name)
 {
@@ -539,9 +627,17 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 	int depth = targetType->ptrDepth();
 	if(depth > 0 && ptrDepth() <= depth)
 	{
-		TypeExpr *target = targetType;
-		PointerType *ptrt = targetType->asPointer();
 		TypeExpr *from = expr->type();
+		TypeExpr *target = targetType;
+
+		bool srcConst = false, targetConst = false;
+//		if (target->isConst())
+//		{
+//			targetConst = true;
+//			target = target->asModified()->innerType();
+//		}
+
+		PointerType *ptrt = targetType->asPointer();
 
 		PointerType *toStack[128];
 		PointerType *fromStack[128];
@@ -557,12 +653,36 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 			{
 				toStack[toDepth++] = ptrt;
 				target = ptrt->targetType();
+//				if (target->isConst())
+//				{
+//					targetConst = true;
+//					target = target->asModified()->innerType();
+//				}
 				ptrt = target->asPointer();
 			}
 			fromStack[fromDepth++] = ptrf;
 			from = ptrf->targetType();
+//			if (from->isConst())
+//			{
+//				srcConst = true;
+//				from = from->asModified()->innerType();
+//			}
 			ptrf = from->asPointer();
 		} while (ptrt || ptrf);
+
+		if (from->isConst())
+		{
+			srcConst = true;
+			from = from->asModified()->innerType();
+		}
+		if (target->isConst())
+		{
+			targetConst = true;
+			target = target->asModified()->innerType();
+		}
+
+		if (srcConst && !targetConst)
+			error(nullptr, 0, "invalid const conversion...");
 
 		// compare pointer targets are the same type
 		if (!from->isSame(target))
@@ -762,6 +882,14 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 //***********************
 
 Node *ModuleDecl::getMember(String name)
+{
+	Declaration *decl = _module->getDecl(name, true);
+	if (decl)
+		return decl;
+	return Declaration::getMember(name);
+}
+
+Node *ImportDecl::getMember(String name)
 {
 	Declaration *decl = _module->getDecl(name, true);
 	if (decl)

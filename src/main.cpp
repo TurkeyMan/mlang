@@ -10,6 +10,7 @@ m::StatementList parse(FILE *file, String filename);
 
 namespace m {
 
+void LoadConfig();
 void InitCodegen();
 void PopulateIntrinsics(Module *module);
 void Codegen(Compiler &compiler);
@@ -24,8 +25,6 @@ extern "C" {
 	int main(int argc, const char *argv[])
 	{
 		GC_INIT();
-
-		InitCodegen();
 
 		// parse command line
 		int arg = 1;
@@ -65,6 +64,11 @@ extern "C" {
 					mlang.opt = atoi(argv[arg] + 2);
 				else
 					mlang.opt = 2;
+			}
+			else if (!strncmp(argv[arg], "-I", 2))
+			{
+				if (argv[arg][2])
+					mlang.impPaths.push_back(argv[arg] + 2);
 			}
 			else if (!strncmp(argv[arg], "-L", 2))
 			{
@@ -124,6 +128,9 @@ extern "C" {
 		}
 		else
 			mlang.objFile = mlang.outFile;
+
+		LoadConfig();
+		InitCodegen();
 
 		for (auto &src : mlang.srcFiles)
 		{
@@ -285,6 +292,50 @@ extern "C" {
 
 		return 0;
 	}
+}
+
+void LoadConfig()
+{
+	MutableString<> file;
+
+	FILE *f;
+	if (fopen_s(&f, "mlang.conf", "r") == 0)
+	{
+		fseek(f, 0, SEEK_END);
+		long size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+
+		file.resize(size);
+		fread(file.get_buffer().ptr, 1, size, f);
+		fclose(f);
+	}
+
+	file.tokenise([](String line, size_t) {
+		line = line.get_left_at_first("#").trim();
+		if (line.empty())
+			return;
+
+		// parse line
+		size_t valOffset = min(line.find_first(' '), line.find_first('='));
+		String token = line.slice(0, valOffset).trim();
+
+		String arg;
+		if (valOffset < line.length)
+		{
+			arg = line.slice(valOffset + 1, line.length).trim();
+			if (arg[0] == '=')
+				arg = arg.slice(1, arg.length).trim();
+		}
+
+		if (token.eq_ic("IMPPATH"))
+			mlang.impPaths.push_back(arg);
+		else if (token.eq_ic("LIBPATH"))
+			mlang.libPaths.push_back(arg);
+		else if (token.eq_ic("LINKCMD"))
+			mlang.linkCmd = arg;
+		else if (token.eq_ic("LINKARGS"))
+			mlang.linkArgs = arg;
+	}, "\n");
 }
 
 void PopulateIntrinsics(Module *module)
