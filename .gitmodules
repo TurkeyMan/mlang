@@ -1,3 +1,6 @@
 [submodule "lib/cpp-slice"]
 	path = lib/cpp-slice
 	url = git@github.com:TurkeyMan/cpp-slice.git
+[submodule "lib/mlib"]
+	path = lib/mlib
+	url = git@github.com:TurkeyMan/mlib.git

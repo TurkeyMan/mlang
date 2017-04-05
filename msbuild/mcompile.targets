@@ -1,0 +1,89 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <PropertyPageSchema Include="$(MSBuildThisFileDirectory)$(MSBuildThisFileName).xml" />
+    <AvailableItemName Include="MCompile">
+      <Targets>MCompile</Targets>
+    </AvailableItemName>
+  </ItemGroup>
+  <UsingTask
+    TaskName="ManuScript"
+    TaskFactory="XamlTaskFactory"
+    AssemblyName="Microsoft.Build.Tasks.v4.0">
+    <Task>$(MSBuildThisFileDirectory)$(MSBuildThisFileName).xml</Task>
+  </UsingTask>
+  <Target
+    Name="MCompile"
+    BeforeTargets="$(MCompileBeforeTargets)"
+    AfterTargets="$(MCompileAfterTargets)"
+    Condition="'@(ManuScript)' != ''"
+    DependsOnTargets="$(ManuScriptDependsOn);ComputeManuScriptOutput"
+    Outputs="%(ManuScript.Outputs)"
+    Inputs="%(ManuScript.Identity);%(ManuScript.AdditionalDependencies);$(MSBuildProjectFile)">
+    <ItemGroup
+      Condition="'@(SelectedFiles)' != ''">
+      <ManuScript
+        Remove="@(ManuScript)"
+        Condition="'%(Identity)' != '@(SelectedFiles)'" />
+    </ItemGroup>
+    <ItemGroup>
+      <ManuScript_tlog
+        Include="%(ManuScript.Outputs)"
+        Condition="'%(ManuScript.Outputs)' != '' and '%(ManuScript.ExcludedFromBuild)' != 'true'">
+        <Source>@(ManuScript, '|')</Source>
+      </ManuScript_tlog>
+    </ItemGroup>
+    <Message
+      Importance="High"
+      Text="%(ManuScript.ExecutionDescription)" />
+    <WriteLinesToFile
+      Condition="'@(ManuScript_tlog)' != '' and '%(ManuScript_tlog.ExcludedFromBuild)' != 'true'"
+      File="$(IntDir)$(ProjectName).write.1.tlog"
+      Lines="^%(ManuScript_tlog.Source);@(ManuScript_tlog-&gt;'%(Fullpath)')" />
+    <ManuScript
+      Condition="'@(ManuScript)' != '' and '%(ManuScript.ExcludedFromBuild)' != 'true'"
+      CommandLineTemplate="%(ManuScript.CommandLineTemplate)"
+      OutputFile="%(ManuScript.OutputFile)"
+      DefinesFile="%(ManuScript.DefinesFile)"
+      Debug="%(ManuScript.Debug)"
+      Verbose="%(ManuScript.Verbose)"
+      NoLines="%(ManuScript.NoLines)"
+      FilePrefix="%(ManuScript.FilePrefix)"
+      GraphFile="%(ManuScript.GraphFile)"
+      Warnings="%(ManuScript.Warnings)"
+      Report="%(ManuScript.Report)"
+      ReportFile="%(ManuScript.ReportFile)"
+      AdditionalOptions="%(ManuScript.AdditionalOptions)"
+      Inputs="%(ManuScript.Identity)" />
+  </Target>
+  <PropertyGroup>
+    <ComputeLinkInputsTargets>
+            $(ComputeLinkInputsTargets);
+            ComputeManuScriptOutput;
+          </ComputeLinkInputsTargets>
+    <ComputeLibInputsTargets>
+            $(ComputeLibInputsTargets);
+            ComputeManuScriptOutput;
+          </ComputeLibInputsTargets>
+  </PropertyGroup>
+  <Target
+    Name="ComputeManuScriptOutput"
+    Condition="'@(ManuScript)' != ''">
+    <ItemGroup>
+      <ManuScriptDirsToMake
+        Condition="'@(ManuScript)' != '' and '%(ManuScript.ExcludedFromBuild)' != 'true'"
+        Include="%(ManuScript.Outputs)" />
+      <Link
+        Include="%(ManuScriptDirsToMake.Identity)"
+        Condition="'%(Extension)'=='.obj' or '%(Extension)'=='.res' or '%(Extension)'=='.rsc' or '%(Extension)'=='.lib'" />
+      <Lib
+        Include="%(ManuScriptDirsToMake.Identity)"
+        Condition="'%(Extension)'=='.obj' or '%(Extension)'=='.res' or '%(Extension)'=='.rsc' or '%(Extension)'=='.lib'" />
+      <ImpLib
+        Include="%(ManuScriptDirsToMake.Identity)"
+        Condition="'%(Extension)'=='.obj' or '%(Extension)'=='.res' or '%(Extension)'=='.rsc' or '%(Extension)'=='.lib'" />
+    </ItemGroup>
+    <MakeDir
+      Directories="@(ManuScriptDirsToMake-&gt;'%(RootDir)%(Directory)')" />
+  </Target>
+</Project>

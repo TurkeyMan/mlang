@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="std">
+      <UniqueIdentifier>{55c21abd-c535-4fab-919b-5c52055ef316}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="std\c">
+      <UniqueIdentifier>{c5304c62-25b0-4595-bb14-a38f7a9a3af1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="std\c\windows">
+      <UniqueIdentifier>{711019f3-022e-4ca5-8aac-c92fceeaa12e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <MCompile Include="lib\mlib\std\c\stdio.me">
+      <Filter>std\c</Filter>
+    </MCompile>
+    <MCompile Include="lib\mlib\std\c\windows\windows.me">
+      <Filter>std\c\windows</Filter>
+    </MCompile>
+  </ItemGroup>
+</Project>
