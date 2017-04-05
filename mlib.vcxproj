@@ -19,7 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <MCompile Include="lib\mlib\std\c\stdint.me" />
     <MCompile Include="lib\mlib\std\c\stdio.me" />
+    <MCompile Include="lib\mlib\std\c\stdlib.me" />
     <MCompile Include="lib\mlib\std\c\windows\windows.me" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

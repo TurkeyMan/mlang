@@ -18,5 +18,11 @@
     <MCompile Include="lib\mlib\std\c\windows\windows.me">
       <Filter>std\c\windows</Filter>
     </MCompile>
+    <MCompile Include="lib\mlib\std\c\stdlib.me">
+      <Filter>std\c</Filter>
+    </MCompile>
+    <MCompile Include="lib\mlib\std\c\stdint.me">
+      <Filter>std\c</Filter>
+    </MCompile>
   </ItemGroup>
 </Project>

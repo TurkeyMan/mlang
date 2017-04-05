@@ -216,6 +216,9 @@ void PopulateIntrinsics(Module *module)
 
 	TypeDecl *deprecate = new TypeDecl("deprecate", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
 	module->addDecl(deprecate->name(), deprecate);
+
+	TypeDecl *noreturn = new TypeDecl("noreturn", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	module->addDecl(noreturn->name(), noreturn);
 }
 
 Module* LoadModule(String filename, String searchPath, bool errorOnFail)
@@ -244,36 +247,36 @@ Module* LoadModule(String filename, String searchPath, bool errorOnFail)
 	fclose(file);
 
 	// dump parse tree
-	FILE *ast = nullptr;
-	if (!astFile.empty())
-	{
-		fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
-		if (!file)
-		{
-			if (errorOnFail)
-				infoError("'%s': can't open ast file", astFile.c_str());
-			return nullptr;
-		}
-		class OS : public llvm::raw_ostream
-		{
-			FILE *ast;
-			uint64_t offset = 0;
-		public:
-			OS(FILE *ast) : ast(ast) {}
-			void write_impl(const char *Ptr, size_t Size) override
-			{
-				if (ast)
-					fwrite(Ptr, 1, Size, ast);
-				offset += Size;
-			}
-			uint64_t current_pos() const override { return offset; }
-		};
-		OS os(ast);
-		for (auto s : statements)
-			s->dump(os, 0);
-		os.flush();
-		fclose(ast);
-	}
+//	FILE *ast = nullptr;
+//	if (!astFile.empty())
+//	{
+//		fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
+//		if (!ast)
+//		{
+//			if (errorOnFail)
+//				infoError("'%s': can't open ast file", astFile.c_str());
+//			return nullptr;
+//		}
+//		class OS : public llvm::raw_ostream
+//		{
+//			FILE *ast;
+//			uint64_t offset = 0;
+//		public:
+//			OS(FILE *ast) : ast(ast) {}
+//			void write_impl(const char *Ptr, size_t Size) override
+//			{
+//				if (ast)
+//					fwrite(Ptr, 1, Size, ast);
+//				offset += Size;
+//			}
+//			uint64_t current_pos() const override { return offset; }
+//		};
+//		OS os(ast);
+//		for (auto s : statements)
+//			s->dump(os, 0);
+//		os.flush();
+//		fclose(ast);
+//	}
 
 	// add to module list
 	Array<SharedString> moduleIdentifier;

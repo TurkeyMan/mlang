@@ -1,0 +1,9 @@
+{
+	"main": {
+		"prefix": "main",
+		"body": [
+			"fn main(${3:args : [string; ..]}) : ${2:int} {$1}"
+		],
+		"description": "fn main(args : [string; ..]) : void"
+	}
+}

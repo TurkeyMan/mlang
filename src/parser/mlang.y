@@ -152,7 +152,7 @@ char32_t parse_char(const char *s, PrimType &type)
 %token ELIPSIS IS ISNOT ARROW IMPLY SLICE INCOP DECOP SHL ASR LSR EQ NEQ GEQ LEQ AND OR POW BIND
 %token MULEQ DIVEQ MODEQ ADDEQ SUBEQ CONCATEQ BITOREQ BITANDEQ BITXOREQ OREQ ANDEQ POWEQ SHLEQ ASREQ LSREQ
 
-%token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ F16 F32 F64 F128
+%token VOID U1 I8 U8 C8 I16 U16 C16 I32 U32 C32 I64 U64 I128 U128 IZ UZ CZ F16 F32 F64 F128
 
 %token <ival> INTEGER BOOL_T NUL
 %token <fval> FLOATING
@@ -342,6 +342,7 @@ primitive	: VOID		{ $$ = PrimitiveType::get(PrimType::v, SourceLocation(yylineno
 			| U128		{ $$ = PrimitiveType::get(PrimType::u128, SourceLocation(yylineno)); }
 			| IZ		{ $$ = PrimitiveType::get(SSizeT_Type, SourceLocation(yylineno)); }
 			| UZ		{ $$ = PrimitiveType::get(SizeT_Type, SourceLocation(yylineno)); }
+			| CZ		{ $$ = PrimitiveType::get(WCharT_Type, SourceLocation(yylineno)); }
 			| C8		{ $$ = PrimitiveType::get(PrimType::c8, SourceLocation(yylineno)); }
 			| C16		{ $$ = PrimitiveType::get(PrimType::c16, SourceLocation(yylineno)); }
 			| C32		{ $$ = PrimitiveType::get(PrimType::c32, SourceLocation(yylineno)); }

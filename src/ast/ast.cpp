@@ -8,6 +8,7 @@ std::map<SharedString, TypeExpr*, string_less> typesUsed;
 
 PrimType SizeT_Type = PrimType::i64;
 PrimType SSizeT_Type = PrimType::u64;
+PrimType WCharT_Type = PrimType::c16;
 
 uint8_t typeFlags[(size_t)PrimType::__NumTypes] =
 {

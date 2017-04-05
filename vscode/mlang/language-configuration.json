@@ -17,7 +17,7 @@
         ["[", "]"],
         ["(", ")"],
         {"open": "\"", "close": "\"", "notin": ["string"]},
-        {"open": "'", "close": "'", "notin": ["string"]},
+        {"open": "'", "close": "'", "notin": ["string", "comment"]},
         {"open": "`", "close": "`", "notin": ["string"]}
     ],
     // symbols that that can be used to surround a selection

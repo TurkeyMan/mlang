@@ -40,7 +40,7 @@ struct MakeTypeHelper<PrimitiveType, Args...>
 };
 
 // compiler will init these when the target arch is known
-extern PrimType SizeT_Type, SSizeT_Type;
+extern PrimType SizeT_Type, SSizeT_Type, WCharT_Type;
 
 
 //****************

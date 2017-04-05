@@ -100,7 +100,7 @@
 			"patterns": [
 				{
 					"name": "storage.type.mlang",
-					"match": "\\b(void|bool|u?byte|u?short|u?int|u?long|u?cent|s?size_t|half|float|double|extended|[wd]?char)\\b"
+					"match": "\\b(void|bool|u?byte|u?short|u?int|u?long|u?cent|s?size_t|half|float|double|extended|[wd]?char|wchar_t)\\b"
 				}
 			]
 		},

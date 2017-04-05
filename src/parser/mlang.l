@@ -71,6 +71,7 @@ cent		{ return I128; }
 ucent		{ return U128; }
 ssize_t		{ return IZ; }
 size_t		{ return UZ; }
+wchar_t		{ return CZ; }
 
 char		{ return C8; }
 wchar		{ return C16; }
