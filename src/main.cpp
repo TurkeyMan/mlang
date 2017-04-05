@@ -213,6 +213,9 @@ void PopulateIntrinsics(Module *module)
 
 	TypeDecl *xternc = new TypeDecl("extern_c", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
 	module->addDecl(xternc->name(), xternc);
+
+	TypeDecl *deprecate = new TypeDecl("deprecate", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	module->addDecl(deprecate->name(), deprecate);
 }
 
 Module* LoadModule(String filename, String searchPath, bool errorOnFail)

@@ -31,6 +31,11 @@
     <ClCompile Include="mlang.flex.cpp" />
     <ClCompile Include="mlang.tab.cpp" />
     <ClCompile Include="src\ast.cpp" />
+    <ClCompile Include="src\ast\declaration.cpp" />
+    <ClCompile Include="src\ast\expression.cpp" />
+    <ClCompile Include="src\ast\indirect.cpp" />
+    <ClCompile Include="src\ast\statement.cpp" />
+    <ClCompile Include="src\ast\type.cpp" />
     <ClCompile Include="src\codegen_llvm.cpp" />
     <ClCompile Include="src\error.cpp" />
     <ClCompile Include="src\main.cpp" />
@@ -41,6 +46,11 @@
     <ClInclude Include="mlang.tab.h" />
     <ClInclude Include="src\ast.h" />
     <ClInclude Include="src\astvisitor.h" />
+    <ClInclude Include="src\ast\declaration.h" />
+    <ClInclude Include="src\ast\expression.h" />
+    <ClInclude Include="src\ast\indirect.h" />
+    <ClInclude Include="src\ast\statement.h" />
+    <ClInclude Include="src\ast\type.h" />
     <ClInclude Include="src\codegen_llvm.h" />
     <ClInclude Include="src\common_llvm.h" />
     <ClInclude Include="src\error.h" />
@@ -129,7 +139,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -144,7 +154,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;lib/gc/include;lib/cpp-slice/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;C:\dev\LLVM\include;lib/gc/include;lib/cpp-slice/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnablePREfast>false</EnablePREfast>
     </ClCompile>
     <Link>
@@ -169,7 +179,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;C:\dev\LLVM\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -187,7 +197,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>.;C:\dev\LLVM\include;lib/gc/include;lib/cpp-slice/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;C:\dev\LLVM\include;lib/gc/include;lib/cpp-slice/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

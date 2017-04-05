@@ -9,6 +9,12 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
     </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{1da9d42d-4f4f-453b-a1ce-8d7b0952b6f1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\ast">
+      <UniqueIdentifier>{57043f0b-747a-44df-87f8-62c30aabb3d4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <Flex Include="mlang.l" />
@@ -40,6 +46,21 @@
     </ClCompile>
     <ClCompile Include="src\error.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\declaration.cpp">
+      <Filter>src\ast</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\expression.cpp">
+      <Filter>src\ast</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\type.cpp">
+      <Filter>src\ast</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\indirect.cpp">
+      <Filter>src\ast</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\statement.cpp">
+      <Filter>src\ast</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -78,6 +99,21 @@
     </ClInclude>
     <ClInclude Include="src\mlang.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\declaration.h">
+      <Filter>src\ast</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\expression.h">
+      <Filter>src\ast</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\type.h">
+      <Filter>src\ast</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\indirect.h">
+      <Filter>src\ast</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\statement.h">
+      <Filter>src\ast</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
