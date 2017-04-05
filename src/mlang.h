@@ -3,7 +3,7 @@
 #define _MLANG_H
 
 #include "error.h"
-#include "ast.h"
+#include "ast/ast.h"
 
 namespace m {
 

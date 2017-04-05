@@ -19,51 +19,46 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <Flex Include="mlang.l">
+    <Flex Include="src\parser\mlang.l">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-DYY_NO_UNISTD_H -B -Cf %(AdditionalOptions)</AdditionalOptions>
     </Flex>
   </ItemGroup>
   <ItemGroup>
-    <Bison Include="mlang.y" />
+    <Bison Include="src\parser\mlang.y" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="link.cpp" />
-    <ClCompile Include="mlang.flex.cpp" />
-    <ClCompile Include="mlang.tab.cpp" />
-    <ClCompile Include="src\ast.cpp" />
+    <ClCompile Include="src\codegen\llvm\codegen_llvm.cpp" />
+    <ClCompile Include="src\link.cpp" />
+    <ClCompile Include="src\ast\ast.cpp" />
     <ClCompile Include="src\ast\declaration.cpp" />
     <ClCompile Include="src\ast\expression.cpp" />
     <ClCompile Include="src\ast\indirect.cpp" />
     <ClCompile Include="src\ast\statement.cpp" />
     <ClCompile Include="src\ast\type.cpp" />
-    <ClCompile Include="src\codegen_llvm.cpp" />
     <ClCompile Include="src\error.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\parser\mlang.flex.cpp" />
+    <ClCompile Include="src\parser\mlang.tab.cpp" />
     <ClCompile Include="src\semantic.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="KaleidoscopeJIT.h" />
-    <ClInclude Include="mlang.tab.h" />
-    <ClInclude Include="src\ast.h" />
+    <ClInclude Include="src\codegen\llvm\codegen_llvm.h" />
+    <ClInclude Include="src\codegen\llvm\common_llvm.h" />
+    <ClInclude Include="src\codegen\llvm\KaleidoscopeJIT.h" />
+    <ClInclude Include="src\ast\ast.h" />
     <ClInclude Include="src\astvisitor.h" />
     <ClInclude Include="src\ast\declaration.h" />
     <ClInclude Include="src\ast\expression.h" />
     <ClInclude Include="src\ast\indirect.h" />
     <ClInclude Include="src\ast\statement.h" />
     <ClInclude Include="src\ast\type.h" />
-    <ClInclude Include="src\codegen_llvm.h" />
-    <ClInclude Include="src\common_llvm.h" />
     <ClInclude Include="src\error.h" />
     <ClInclude Include="src\mlang.h" />
+    <ClInclude Include="src\parser\mlang.tab.h" />
     <ClInclude Include="src\semantic.h" />
     <ClInclude Include="src\sourceloc.h" />
     <ClInclude Include="src\string.h" />
     <ClInclude Include="src\util.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="test.ast">
-      <SubType>Designer</SubType>
-    </None>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{10CA5159-86DE-4F3B-A3F1-41DAC9B8BCD7}</ProjectGuid>

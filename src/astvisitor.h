@@ -1,7 +1,7 @@
 #pragma once
 
 #include "mlang.h"
-#include "ast.h"
+#include "ast/ast.h"
 
 namespace m {
 

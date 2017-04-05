@@ -10,7 +10,7 @@
 #include <map>
 #include <set>
 
-#include "common_llvm.h"
+#include "codegen/llvm/common_llvm.h"
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/ADT/ArrayRef.h>
 

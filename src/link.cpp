@@ -1,4 +1,4 @@
-#include "src/mlang.h"
+#include "mlang.h"
 
 #include <stdio.h>
 #include <cstdio>

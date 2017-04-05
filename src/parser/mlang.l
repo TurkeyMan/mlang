@@ -1,5 +1,5 @@
 %{
-#include "src/ast.h"
+#include "ast/ast.h"
 
 #include "mlang.tab.h"
 

@@ -21,8 +21,8 @@ void yyerror(const char *s);
 #undef CONST
 #undef VOID
 
-#include "src/ast.h"
-#include "src/error.h"
+#include "ast/ast.h"
+#include "error.h"
 
 
 

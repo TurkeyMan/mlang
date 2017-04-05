@@ -1,52 +1,26 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
-    </Filter>
     <Filter Include="src">
       <UniqueIdentifier>{1da9d42d-4f4f-453b-a1ce-8d7b0952b6f1}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\ast">
       <UniqueIdentifier>{57043f0b-747a-44df-87f8-62c30aabb3d4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\parser">
+      <UniqueIdentifier>{c6668730-fba4-4f6b-b71d-9d076d10435f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\codegen">
+      <UniqueIdentifier>{04845401-4b9d-4239-a05e-450723d70653}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\codegen\llvm">
+      <UniqueIdentifier>{f1696446-ad8e-4aff-8c91-6e990d37fdfe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="gen">
+      <UniqueIdentifier>{042118d8-f02a-43a4-953e-819d2244780d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <Flex Include="mlang.l" />
-  </ItemGroup>
-  <ItemGroup>
-    <Bison Include="mlang.y" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="mlang.flex.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="mlang.tab.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\ast.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\codegen_llvm.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\semantic.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="link.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\error.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\ast\declaration.cpp">
       <Filter>src\ast</Filter>
     </ClCompile>
@@ -62,44 +36,32 @@
     <ClCompile Include="src\ast\statement.cpp">
       <Filter>src\ast</Filter>
     </ClCompile>
+    <ClCompile Include="src\codegen\llvm\codegen_llvm.cpp">
+      <Filter>src\codegen\llvm</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ast\ast.cpp">
+      <Filter>src\ast</Filter>
+    </ClCompile>
+    <ClCompile Include="src\semantic.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\error.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\link.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\parser\mlang.tab.cpp">
+      <Filter>gen</Filter>
+    </ClCompile>
+    <ClCompile Include="src\parser\mlang.flex.cpp">
+      <Filter>gen</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="mlang.tab.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="KaleidoscopeJIT.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\ast.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\sourceloc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\util.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\codegen_llvm.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\common_llvm.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\astvisitor.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\semantic.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\error.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\string.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\mlang.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\ast\declaration.h">
       <Filter>src\ast</Filter>
     </ClInclude>
@@ -115,8 +77,51 @@
     <ClInclude Include="src\ast\statement.h">
       <Filter>src\ast</Filter>
     </ClInclude>
+    <ClInclude Include="src\codegen\llvm\codegen_llvm.h">
+      <Filter>src\codegen\llvm</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codegen\llvm\common_llvm.h">
+      <Filter>src\codegen\llvm</Filter>
+    </ClInclude>
+    <ClInclude Include="src\codegen\llvm\KaleidoscopeJIT.h">
+      <Filter>src\codegen\llvm</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ast\ast.h">
+      <Filter>src\ast</Filter>
+    </ClInclude>
+    <ClInclude Include="src\astvisitor.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\error.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\mlang.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\semantic.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\sourceloc.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\string.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\util.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\parser\mlang.tab.h">
+      <Filter>gen</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="test.ast" />
+    <Flex Include="src\parser\mlang.l">
+      <Filter>src\parser</Filter>
+    </Flex>
+  </ItemGroup>
+  <ItemGroup>
+    <Bison Include="src\parser\mlang.y">
+      <Filter>src\parser</Filter>
+    </Bison>
   </ItemGroup>
 </Project>

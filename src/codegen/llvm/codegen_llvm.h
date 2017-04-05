@@ -20,7 +20,7 @@
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/Support/Casting.h"
 
-#include "../KaleidoscopeJIT.h"
+#include "KaleidoscopeJIT.h"
 
 #include "astvisitor.h"
 
