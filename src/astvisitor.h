@@ -5,7 +5,7 @@
 
 namespace m {
 
-class ASTVisitor : public gc_cleanup
+class ASTVisitor
 {
 public:
 	virtual void visit(Declaration &n) {}

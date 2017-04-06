@@ -168,11 +168,11 @@ class Tuple : public AmbiguousExpr
 {
 	friend class Semantic;
 
-	NodeList _elements = NodeList::empty();
+	Array<Node*> _elements;
 	Array<size_t> _offsets;
 
 	Node *_element = nullptr;
-	ExprList _shape;
+	Array<Expr*> _shape;
 	Expr *_numElements = nullptr;
 
 	bool allExpr = false, allTypes = false;
@@ -182,24 +182,24 @@ class Tuple : public AmbiguousExpr
 	Tuple *_init = nullptr;
 
 public:
-	Tuple(NodeList elements, SourceLocation loc)
-		: Node(loc), AmbiguousExpr(loc), _elements(elements)
+	Tuple(Array<Node*> elements, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _elements(std::move(elements))
 	{
 		// check if all elements are the same, if so, make it into an array...
 		//...
 	}
-	Tuple(Node *element, ExprList shape, SourceLocation loc)
-		: Node(loc), AmbiguousExpr(loc), _element(element), _shape(shape)
+	Tuple(Node *element, Array<Expr*> shape, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _element(element), _shape(std::move(shape))
 	{}
 
 	static Tuple* makeStringLiteralQuoted(String str, SourceLocation loc);
 	static Tuple* makeStringLiteral(String str, PrimType type, bool unescape, SourceLocation loc);
 
-	NodeList elements() const { return _elements; }
+	const Array<Node*>& elements() const { return _elements; }
 
 	bool isSequence() const { return _element != nullptr; }
 	Node* seqElement() { return _element; }
-	ExprList shape() { return _shape; }
+	const Array<Expr*>& shape() { return _shape; }
 	int dimensions() const { return _element == nullptr ? 1 : _shape.length; }
 	ptrdiff_t numElements(int dimension = -1) const;
 	bool isDynamicSize() const { return numElements() == -1; }
@@ -247,14 +247,14 @@ class Index : public AmbiguousExpr
 	Node *_node;
 	Node *_result = nullptr;
 
-	ExprList _indices;
+	Array<Expr*> _indices;
 
 public:
-	Index(Node *node, ExprList indices, SourceLocation loc)
-		: Node(loc), AmbiguousExpr(loc), _node(node), _indices(indices) {}
+	Index(Node *node, Array<Expr*> indices, SourceLocation loc)
+		: Node(loc), AmbiguousExpr(loc), _node(node), _indices(std::move(indices)) {}
 
 	Node* source() { return _node; }
-	ExprList indices() { return _indices; }
+	const Array<Expr*>& indices() { return _indices; }
 
 	Node* expr() const { return _result; }
 

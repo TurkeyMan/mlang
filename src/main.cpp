@@ -6,7 +6,7 @@
 #include <Windows.h>
 #include <stdio.h>
 
-m::StatementList parse(FILE *file, String filename);
+Array<m::Statement*> parse(FILE *file, String filename);
 
 namespace m {
 
@@ -25,8 +25,6 @@ Compiler mlang;
 extern "C" {
 	int main(int argc, const char *argv[])
 	{
-		GC_INIT();
-
 		// parse command line
 		int arg = 1;
 		while (arg < argc)
@@ -134,7 +132,7 @@ extern "C" {
 		InitCodegen();
 
 		// create root module
-		mlang.root = new Module(nullptr, nullptr, {}, StatementList::empty(), nullptr);
+		mlang.root = new Module(nullptr, nullptr, {}, nullptr, nullptr);
 
 		// load source modules
 		for (auto &src : mlang.srcFiles)
@@ -208,16 +206,16 @@ void LoadConfig()
 
 void PopulateIntrinsics(Module *module)
 {
-	TypeDecl *xtern = new TypeDecl("extern", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	TypeDecl *xtern = new TypeDecl("extern", new Struct(nullptr, SourceLocation(0)), nullptr, SourceLocation(0));
 	module->addDecl(xtern->name(), xtern);
 
-	TypeDecl *xternc = new TypeDecl("extern_c", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	TypeDecl *xternc = new TypeDecl("extern_c", new Struct(nullptr, SourceLocation(0)), nullptr, SourceLocation(0));
 	module->addDecl(xternc->name(), xternc);
 
-	TypeDecl *deprecate = new TypeDecl("deprecate", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	TypeDecl *deprecate = new TypeDecl("deprecate", new Struct(nullptr, SourceLocation(0)), nullptr, SourceLocation(0));
 	module->addDecl(deprecate->name(), deprecate);
 
-	TypeDecl *noreturn = new TypeDecl("noreturn", new Struct(StatementList::empty(), SourceLocation(0)), NodeList::empty(), SourceLocation(0));
+	TypeDecl *noreturn = new TypeDecl("noreturn", new Struct(nullptr, SourceLocation(0)), nullptr, SourceLocation(0));
 	module->addDecl(noreturn->name(), noreturn);
 }
 
@@ -241,42 +239,42 @@ Module* LoadModule(String filename, String searchPath, bool errorOnFail)
 	}
 
 	// parse the source
-	m::StatementList statements = parse(file, src);
+	Array<Statement*> statements = parse(file, src);
 
 	// done with the file
 	fclose(file);
 
 	// dump parse tree
-//	FILE *ast = nullptr;
-//	if (!astFile.empty())
-//	{
-//		fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
-//		if (!ast)
-//		{
-//			if (errorOnFail)
-//				infoError("'%s': can't open ast file", astFile.c_str());
-//			return nullptr;
-//		}
-//		class OS : public llvm::raw_ostream
-//		{
-//			FILE *ast;
-//			uint64_t offset = 0;
-//		public:
-//			OS(FILE *ast) : ast(ast) {}
-//			void write_impl(const char *Ptr, size_t Size) override
-//			{
-//				if (ast)
-//					fwrite(Ptr, 1, Size, ast);
-//				offset += Size;
-//			}
-//			uint64_t current_pos() const override { return offset; }
-//		};
-//		OS os(ast);
-//		for (auto s : statements)
-//			s->dump(os, 0);
-//		os.flush();
-//		fclose(ast);
-//	}
+	FILE *ast = nullptr;
+	if (!astFile.empty())
+	{
+		fopen_s(&ast, MutableString256(Concat, src, ".ast").c_str(), "w");
+		if (!ast)
+		{
+			if (errorOnFail)
+				infoError("'%s': can't open ast file", astFile.c_str());
+			return nullptr;
+		}
+		class OS : public llvm::raw_ostream
+		{
+			FILE *ast;
+			uint64_t offset = 0;
+		public:
+			OS(FILE *ast) : ast(ast) {}
+			void write_impl(const char *Ptr, size_t Size) override
+			{
+				if (ast)
+					fwrite(Ptr, 1, Size, ast);
+				offset += Size;
+			}
+			uint64_t current_pos() const override { return offset; }
+		};
+		OS os(ast);
+		for (auto s : statements)
+			s->dump(os, 0);
+		os.flush();
+		fclose(ast);
+	}
 
 	// add to module list
 	Array<SharedString> moduleIdentifier;
@@ -312,7 +310,7 @@ Module* LoadModule(String filename, String searchPath, bool errorOnFail)
 
 		moduleName.tokenise([&](String token, size_t) { moduleIdentifier.push_back(token); }, ".");
 
-		moduleDecl = new ModuleDecl(moduleName, NodeList::empty(), SourceLocation(0));
+		moduleDecl = new ModuleDecl(moduleName, nullptr, SourceLocation(0));
 	}
 
 	m::Module *module = new m::Module(src, filePart, moduleIdentifier, statements, moduleDecl);
@@ -329,8 +327,8 @@ Module* LoadModule(String filename, String searchPath, bool errorOnFail)
 		{
 			if (it == sub->submodules().end())
 			{
-				ModuleDecl *moduleDecl = new ModuleDecl(nullptr, NodeList::empty(), SourceLocation(0));
-				Module *package = new Module(nullptr, nullptr, Array<SharedString>(moduleIdentifier.slice(0, i + 1)), StatementList::empty(), moduleDecl);
+				ModuleDecl *moduleDecl = new ModuleDecl(nullptr, nullptr, SourceLocation(0));
+				Module *package = new Module(nullptr, nullptr, Array<SharedString>(moduleIdentifier.slice(0, i + 1)), nullptr, moduleDecl);
 				moduleDecl->setModule(package);
 
 				package->setParent(sub);

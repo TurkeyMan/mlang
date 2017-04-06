@@ -104,14 +104,14 @@
     <ClInclude Include="src\sourceloc.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="src\string.h">
-      <Filter>src</Filter>
-    </ClInclude>
     <ClInclude Include="src\util.h">
       <Filter>src</Filter>
     </ClInclude>
     <ClInclude Include="src\parser\mlang.tab.h">
       <Filter>gen</Filter>
+    </ClInclude>
+    <ClInclude Include="src\parser\arrayholder.h">
+      <Filter>src\parser</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

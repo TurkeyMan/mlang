@@ -27,7 +27,7 @@ uint8_t typeBytes[(size_t)PrimType::__NumTypes] =
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 
 
-Node* makePragma(String identifier, NodeList args)
+Node* makePragma(String identifier, Array<Node*> args)
 {
 	error(nullptr, 0, "Unknown: pragma(%s, ...)", (const char*)identifier.c_str());
 	return nullptr;

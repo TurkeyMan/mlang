@@ -9,7 +9,7 @@ class ModuleDecl : public Declaration
 	Module *_module = nullptr;
 
 public:
-	ModuleDecl(SharedString name, NodeList attrs, SourceLocation loc)
+	ModuleDecl(SharedString name, Array<Node*> attrs, SourceLocation loc)
 		: Node(loc), Declaration(name, std::move(attrs), loc)
 	{
 	}
@@ -38,7 +38,7 @@ class ImportDecl : public Declaration
 	Module *_module = nullptr;
 
 public:
-	ImportDecl(SharedString name, NodeList attrs, SourceLocation loc)
+	ImportDecl(SharedString name, Array<Node*> attrs, SourceLocation loc)
 		: Node(loc), Declaration(name, std::move(attrs), loc)
 	{
 	}
@@ -67,7 +67,7 @@ protected:
 	TypeExpr *_type;
 
 public:
-	TypeDecl(SharedString name, TypeExpr *type, NodeList attrs, SourceLocation loc) // TODO: template args
+	TypeDecl(SharedString name, TypeExpr *type, Array<Node*> attrs, SourceLocation loc) // TODO: template args
 		: Node(loc), Declaration(std::move(name), std::move(attrs), loc), _type(type)
 	{}
 
@@ -89,7 +89,7 @@ protected:
 	Expr *_value;
 
 public:
-	ValDecl(SharedString name, TypeExpr *type, Expr *value, NodeList attrs, SourceLocation loc)
+	ValDecl(SharedString name, TypeExpr *type, Expr *value, Array<Node*> attrs, SourceLocation loc)
 		: Node(loc), Declaration(std::move(name), std::move(attrs), loc), _type(type), _value(value)
 	{}
 
@@ -106,13 +106,13 @@ public:
 class VarDecl : public ValDecl
 {
 	friend class Semantic;
-	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*, SourceLocation);
+	friend Statement* makeForEach(Array<ValDecl*>, Expr*, ScopeStatement*, SourceLocation);
 protected:
 	TypeExpr *_valType;
 	Expr *_init;
 
 public:
-	VarDecl(SharedString name, TypeExpr *type, Expr *init, NodeList attrs, SourceLocation loc)
+	VarDecl(SharedString name, TypeExpr *type, Expr *init, Array<Node*> attrs, SourceLocation loc)
 		: Node(loc), ValDecl(std::move(name), nullptr, nullptr, std::move(attrs), loc), _valType(type), _init(init)
 	{}
 

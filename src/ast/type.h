@@ -161,7 +161,7 @@ class Struct : public TypeExpr, public Scope
 		VarDecl *decl;
 	};
 
-	StatementList _members;
+	Array<Statement*> _members;
 	Array<DataMember> _dataMembers;
 
 	Expr *_init = nullptr;
@@ -172,8 +172,8 @@ class Struct : public TypeExpr, public Scope
 	SourceLocation _defLoc = SourceLocation(0);
 
 public:
-	Struct(StatementList members, SourceLocation loc)
-		: Node(loc), TypeExpr(loc), Scope(nullptr, loc), _members(members)
+	Struct(Array<Statement*> members, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), Scope(nullptr, loc), _members(std::move(members))
 	{}
 
 	Array<DataMember>& dataMembers() { return _dataMembers; }
@@ -206,14 +206,14 @@ class FunctionType : public TypeExpr
 	friend class Semantic;
 
 	TypeExpr *_returnType = nullptr;
-	TypeExprList _argTypes = TypeExprList::empty();
-	DeclList _args = DeclList::empty();
+	Array<TypeExpr*> _argTypes;
+	Array<ValDecl*> _args;
 
 public:
-	FunctionType(TypeExpr *returnType, TypeExprList args, SourceLocation loc)
-		: Node(loc), TypeExpr(loc), _returnType(returnType), _argTypes(args) {}
-	FunctionType(TypeExpr *returnType, DeclList args, SourceLocation loc)
-		: Node(loc), TypeExpr(loc), _returnType(returnType), _args(args) {}
+	FunctionType(TypeExpr *returnType, Array<TypeExpr*> args, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _returnType(returnType), _argTypes(std::move(args)) {}
+	FunctionType(TypeExpr *returnType, Array<ValDecl*> args, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _returnType(returnType), _args(std::move(args)) {}
 	~FunctionType() {}
 
 	Expr* init() const override { assert(false); return nullptr; }
@@ -228,7 +228,7 @@ public:
 	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
 
 	TypeExpr* returnType() const { return _returnType; }
-	TypeExprList argTypes() const { return _argTypes; }
+	const Array<TypeExpr*>& argTypes() const { return _argTypes; }
 
 	void accept(ASTVisitor &v) override;
 

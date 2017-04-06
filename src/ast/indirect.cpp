@@ -127,7 +127,7 @@ Tuple* Tuple::makeStringLiteralQuoted(String str, SourceLocation loc)
 
 Tuple* Tuple::makeStringLiteral(String str, PrimType type, bool unescape, SourceLocation loc)
 {
-	NodeList s = NodeList::empty();
+	Array<Node*> s;
 	Array<size_t> offsets;
 
 	offsets.reserve(str.length);
@@ -219,7 +219,7 @@ Tuple* Tuple::makeStringLiteral(String str, PrimType type, bool unescape, Source
 	r->allExpr = true;
 	r->_offsets = std::move(offsets);
 
-	r->_type = new Tuple(ty, ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, s.length, loc)), loc);
+	r->_type = new Tuple(ty, Array<Expr*>{ new PrimitiveLiteralExpr(SizeT_Type, s.length, loc) }, loc);
 
 	return r;
 }
@@ -256,8 +256,8 @@ void Tuple::analyse()
 			if (same)
 			{
 				_element = _elements[0];
-				_shape = ExprList::empty().append(new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc()));
-				_elements = NodeList::empty();
+				_shape = Array<Expr*>{ new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc()) };
+				_elements.clear();
 			}
 		}
 	}
@@ -382,7 +382,7 @@ TypeExpr* Tuple::type()
 		}
 		else
 		{
-			NodeList types = NodeList::empty();
+			Array<Node*> types;
 			for (auto e : _elements)
 			{
 				Expr *expr = dynamic_cast<Expr*>(e);
@@ -415,7 +415,7 @@ Expr* Tuple::init() const
 		}
 		else
 		{
-			NodeList init = NodeList::empty();
+			Array<Node*> init;
 			for (auto e : _elements)
 			{
 				TypeExpr *t = dynamic_cast<TypeExpr*>(e);
@@ -570,7 +570,7 @@ Expr* Tuple::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) con
 		return r;
 	}
 
-	NodeList nodes = NodeList::empty();
+	Array<Node*> nodes;
 	size_t count = tup->numElements(0);
 	for (size_t i = 0; i < count; ++i)
 	{

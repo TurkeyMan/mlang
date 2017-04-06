@@ -1,8 +1,5 @@
 ﻿#pragma once
 
-#include "gc_cpp.h"
-#include "gc_allocator.h"
-
 #include "sourceloc.h"
 #include "util.h"
 #include "error.h"
@@ -32,84 +29,6 @@ struct string_less
 		return _Left.cmp(_Right) < 0;
 	}
 };
-
-template <typename T>
-struct List
-{
-	T *ptr;
-	size_t length;
-
-	static List empty() { return List{ nullptr, 0 }; }
-
-//	void destroy()
-//	{
-//		for (size_t i = 0; i < length; ++i)
-//			ptr[i].~T();
-//		free(ptr);
-//	}
-
-	List append(const T &v) const
-	{
-		List<T> l = { ptr, length };
-		l.expand();
-		new(&l.ptr[l.length - 1]) T(v);
-		return l;
-	}
-	List append(T &&v) const
-	{
-		List<T> l = { ptr, length };
-		l.expand();
-		new(&l.ptr[l.length - 1]) T(std::move(v));
-		return l;
-	}
-	template <typename U>
-	List append(const List<U> &list) const
-	{
-		List<T> l = { ptr, length };
-		for (auto &i : list)
-			l = l.append(i);
-		return l;
-	}
-
-	template <typename U>
-	List prepend(U &&v) const
-	{
-		List<T> l = { ptr, length };
-		l.expand();
-		for (size_t i = l.length - 1; i > 0; --i)
-		{
-			new(&l.ptr[i]) T(std::move(l.ptr[i - 1]));
-			l.ptr[i - 1].~T();
-		}
-		new(&l.ptr[0]) T(std::forward<U>(v));
-		return l;
-	}
-
-	T* begin() const { return ptr; }
-	T* end() const { return ptr + length; }
-
-	T& operator[](size_t i) { return ptr[i]; }
-	const T& operator[](size_t i) const { return ptr[i]; }
-
-private:
-	void expand()
-	{
-		++length;
-		if (((length - 1) & length) == 0)
-		{
-			T *mem = (T*)GC_MALLOC(sizeof(T)*(length << 1));
-//			T *mem = (T*)malloc(sizeof(T)*(length<<1));
-			for (size_t i = 0; i < length - 1; ++i)
-			{
-				new(&mem[i]) T(std::move(ptr[i]));
-				ptr[i].~T();
-			}
-//			free(ptr);
-			ptr = mem;
-		}
-	}
-};
-
 
 class ASTVisitor;
 
@@ -163,12 +82,6 @@ class Tuple;
 
 class ModuleDecl;
 
-using NodeList = List<Node*>;
-using ExprList = List<Expr*>;
-using TypeExprList = List<TypeExpr*>;
-using StatementList = List<Statement*>;
-using DeclList = List<ValDecl*>;
-
 
 enum class ConvType
 {
@@ -183,7 +96,7 @@ enum class ConvType
 // Abstract Syntax Tree (aka Parse Tree)
 //===----------------------------------------------------------------------===//
 
-class Node : public gc_cleanup
+class Node
 {
 	friend class Semantic;
 	friend class LLVMGenerator;
@@ -425,13 +338,13 @@ class Module : public virtual Node, public Scope
 
 	std::map<SharedString, Module*, string_less> _submodules;
 
-	StatementList moduleStatements;
+	Array<Statement*> moduleStatements;
 
 	ModuleDecl *_declaration;
 
 public:
-	Module(SharedString path, SharedString filename, Array<SharedString> moduleName, StatementList moduleStatements, ModuleDecl *moduleDecl)
-		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(std::move(moduleName)), _path(std::move(path)), _filename(std::move(filename)), moduleStatements(moduleStatements), _declaration(moduleDecl)
+	Module(SharedString path, SharedString filename, Array<SharedString> moduleName, Array<Statement*> moduleStatements, ModuleDecl *moduleDecl)
+		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _name(std::move(moduleName)), _path(std::move(path)), _filename(std::move(filename)), moduleStatements(std::move(moduleStatements)), _declaration(moduleDecl)
 	{}
 
 	MutableString64 stringof() const override;
@@ -447,7 +360,7 @@ public:
 
 	std::map<SharedString, Module*, string_less>& submodules() { return _submodules; }
 
-	StatementList statements() { return moduleStatements; }
+	const Array<Statement*>& statements() { return moduleStatements; }
 
 	ModuleDecl *getModuleDecl() const { return _declaration; }
 
@@ -523,9 +436,9 @@ public:
 };
 */
 
-Statement* makeForEach(DeclList iterators, Expr *range, StatementList body, SourceLocation loc);
+Statement* makeForEach(Array<ValDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc);
 
-Node* makePragma(String identifier, NodeList args);
+Node* makePragma(String identifier, Array<Node*> args);
 
 
 

@@ -7,7 +7,7 @@ class Declaration : public Statement
 	friend class Semantic;
 protected:
 
-	NodeList _attributes;
+	Array<Node*> _attributes;
 
 	SharedString _name;
 	mutable SharedString _mangledName;
@@ -18,12 +18,12 @@ public:
 	const SharedString& name() const { return _name; }
 	const SharedString& mangledName() const;
 
-	Declaration(SharedString name, NodeList attrs, SourceLocation loc)
+	Declaration(SharedString name, Array<Node*> attrs, SourceLocation loc)
 		: Statement(loc), _attributes(std::move(attrs)), _name(std::move(name))
 	{}
 
-	NodeList attributes() const { return _attributes; }
-	void appendAttributes(NodeList attrs) { _attributes.append(attrs); }
+	Array<Node*>& attributes() { return _attributes; }
+	const Array<Node*>& attributes() const { return _attributes; }
 
 	bool didReturn() const override { return false; }
 
@@ -83,20 +83,20 @@ public:
 class ScopeStatement : public Statement, public Scope
 {
 	friend class Semantic;
-	friend Statement* makeForEach(DeclList, Expr*, ScopeStatement*, SourceLocation);
+	friend Statement* makeForEach(Array<ValDecl*>, Expr*, ScopeStatement*, SourceLocation);
 
-	StatementList _statements;
+	Array<Statement*> _statements;
 
 	bool _didReturn = false;
 
 	// TODO: scope attributes
 
 public:
-	ScopeStatement(StatementList statements, Scope *parentScope, SourceLocation loc)
-		: Node(loc), Statement(loc), Scope(parentScope, loc), _statements(statements)
+	ScopeStatement(Array<Statement*> statements, Scope *parentScope, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(parentScope, loc), _statements(std::move(statements))
 	{}
 
-	StatementList statements() const { return _statements; }
+	const Array<Statement*>& statements() const { return _statements; }
 	bool didReturn() const override { return _didReturn; }
 
 	MutableString64 stringof() const override { assert(false); return nullptr; }
@@ -115,16 +115,16 @@ class IfStatement : public Statement, public Scope
 	ScopeStatement *_then = nullptr;
 	ScopeStatement *_else = nullptr;
 
-	DeclList _initStatements;
+	Array<ValDecl*> _initStatements;
 
 public:
-	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, DeclList initStatements, SourceLocation loc)
-		: Node(loc), Statement(loc), Scope(nullptr, loc), _cond(cond), _then(thenStatements), _else(elseStatements), _initStatements(initStatements)
+	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, Array<ValDecl*> initStatements, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(nullptr, loc), _cond(cond), _then(thenStatements), _else(elseStatements), _initStatements(std::move(initStatements))
 	{}
 
 	Expr *cond() { return _cond; }
 
-	DeclList initStatements() { return _initStatements; }
+	const Array<ValDecl*>& initStatements() { return _initStatements; }
 
 	ScopeStatement* thenStatements() { return _then; }
 	ScopeStatement* elseStatements() { return _else; }
@@ -145,23 +145,23 @@ class LoopStatement : public Statement, public Scope
 {
 	friend class Semantic;
 
-	DeclList _iterators;
+	Array<ValDecl*> _iterators;
 	Expr *_cond;
-	ExprList _increments;
+	Array<Expr*> _increments;
 
 	ScopeStatement* _body;
 
 public:
-	LoopStatement(DeclList iterators, Expr *cond, ExprList increments, ScopeStatement* body, SourceLocation loc)
-		: Node(loc), Statement(loc), Scope(nullptr, loc), _iterators(iterators), _cond(cond), _increments(increments), _body(body)
+	LoopStatement(Array<ValDecl*> iterators, Expr *cond, Array<Expr*> increments, ScopeStatement* body, SourceLocation loc)
+		: Node(loc), Statement(loc), Scope(nullptr, loc), _iterators(std::move(iterators)), _cond(cond), _increments(std::move(increments)), _body(body)
 	{}
 
-	DeclList iterators() { return _iterators; }
+	const Array<ValDecl*>& iterators() { return _iterators; }
 
 	Expr *cond() { return _cond; }
 
 	ScopeStatement* body() { return _body; }
-	ExprList incrementExpressions() { return _increments; }
+	const Array<Expr*>& incrementExpressions() { return _increments; }
 
 	bool didReturn() const override { return _body->didReturn(); }
 

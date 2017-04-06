@@ -12,7 +12,7 @@ void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 
 
-Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, SourceLocation loc)
+Statement* makeForEach(Array<ValDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc)
 {
 	assert(false); // TODO!!
 
@@ -23,12 +23,12 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, So
 	for (auto &i : iterators)
 		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, loc);
 
-	VarDecl *r = new VarDecl("__loop_range", nullptr, range, NodeList::empty(), loc);
-	iterators.prepend(r);
+	VarDecl *r = new VarDecl("__loop_range", nullptr, range, Array<Node*>(), loc);
+	iterators = Array<ValDecl*>(Concat, r, iterators);
 
 	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
 
-	StatementList entry = StatementList::empty();
+	Array<Statement*> entry;
 	if (iterators.length)
 	{
 		if (iterators.length == 3)
@@ -44,7 +44,7 @@ Statement* makeForEach(DeclList iterators, Expr *range, ScopeStatement *body, So
 
 	Expr *increment = nullptr; // __loop_range = __loop_range.popFront();
 
-	return new LoopStatement(iterators, cond, ExprList::empty().append(increment), body, loc);
+	return new LoopStatement(std::move(iterators), cond, Array<Expr*>(Concat, increment), body, loc);
 }
 
 

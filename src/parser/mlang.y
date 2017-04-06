@@ -21,21 +21,19 @@ void yyerror(const char *s);
 #undef CONST
 #undef VOID
 
-#include "ast/ast.h"
+#include "arrayholder.h"
 #include "error.h"
-
-
 
 using namespace m;
 
-static StatementList parseTree = StatementList::empty();
+static Array<Statement*> parseTree;
 static String filename;
 
 const char *join_strings(const char *s1, const char *s2)
 {
 	size_t sz1 = strlen(s1);
 	size_t sz2 = strlen(s2);
-	char *buffer = (char*)GC_MALLOC(sz1 + sz2 + 2);
+	char *buffer = (char*)malloc(sz1 + sz2 + 2);
 	strcpy_s(buffer, sz1 + sz2 + 2, s1);
 	strcpy_s(buffer + sz1 + 1, sz2 + 1, s2);
 	buffer[sz1] = '.';
@@ -128,16 +126,16 @@ char32_t parse_char(const char *s, PrimType &type)
 	double fval;
 	const char *sval;
 	m::Node *node;
-	m::NodeList nodeList;
+	NodeList nodeList;
 	m::AmbiguousExpr *ambiguous;
 	m::Expr *expr;
-	m::ExprList exprList;
+	ExprList exprList;
 	m::TypeExpr *type;
-	m::TypeExprList typeExprList;
+	TypeExprList typeExprList;
 	m::Statement *statement;
-	m::StatementList statementList;
+	StatementList statementList;
 	m::ValDecl *decl;
-	m::DeclList declList;
+	DeclList declList;
 	m::UnaryOp unaryOp;
 	m::BinOp binaryOp;
 	m::PtrType ptrType;
@@ -191,7 +189,7 @@ char32_t parse_char(const char *s, PrimType &type)
 %glr-parser
 
 %%
-mlang	: module_statemtnts								{ parseTree = $1; }
+mlang	: module_statemtnts								{ parseTree = $1.get(); }
 
 module_statemtnts	: module_stmnt						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| module_statemtnts module_stmnt	{ $$ = $2 ? $1.append($2) : $1; }
@@ -215,13 +213,13 @@ code_stmnt			: def_statement						{ $$ = $1; }
 					| import_statement					{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
 
-var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, NodeList::empty(), SourceLocation(yylineno)); }
-					| IDENTIFIER ':' type						{ $$ = new VarDecl($1, $3, nullptr, NodeList::empty(), SourceLocation(yylineno)); }
+var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, nullptr, SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type						{ $$ = new VarDecl($1, $3, nullptr, nullptr, SourceLocation(yylineno)); }
 var_decl_assign		: var_decl									{ $$ = $1; }
-					| IDENTIFIER ':' type '=' value				{ $$ = new VarDecl($1, $3, $5, NodeList::empty(), SourceLocation(yylineno)); }
-					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3, NodeList::empty(), SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type '=' value				{ $$ = new VarDecl($1, $3, $5, nullptr, SourceLocation(yylineno)); }
+					| IDENTIFIER '=' value						{ $$ = new VarDecl($1, nullptr, $3, nullptr, SourceLocation(yylineno)); }
 var_decl_assign_void: var_decl_assign							{ $$ = $1; }
-					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }
+					| IDENTIFIER ':' type '=' VOID				{ $$ = new VarDecl($1, $3, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), nullptr, SourceLocation(yylineno)); }
 
 var_decl_list		: var_decl									{ $$ = DeclList::empty().append($1); }
 					| var_decl_list ',' var_decl				{ $$ = $1.append($3); }
@@ -250,10 +248,10 @@ unknown_list		: unknown									{ $$ = NodeList::empty().append($1); }
 					| unknown_list ',' unknown					{ $$ = $1.append($3); }
 					| unknown_list ',' known_value				{ $$ = $1.append($3); }
 					| unknown_list ',' known_type				{ $$ = $1.append($3); }
-					| known_value_list ',' unknown				{ $$ = NodeList::empty().append($1).append($3); }
-					| known_value_list ',' known_type			{ $$ = NodeList::empty().append($1).append($3); }
-					| known_type_list ',' unknown				{ $$ = NodeList::empty().append($1).append($3); }
-					| known_type_list ',' known_value			{ $$ = NodeList::empty().append($1).append($3); }
+					| known_value_list ',' unknown				{ $$ = NodeList::create(Array<Node*>(Concat, $1.get().slice(), $3)); }
+					| known_value_list ',' known_type			{ $$ = NodeList::create(Array<Node*>(Concat, $1.get().slice(), $3)); }
+					| known_type_list ',' unknown				{ $$ = NodeList::create(Array<Node*>(Concat, $1.get().slice(), $3)); }
+					| known_type_list ',' known_value			{ $$ = NodeList::create(Array<Node*>(Concat, $1.get().slice(), $3)); }
 //type_list			: type										{ $$ = TypeExprList::empty().append($1); }
 //					| type_list ',' type						{ $$ = $1.append($3); }
 value_list			: value										{ $$ = ExprList::empty().append($1); }
@@ -273,49 +271,49 @@ array				: '[' ']'									{ $$ = ExprList::empty(); }
 body_block			: code_stmnt								{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| '{' '}'									{ $$ = StatementList::empty(); }
 					| '{' code_statements '}'					{ $$ = $2; }
-body				: body_block								{ $$ = new ScopeStatement($1, nullptr, SourceLocation(yylineno)); }
+body				: body_block								{ $$ = new ScopeStatement($1.get(), nullptr, SourceLocation(yylineno)); }
 
 /**** STATEMENTS ****/
 
 empty_statement			: ';'																	{ $$ = nullptr; }
-module_statement		: MODULE module_name ';'												{ $$ = new ModuleDecl($2, NodeList::empty(), SourceLocation(yylineno)); }
-						| attributes MODULE module_name ';'										{ $$ = new ModuleDecl($3, $1, SourceLocation(yylineno)); }
-import_statement		: IMPORT module_name ';'												{ $$ = new ImportDecl($2, NodeList::empty(), SourceLocation(yylineno)); }
-						| attributes IMPORT module_name ';'										{ $$ = new ImportDecl($3, $1, SourceLocation(yylineno)); }
-def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, NodeList::empty(), SourceLocation(yylineno)); }
-						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, NodeList::empty(), SourceLocation(yylineno)); }
-						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), NodeList::empty(), SourceLocation(yylineno)); }
-						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, NodeList::empty(), SourceLocation(yylineno)); }
-						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, NodeList::empty(), SourceLocation(yylineno)); }
-						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, NodeList::empty(), SourceLocation(yylineno)); }
-						| attributes DEF IDENTIFIER ':' type ';'								{ $$ = new TypeDecl($3, $5, $1, SourceLocation(yylineno)); }
-						| attributes DEF IDENTIFIER ':' type '=' value ';'						{ $$ = new ValDecl($3, $5, $7, $1, SourceLocation(yylineno)); }
-						| attributes DEF IDENTIFIER ':' type '=' VOID ';'						{ $$ = new ValDecl($3, $5, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), $1, SourceLocation(yylineno)); }
-						| attributes DEF IDENTIFIER '=' value ';'								{ $$ = new ValDecl($3, nullptr, $5, $1, SourceLocation(yylineno)); }
-						| attributes FN IDENTIFIER function_literal_inner						{ $$ = new ValDecl($3, nullptr, $4, $1, SourceLocation(yylineno)); }
-						| attributes STRUCT IDENTIFIER struct_def								{ $$ = new TypeDecl($3, $4, $1, SourceLocation(yylineno)); }
+module_statement		: MODULE module_name ';'												{ $$ = new ModuleDecl($2, nullptr, SourceLocation(yylineno)); }
+						| attributes MODULE module_name ';'										{ $$ = new ModuleDecl($3, $1.get(), SourceLocation(yylineno)); }
+import_statement		: IMPORT module_name ';'												{ $$ = new ImportDecl($2, nullptr, SourceLocation(yylineno)); }
+						| attributes IMPORT module_name ';'										{ $$ = new ImportDecl($3, $1.get(), SourceLocation(yylineno)); }
+def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, $4, nullptr, SourceLocation(yylineno)); }
+						| DEF IDENTIFIER ':' type '=' value ';'									{ $$ = new ValDecl($2, $4, $6, nullptr, SourceLocation(yylineno)); }
+						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), nullptr, SourceLocation(yylineno)); }
+						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, nullptr, SourceLocation(yylineno)); }
+						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, nullptr, SourceLocation(yylineno)); }
+						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, nullptr, SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type ';'								{ $$ = new TypeDecl($3, $5, $1.get(), SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type '=' value ';'						{ $$ = new ValDecl($3, $5, $7, $1.get(), SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER ':' type '=' VOID ';'						{ $$ = new ValDecl($3, $5, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), $1.get(), SourceLocation(yylineno)); }
+						| attributes DEF IDENTIFIER '=' value ';'								{ $$ = new ValDecl($3, nullptr, $5, $1.get(), SourceLocation(yylineno)); }
+						| attributes FN IDENTIFIER function_literal_inner						{ $$ = new ValDecl($3, nullptr, $4, $1.get(), SourceLocation(yylineno)); }
+						| attributes STRUCT IDENTIFIER struct_def								{ $$ = new TypeDecl($3, $4, $1.get(), SourceLocation(yylineno)); }
 var_statement			: VAR var_decl_assign_void ';'											{ $$ = $2; }
-						| attributes VAR var_decl_assign_void ';'								{ $3->appendAttributes($1); $$ = $3; }
+						| attributes VAR var_decl_assign_void ';'								{ $3->attributes().append($1.get()); $$ = $3; }
 expression_statement	: value_assign ';'														{ $$ = new ExpressionStatement($1, SourceLocation(yylineno)); }
 control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr, SourceLocation(yylineno)); }
 						| RETURN value ';'														{ $$ = new ReturnStatement($2, SourceLocation(yylineno)); }
 //						| BREAK ';'
-						| IF '(' value ')' body ELSE body										{ $$ = new IfStatement($3, (ScopeStatement*)$5, (ScopeStatement*)$7, DeclList::empty(), SourceLocation(yylineno)); }
-						| IF '(' value ')' body										%prec THEN	{ $$ = new IfStatement($3, (ScopeStatement*)$5, nullptr, DeclList::empty(), SourceLocation(yylineno)); }
-						| IF '(' var_decl_assign_list ';' value ')' body ELSE body				{ $$ = new IfStatement($5, (ScopeStatement*)$7, (ScopeStatement*)$9, $3, SourceLocation(yylineno)); }
-						| IF '(' var_decl_assign_list ';' value ')' body			%prec THEN	{ $$ = new IfStatement($5, (ScopeStatement*)$7, nullptr, $3, SourceLocation(yylineno)); }
-						| DO body																{ $$ = new LoopStatement(DeclList::empty(), nullptr, ExprList::empty(), (ScopeStatement*)$2, SourceLocation(yylineno)); }
-						| WHILE '(' value ')' body												{ $$ = new LoopStatement(DeclList::empty(), $3, ExprList::empty(), (ScopeStatement*)$5, SourceLocation(yylineno)); }
-						| FOR '('                      ';'       ';'                   ')' body	{ $$ = new LoopStatement(DeclList::empty(), nullptr, ExprList::empty(), (ScopeStatement*)$6, SourceLocation(yylineno)); }
-						| FOR '('                      ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement(DeclList::empty(), nullptr, $5, (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '('                      ';' value ';'                   ')' body	{ $$ = new LoopStatement(DeclList::empty(), $4, ExprList::empty(), (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '('                      ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement(DeclList::empty(), $4, $6, (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';'       ';'                   ')' body	{ $$ = new LoopStatement($3, nullptr, ExprList::empty(), (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement($3, nullptr, $6, (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';' value ';'                   ')' body	{ $$ = new LoopStatement($3, $5, ExprList::empty(), (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement($3, $5, $7, (ScopeStatement*)$9, SourceLocation(yylineno)); }
-						| FOREACH '(' value ')' body											{ $$ = makeForEach(DeclList::empty(), $3, (ScopeStatement*)$5, SourceLocation(yylineno)); }
-						| FOREACH '(' var_decl_list ';' value ')' body							{ $$ = makeForEach($3, $5, (ScopeStatement*)$7, SourceLocation(yylineno)); }
+						| IF '(' value ')' body ELSE body										{ $$ = new IfStatement($3, (ScopeStatement*)$5, (ScopeStatement*)$7, nullptr, SourceLocation(yylineno)); }
+						| IF '(' value ')' body										%prec THEN	{ $$ = new IfStatement($3, (ScopeStatement*)$5, nullptr, nullptr, SourceLocation(yylineno)); }
+						| IF '(' var_decl_assign_list ';' value ')' body ELSE body				{ $$ = new IfStatement($5, (ScopeStatement*)$7, (ScopeStatement*)$9, $3.get(), SourceLocation(yylineno)); }
+						| IF '(' var_decl_assign_list ';' value ')' body			%prec THEN	{ $$ = new IfStatement($5, (ScopeStatement*)$7, nullptr, $3.get(), SourceLocation(yylineno)); }
+						| DO body																{ $$ = new LoopStatement(nullptr, nullptr, nullptr, (ScopeStatement*)$2, SourceLocation(yylineno)); }
+						| WHILE '(' value ')' body												{ $$ = new LoopStatement(nullptr, $3, nullptr, (ScopeStatement*)$5, SourceLocation(yylineno)); }
+						| FOR '('                      ';'       ';'                   ')' body	{ $$ = new LoopStatement(nullptr, nullptr, nullptr, (ScopeStatement*)$6, SourceLocation(yylineno)); }
+						| FOR '('                      ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, nullptr, $5.get(), (ScopeStatement*)$7, SourceLocation(yylineno)); }
+						| FOR '('                      ';' value ';'                   ')' body	{ $$ = new LoopStatement(nullptr, $4, nullptr, (ScopeStatement*)$7, SourceLocation(yylineno)); }
+						| FOR '('                      ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, $4, $6.get(), (ScopeStatement*)$8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';'       ';'                   ')' body	{ $$ = new LoopStatement($3.get(), nullptr, nullptr, (ScopeStatement*)$7, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), nullptr, $6.get(), (ScopeStatement*)$8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';' value ';'                   ')' body	{ $$ = new LoopStatement($3.get(), $5, nullptr, (ScopeStatement*)$8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), $5, $7.get(), (ScopeStatement*)$9, SourceLocation(yylineno)); }
+						| FOREACH '(' value ')' body											{ $$ = makeForEach(nullptr, $3, (ScopeStatement*)$5, SourceLocation(yylineno)); }
+						| FOREACH '(' var_decl_list ';' value ')' body							{ $$ = makeForEach($3.get(), $5, (ScopeStatement*)$7, SourceLocation(yylineno)); }
 //						| MATCH body
 
 
@@ -397,24 +395,24 @@ ptr_type	: '*'		{ $$ = PtrType::RawPtr; }
 			| '^'		{ $$ = PtrType::UniquePtr; }
 			| '&'		{ $$ = PtrType::BorrowedPtr; }
 
-struct_def				: '{' '}'												{ $$ = new Struct(StatementList::empty(), SourceLocation(yylineno)); }
-						| '{' struct_statements '}'								{ $$ = new Struct($2, SourceLocation(yylineno)); }
+struct_def				: '{' '}'												{ $$ = new Struct(nullptr, SourceLocation(yylineno)); }
+						| '{' struct_statements '}'								{ $$ = new Struct($2.get(), SourceLocation(yylineno)); }
 struct					: STRUCT struct_def										{ $$ = $2; }
 
-function				: FN function_arguments									{ $$ = new ::FunctionType(PrimitiveType::get(PrimType::v, SourceLocation(yylineno)), $2, SourceLocation(yylineno)); }
-						| FN function_arguments ':' type						{ $$ = new ::FunctionType($4, $2, SourceLocation(yylineno)); }
+function				: FN function_arguments									{ $$ = new ::FunctionType(PrimitiveType::get(PrimType::v, SourceLocation(yylineno)), $2.get(), SourceLocation(yylineno)); }
+						| FN function_arguments ':' type						{ $$ = new ::FunctionType($4, $2.get(), SourceLocation(yylineno)); }
 
-function_literal_inner	: function_arguments '{' '}'							{ $$ = new FunctionLiteralExpr(StatementList::empty(), $1, nullptr, SourceLocation(yylineno)); }
-						| function_arguments '{' code_statements '}'			{ $$ = new FunctionLiteralExpr($3, $1, nullptr, SourceLocation(yylineno)); }
-						| function_arguments ':' type '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5, $1, $3, SourceLocation(yylineno)); }
+function_literal_inner	: function_arguments '{' '}'							{ $$ = new FunctionLiteralExpr(nullptr, $1.get(), nullptr, SourceLocation(yylineno)); }
+						| function_arguments '{' code_statements '}'			{ $$ = new FunctionLiteralExpr($3.get(), $1.get(), nullptr, SourceLocation(yylineno)); }
+						| function_arguments ':' type '{' code_statements '}'	{ $$ = new FunctionLiteralExpr($5.get(), $1.get(), $3, SourceLocation(yylineno)); }
 function_literal		: FN function_literal_inner								{ $$ = $2; }
 
-lambda	: FN IMPLY value						{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($3, SourceLocation(yylineno))), DeclList::empty(), nullptr, SourceLocation(yylineno)); }
-		| FN var_decl_list IMPLY value			{ $$ = new FunctionLiteralExpr(StatementList::empty().append(new ReturnStatement($4, SourceLocation(yylineno))), $2, nullptr, SourceLocation(yylineno)); }
+lambda	: FN IMPLY value						{ $$ = new FunctionLiteralExpr(Array<Statement*>{ new ReturnStatement($3, SourceLocation(yylineno)) }, nullptr, nullptr, SourceLocation(yylineno)); }
+		| FN var_decl_list IMPLY value			{ $$ = new FunctionLiteralExpr(Array<Statement*>{ new ReturnStatement($4, SourceLocation(yylineno)) }, $2.get(), nullptr, SourceLocation(yylineno)); }
 
 member	: any_postfix '.' IDENTIFIER			{ $$ = new MemberLookup($1, $3, SourceLocation(yylineno)); }
 
-call	: value_postfix parameters				{ $$ = new CallExpr($1, $2, SourceLocation(yylineno)); }
+call	: value_postfix parameters				{ $$ = new CallExpr($1, $2.get(), SourceLocation(yylineno)); }
 
 ref		: type_postfix ptr_type					{ $$ = new PointerType($2, $1, SourceLocation(yylineno)); }
 
@@ -425,22 +423,22 @@ unary	: unary_op value_prefix					{ $$ = new UnaryExpr($1, $2, SourceLocation(yy
 /*** primaries ***/
 
 unknown_primary		: IDENTIFIER									{ $$ = new Identifier($1, SourceLocation(yylineno)); }
-					| PRAGMA '(' IDENTIFIER ')'						{ $$ = new UnknownExpr(makePragma($3, NodeList::empty()), SourceLocation(yylineno)); }
-					| PRAGMA '(' IDENTIFIER ',' unknown_list ')'	{ $$ = new UnknownExpr(makePragma($3, $5), SourceLocation(yylineno)); }
-					| '[' unknown_list ']'							{ $$ = new Tuple($2, SourceLocation(yylineno)); }
-					| '[' unknown ';' value_list ']'				{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| PRAGMA '(' IDENTIFIER ')'						{ $$ = new UnknownExpr(makePragma($3, nullptr), SourceLocation(yylineno)); }
+					| PRAGMA '(' IDENTIFIER ',' unknown_list ')'	{ $$ = new UnknownExpr(makePragma($3, $5.get()), SourceLocation(yylineno)); }
+					| '[' unknown_list ']'							{ $$ = new Tuple($2.get(), SourceLocation(yylineno)); }
+					| '[' unknown ';' value_list ']'				{ $$ = new Tuple($2, $4.get(), SourceLocation(yylineno)); }
 					| '(' unknown ')'								{ $$ = $2; }
 known_value_primary	: literal										{ $$ = $1; }
 					| function_literal								{ $$ = $1; }
-					| '[' known_value_list ']'						{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '[' known_value ';' value_list ']'			{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '[' known_value_list ']'						{ $$ = new Tuple(Array<Node*>{ $2.get().slice() }, SourceLocation(yylineno)); }
+					| '[' known_value ';' value_list ']'			{ $$ = new Tuple($2, $4.get(), SourceLocation(yylineno)); }
 					| '(' known_value ')'							{ $$ = $2; }
 known_type_primary	: primitive										{ $$ = $1; }
 					| CONST '(' type ')'							{ $$ = ModifiedType::makeModified(TypeMod::Const, $3, SourceLocation(yylineno)); }
 					| struct										{ $$ = $1; }
 					| function										{ $$ = $1; }
-					| '[' known_type_list ']'						{ $$ = new Tuple(NodeList::empty().append($2), SourceLocation(yylineno)); }
-					| '[' known_type ';' value_list ']'				{ $$ = new Tuple($2, $4, SourceLocation(yylineno)); }
+					| '[' known_type_list ']'						{ $$ = new Tuple(Array<Node*>{ $2.get().slice() }, SourceLocation(yylineno)); }
+					| '[' known_type ';' value_list ']'				{ $$ = new Tuple($2, $4.get(), SourceLocation(yylineno)); }
 					| '(' known_type ')'							{ $$ = $2; }
 
 
@@ -448,13 +446,13 @@ known_type_primary	: primitive										{ $$ = $1; }
 
 unknown_postfix		: unknown_primary			{ $$ = $1; }
 					| member					{ $$ = $1; }
-					| unknown_postfix array		{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
+					| unknown_postfix array		{ $$ = new Index($1, $2.get(), SourceLocation(yylineno)); }
 known_value_postfix	: known_value_primary		{ $$ = $1; }
 					| call						{ $$ = $1; }
-					| known_value_postfix array	{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
+					| known_value_postfix array	{ $$ = new Index($1, $2.get(), SourceLocation(yylineno)); }
 known_type_postfix	: known_type_primary		{ $$ = $1; }
 					| ref						{ $$ = $1; }
-					| known_type_postfix array	{ $$ = new Index($1, $2, SourceLocation(yylineno)); }
+					| known_type_postfix array	{ $$ = new Index($1, $2.get(), SourceLocation(yylineno)); }
 
 value_postfix		: known_value_postfix		{ $$ = $1; }
 					| unknown_postfix			{ $$ = $1; /* Check/fix category */ }
@@ -625,7 +623,7 @@ void yyerror(const char *s)
 }
 
 
-StatementList parse(FILE *file, String name)
+Array<Statement*> parse(FILE *file, String name)
 {
 	filename = name;
 
@@ -638,5 +636,5 @@ StatementList parse(FILE *file, String name)
 		yyparse();
 	} while (!feof(yyin));
 
-	return parseTree;
+	return std::move(parseTree);
 }

@@ -50,15 +50,15 @@ class AggregateLiteralExpr : public Expr
 	friend class Semantic;
 
 	TypeExpr *_type;
-	ExprList _items;
+	Array<Expr*> _items;
 
 public:
-	AggregateLiteralExpr(ExprList items, TypeExpr *type, SourceLocation loc)
+	AggregateLiteralExpr(Array<Expr*> items, TypeExpr *type, SourceLocation loc)
 		: Node(loc), Expr(false, loc), _type(type), _items(std::move(items)) {}
 
 	TypeExpr* type() override { return _type; }
 
-	ExprList items() { return _items; }
+	const Array<Expr*>& items() { return _items; }
 
 	MutableString64 stringof() const override { assert(false); return nullptr; }
 	MutableString64 mangleof() const override { assert(false); return nullptr; }
@@ -72,21 +72,21 @@ class FunctionLiteralExpr : public Expr, public Scope
 {
 	friend class Semantic;
 
-	StatementList bodyStatements;
+	Array<Statement*> bodyStatements;
 
-	DeclList _args;
+	Array<ValDecl*> _args;
 	TypeExpr *returnType;
 	bool inferReturnType;
 
-	TypeExprList argTypes = TypeExprList::empty();
+	Array<TypeExpr*> argTypes;
 	FunctionType *_type = nullptr;
 
 	SharedString _givenName;
 	SourceLocation _defLoc = SourceLocation(0);
 
 public:
-	FunctionLiteralExpr(StatementList bodyStatements, DeclList args, TypeExpr *returnType, SourceLocation loc)
-		: Node(loc), Expr(true, loc), Scope(nullptr, loc), bodyStatements(bodyStatements), _args(args), returnType(returnType), inferReturnType(returnType == nullptr)
+	FunctionLiteralExpr(Array<Statement*> bodyStatements, Array<ValDecl*> args, TypeExpr *returnType, SourceLocation loc)
+		: Node(loc), Expr(true, loc), Scope(nullptr, loc), bodyStatements(std::move(bodyStatements)), _args(std::move(args)), returnType(returnType), inferReturnType(returnType == nullptr)
 	{
 		static int literalCount = 0;
 		_givenName = SharedString(Concat, "fn_literal_", std::to_string(literalCount++));
@@ -94,8 +94,8 @@ public:
 
 	FunctionType* type() override { return _type; }
 
-	DeclList args() const { return _args; }
-	StatementList statements() { return bodyStatements; }
+	const Array<ValDecl*>& args() const { return _args; }
+	const Array<Statement*>& statements() { return bodyStatements; }
 
 	Node *getMember(String name) override { return Expr::getMember(name); }
 
@@ -295,11 +295,11 @@ class CallExpr : public Expr
 	friend class Semantic;
 
 	Expr *_func;
-	ExprList _callArgs;
+	Array<Expr*> _callArgs;
 
 public:
-	CallExpr(Expr *func, ExprList callArgs, SourceLocation loc)
-		: Node(loc), Expr(false, loc), _func(func), _callArgs(callArgs)
+	CallExpr(Expr *func, Array<Expr*> callArgs, SourceLocation loc)
+		: Node(loc), Expr(false, loc), _func(func), _callArgs(std::move(callArgs))
 	{}
 
 	TypeExpr* type() override
@@ -309,7 +309,7 @@ public:
 	}
 
 	Expr* function() { return _func; }
-	ExprList callArgs() { return _callArgs; }
+	const Array<Expr*>& callArgs() { return _callArgs; }
 
 	Node* getMember(String name) override;
 

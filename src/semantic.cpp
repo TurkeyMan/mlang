@@ -258,7 +258,7 @@ void Semantic::visit(Struct &n)
 	n._alignment = structAlign;
 
 	// create init node
-	ExprList members = ExprList::empty();
+	Array<Expr*> members;
 	for (auto &m : n._dataMembers)
 	{
 		Expr *expr = m.decl->init();
@@ -539,7 +539,7 @@ void Semantic::visit(CallExpr &n)
 		funcType = n._func->type()->asFunction();
 	}
 
-	TypeExprList args = funcType->argTypes();
+	Array<TypeExpr*> args = funcType->argTypes();
 
 	for (size_t i = 0; i < args.length; ++i)
 	{

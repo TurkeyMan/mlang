@@ -1,12 +1,12 @@
 %{
-#include "ast/ast.h"
+#include "arrayholder.h"
 
 #include "mlang.tab.h"
 
-const char *gc_dup(const char *s)
+const char *my_dup(const char *s)
 {
 	size_t sz = strlen(s);
-	char *buffer = (char*)GC_MALLOC(sz + 1);
+	char *buffer = (char*)malloc(sz + 1);
 	strcpy_s(buffer, sz + 1, s);
 	return buffer;
 }
@@ -126,9 +126,9 @@ is			{ return IS; }
 ">>="		{ return ASREQ; }
 ">>>="		{ return LSREQ; }
 
-\"(\\.|[^\n"])*\"[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
-\`(\\.|[^\n`])*\`[wd]? { yylval.sval = gc_dup(yytext); return STRING; }
-\'(\\.|[^\n'])*\'[wd]? { yylval.sval = gc_dup(yytext); return CHARACTER; }
+\"(\\.|[^\n"])*\"[wd]? { yylval.sval = my_dup(yytext); return STRING; }
+\`(\\.|[^\n`])*\`[wd]? { yylval.sval = my_dup(yytext); return STRING; }
+\'(\\.|[^\n'])*\'[wd]? { yylval.sval = my_dup(yytext); return CHARACTER; }
 
 null			{ yylval.ival = 0; return NUL; }
 
@@ -142,7 +142,7 @@ false			{ yylval.ival = 0; return BOOL_T; }
 "0b"{B}({B}|_{B})*	{ yylval.ival = String(yytext).drop_front(2).parse_int<2>(); return INTEGER; }
 "0o"{O}({O}|_{O})*	{ yylval.ival = String(yytext).drop_front(2).parse_int<8>(); return INTEGER; }
 
-{L}{I}*			{ yylval.sval = gc_dup(yytext); return IDENTIFIER; }
+{L}{I}*			{ yylval.sval = my_dup(yytext); return IDENTIFIER; }
 
 "/*"			BEGIN(BLOCK_COMMENT);
 <BLOCK_COMMENT>{

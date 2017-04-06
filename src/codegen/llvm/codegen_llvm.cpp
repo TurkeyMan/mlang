@@ -775,7 +775,7 @@ void LLVMGenerator::visit(FunctionType &n)
 	n.returnType()->accept(*this);
 	llvm::Type *r = n.returnType()->cgData<LLVMData>()->type;
 
-	TypeExprList argList = n.argTypes();
+	Array<TypeExpr*> argList = n.argTypes();
 	SmallVector<llvm::Type*, 8> args;
 
 	for (auto a : argList)
@@ -919,7 +919,7 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 	FunctionState &funcState = _functionStack.back();
 
 	// create stack storage and store all the args
-	DeclList args = n.args();
+	Array<ValDecl*> args = n.args();
 	size_t i = 0;
 	for (auto &a : function->args())
 	{
