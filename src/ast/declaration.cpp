@@ -4,6 +4,7 @@
 
 namespace m {
 
+void NamespaceDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ModuleDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void ImportDecl::accept(ASTVisitor &v) { v.visit(*this); }
 void TypeDecl::accept(ASTVisitor &v) { v.visit(*this); }

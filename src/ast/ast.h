@@ -61,6 +61,7 @@ inline raw_ostream &indent(raw_ostream &O, int size) {
 }
 
 // prototype nodes used for arguments?
+class Namespace;
 class Module;
 
 class Statement;
@@ -80,6 +81,7 @@ class PointerType;
 class Struct;
 class Tuple;
 
+class NamespaceDecl;
 class ModuleDecl;
 
 
@@ -174,13 +176,13 @@ class Scope : public virtual Node
 	Scope *_parentScope = nullptr; // parent scope
 	Module *_module = nullptr;
 
-	MutableString64 stringof() const override { assert(false); return String(); }
-	MutableString64 mangleof() const override { assert(false); return String(); }
-
 public:
 	Scope(Scope *parent, SourceLocation loc)
 		: Node(loc), _parentScope(parent)
 	{}
+
+	MutableString64 stringof() const override { assert(false); return String(); }
+	MutableString64 mangleof() const override { assert(false); return String(); }
 
 	Module *module() const { return _module; }
 	Scope *parentScope() const { return _parentScope; }
@@ -325,6 +327,27 @@ public:
 	{}
 
 	virtual bool didReturn() const = 0;
+};
+
+class Namespace : public virtual Node, public Scope
+{
+	friend class Semantic;
+
+	Array<Statement*> _statements;
+
+	NamespaceDecl *_declaration;
+
+public:
+	Namespace(Array<Statement*> statements, NamespaceDecl *nsDecl)
+		: Node(SourceLocation(0)), Scope(nullptr, SourceLocation(0)), _statements(std::move(statements)), _declaration(nsDecl)
+	{}
+
+	MutableString64 stringof() const override;
+	MutableString64 mangleof() const override;
+
+	const Array<Statement*>& statements() { return _statements; }
+
+	void accept(ASTVisitor &v) override;
 };
 
 class Module : public virtual Node, public Scope

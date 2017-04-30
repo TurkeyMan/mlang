@@ -401,6 +401,26 @@ void LLVMGenerator::visit(Declaration &n)
 
 }
 
+void LLVMGenerator::visit(Namespace &n)
+{
+	if (n.doneCodegen()) return;
+
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	if (compiler.debug)
+	{
+		// TODO: get namespace name...
+//		cg->discope = DBuilder->createNameSpace(scopeCg()->discope, str_ref(n.givenName()), scopeCg()->file(), n.getLine());
+	}
+
+	pushScope(&n);
+
+	for (auto &s : n.symbols())
+		s->accept(*this);
+
+	popScope();
+}
+
 void LLVMGenerator::visit(Module &n)
 {
 	if (n.doneCodegen()) return;
@@ -1799,6 +1819,13 @@ void LLVMGenerator::visit(Index &n)
 
 	cg->value = n.expr()->cgData<LLVMData>()->value;
 	cg->type = n.expr()->cgData<LLVMData>()->type;
+}
+
+void LLVMGenerator::visit(NamespaceDecl &n)
+{
+	if (n.doneCodegen()) return;
+
+	n.ns()->accept(*this);
 }
 
 void LLVMGenerator::visit(ModuleDecl &n)

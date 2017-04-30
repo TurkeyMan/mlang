@@ -24,12 +24,13 @@ uint8_t typeBytes[(size_t)PrimType::__NumTypes] =
 };
 
 
+void Namespace::accept(ASTVisitor &v) { v.visit(*this); }
 void Module::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 Node* makePragma(String identifier, Array<Node*> args)
 {
-	error(nullptr, 0, "Unknown: pragma(%s, ...)", (const char*)identifier.c_str());
+	error(nullptr, 0, "unknown: pragma(%s, ...)", (const char*)identifier.c_str());
 	return nullptr;
 }
 
@@ -63,6 +64,25 @@ void Scope::addDecl(SharedString name, Declaration *decl)
 {
 	_symbolTable.push_back(decl);
 	_symbols.insert({ std::move(name), decl });
+}
+
+MutableString64 Namespace::stringof() const
+{
+	MutableString64 r;
+	if (parentScope())
+		r = std::move(parentScope()->stringof());
+	if (_declaration)
+		return r.append(r.empty() ? "" : ".", _declaration->name());
+	return r;
+}
+MutableString64 Namespace::mangleof() const
+{
+	MutableString64 r;
+	if (parentScope())
+		r = std::move(parentScope()->mangleof());
+	if (_declaration)
+		return r.append(std::to_string(_declaration->name().length), _declaration->name());
+	return r;
 }
 
 MutableString64 Module::stringof() const

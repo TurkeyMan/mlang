@@ -125,6 +125,21 @@ void Semantic::visit(Declaration &n)
 		attr->accept(*this);
 }
 
+void Semantic::visit(Namespace &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._parentScope = scope();
+	n._module = n._parentScope->_module;
+
+	pushScope(&n);
+
+	for (auto s : n.statements())
+		s->accept(*this);
+
+	popScope();
+}
+
 void Semantic::visit(Module &n)
 {
 	if (n.doneSemantic()) return;
@@ -274,11 +289,16 @@ void Semantic::visit(FunctionType &n)
 
 	if (n._args.length > 0)
 	{
-		pushScope(nullptr);
+		// dummy namespace for args, since we don't have a body
+		Namespace temp(nullptr, nullptr);
+		temp._parentScope = scope();
+		temp._module = scope()->_module;
+		pushScope(&temp);
 
 		for (size_t i = 0; i < n._args.length; ++i)
 		{
 			n._args[i]->accept(*this);
+			// TODO: set owner to nullptr?
 			n._argTypes = n._argTypes.append(n._args[i]->type()->asPointer()->targetType());
 		}
 
@@ -936,6 +956,18 @@ void Semantic::visit(LoopStatement &n)
 
 		popScope();
 	}
+}
+
+void Semantic::visit(NamespaceDecl &n)
+{
+	if (n.doneSemantic()) return;
+
+	visit((Declaration&)n);
+
+//	Scope *s = scope();
+//	n._owner = s;
+
+	n._ns->accept(*this);
 }
 
 void Semantic::visit(ModuleDecl &n)

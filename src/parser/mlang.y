@@ -285,12 +285,16 @@ def_statement			: DEF IDENTIFIER ':' type ';'											{ $$ = new TypeDecl($2, 
 						| DEF IDENTIFIER ':' type '=' VOID ';'									{ $$ = new ValDecl($2, $4, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), nullptr, SourceLocation(yylineno)); }
 						| DEF IDENTIFIER '=' value ';'											{ $$ = new ValDecl($2, nullptr, $4, nullptr, SourceLocation(yylineno)); }
 						| FN IDENTIFIER function_literal_inner									{ $$ = new ValDecl($2, nullptr, $3, nullptr, SourceLocation(yylineno)); }
+						| FN IDENTIFIER function_arguments ';'									{ $$ = nullptr; error(filename.c_str(), yylineno, "function prototype must have explicit return type"); }
+						| FN IDENTIFIER function_arguments ':' type ';'							{ $$ = new ValDecl($2, new ::FunctionType($5, $3.get(), SourceLocation(yylineno)), new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), nullptr, SourceLocation(yylineno)); }
 						| STRUCT IDENTIFIER struct_def											{ $$ = new TypeDecl($2, $3, nullptr, SourceLocation(yylineno)); }
 						| attributes DEF IDENTIFIER ':' type ';'								{ $$ = new TypeDecl($3, $5, $1.get(), SourceLocation(yylineno)); }
 						| attributes DEF IDENTIFIER ':' type '=' value ';'						{ $$ = new ValDecl($3, $5, $7, $1.get(), SourceLocation(yylineno)); }
 						| attributes DEF IDENTIFIER ':' type '=' VOID ';'						{ $$ = new ValDecl($3, $5, new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), $1.get(), SourceLocation(yylineno)); }
 						| attributes DEF IDENTIFIER '=' value ';'								{ $$ = new ValDecl($3, nullptr, $5, $1.get(), SourceLocation(yylineno)); }
 						| attributes FN IDENTIFIER function_literal_inner						{ $$ = new ValDecl($3, nullptr, $4, $1.get(), SourceLocation(yylineno)); }
+						| attributes FN IDENTIFIER function_arguments ';'						{ $$ = nullptr; error(filename.c_str(), yylineno, "function prototype must have explicit return type"); }
+						| attributes FN IDENTIFIER function_arguments ':' type ';'				{ $$ = new ValDecl($3, new ::FunctionType($6, $4.get(), SourceLocation(yylineno)), new PrimitiveLiteralExpr(PrimType::v, 0ull, SourceLocation(yylineno)), $1.get(), SourceLocation(yylineno)); }
 						| attributes STRUCT IDENTIFIER struct_def								{ $$ = new TypeDecl($3, $4, $1.get(), SourceLocation(yylineno)); }
 var_statement			: VAR var_decl_assign_void ';'											{ $$ = $2; }
 						| attributes VAR var_decl_assign_void ';'								{ $3->attributes().append($1.get()); $$ = $3; }

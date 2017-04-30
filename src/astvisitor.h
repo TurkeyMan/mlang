@@ -9,6 +9,7 @@ class ASTVisitor
 {
 public:
 	virtual void visit(Declaration &n) {}
+	virtual void visit(Namespace &n) {}
 	virtual void visit(Module &n) {}
 	virtual void visit(ExpressionStatement &n) {}
 	virtual void visit(ReturnStatement &n) {}
@@ -36,6 +37,7 @@ public:
 	virtual void visit(MemberLookup &n) {}
 	virtual void visit(Tuple &n) {}
 	virtual void visit(Index &n) {}
+	virtual void visit(NamespaceDecl &n) {}
 	virtual void visit(ModuleDecl &n) {}
 	virtual void visit(ImportDecl &n) {}
 	virtual void visit(TypeDecl &n) {}

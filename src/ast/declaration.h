@@ -2,6 +2,31 @@
 //** Declaration nodes **
 //***********************
 
+class NamespaceDecl : public Declaration
+{
+	friend class Semantic;
+
+	Namespace *_ns;
+
+public:
+	NamespaceDecl(SharedString name, Namespace *ns, Array<Node*> attrs, SourceLocation loc)
+		: Node(loc), Declaration(name, std::move(attrs), loc), _ns(ns)
+	{}
+
+	Namespace *ns() const { return _ns; }
+	const Array<Statement*>& statements() const { return _ns->statements(); }
+	bool didReturn() const override { return false; }
+
+	MutableString64 stringof() const override { assert(false); return nullptr; }
+	MutableString64 mangleof() const override { assert(false); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override {
+		return Statement::dump(out << "namespace: #" << str_ref(_name) << '\n', ind);
+	}
+};
+
 class ModuleDecl : public Declaration
 {
 	friend class Semantic;

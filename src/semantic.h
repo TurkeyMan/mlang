@@ -28,7 +28,7 @@ public:
 	TypeExpr* typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *right);
 
 	Scope* scope() const { return _scope.size() ? _scope.back() : nullptr; }
-	void pushScope(Scope *s) { _scope.push_back(s); }
+	void pushScope(Scope *s) { assert(s); _scope.push_back(s); }
 	void popScope() { _scope.pop_back(); }
 	const SharedString &scopeFilename() const { return scope()->module()->filename(); }
 
@@ -38,6 +38,7 @@ public:
 
 private:
 	void visit(Declaration &n) override;
+	void visit(Namespace &n) override;
 	void visit(Module &n) override;
 	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
@@ -65,6 +66,7 @@ private:
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &n) override;
 	void visit(Index &n) override;
+	void visit(NamespaceDecl &n) override;
 	void visit(ModuleDecl &n) override;
 	void visit(ImportDecl &n) override;
 	void visit(TypeDecl &n) override;

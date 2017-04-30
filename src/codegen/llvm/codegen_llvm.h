@@ -123,6 +123,7 @@ public:
 	void earlyReturn(Expr *expr);
 
 	void visit(Declaration &n) override;
+	void visit(Namespace &n) override;
 	void visit(Module &n) override;
 	void visit(ExpressionStatement &n) override;
 	void visit(ReturnStatement &n) override;
@@ -150,6 +151,7 @@ public:
 	void visit(MemberLookup &n) override;
 	void visit(Tuple &v) override;
 	void visit(Index &n) override;
+	void visit(NamespaceDecl &n) override;
 	void visit(ModuleDecl &n) override;
 	void visit(ImportDecl &n) override;
 	void visit(TypeDecl &n) override;
