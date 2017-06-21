@@ -60,6 +60,9 @@
     <ClCompile Include="src\parser\mlang.flex.cpp">
       <Filter>gen</Filter>
     </ClCompile>
+    <ClCompile Include="src\parser\parse.cpp">
+      <Filter>src\parser</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\ast\declaration.h">
@@ -111,6 +114,9 @@
       <Filter>gen</Filter>
     </ClInclude>
     <ClInclude Include="src\parser\arrayholder.h">
+      <Filter>src\parser</Filter>
+    </ClInclude>
+    <ClInclude Include="src\parser\parse.h">
       <Filter>src\parser</Filter>
     </ClInclude>
   </ItemGroup>

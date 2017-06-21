@@ -1,15 +1,8 @@
 %{
 #include "arrayholder.h"
+#include "parse.h"
 
 #include "mlang.tab.h"
-
-const char *my_dup(const char *s)
-{
-	size_t sz = strlen(s);
-	char *buffer = (char*)malloc(sz + 1);
-	strcpy_s(buffer, sz + 1, s);
-	return buffer;
-}
 
 %}
 

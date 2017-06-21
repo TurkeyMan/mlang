@@ -21,6 +21,7 @@ public:
 	virtual void visit(PointerType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(FunctionType &n) {}
+	virtual void visit(CVarArgType &n) {}
 	virtual void visit(PrimitiveLiteralExpr &n) {}
 	virtual void visit(AggregateLiteralExpr &n) {}
 	virtual void visit(FunctionLiteralExpr &n) {}

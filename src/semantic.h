@@ -50,6 +50,7 @@ private:
 	void visit(PointerType &v) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
+	void visit(CVarArgType &n) override;
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(AggregateLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;

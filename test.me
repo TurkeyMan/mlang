@@ -1,4 +1,4 @@
-// central concepts for pointers/references
+﻿// central concepts for pointers/references
 
 // unique refs	RVAL's?
 // scoped refs	may not escape, scope returns have narrowest life of inputs
@@ -10,17 +10,74 @@
 // owner   ^
 // borrow  &
 
-module test;
-//module x.y.z;
+module test1;
+
+//import std.c.stdlib;
+//import std.c.stdio;
+//import test2;
+
+fn test()
+{
+	// values
+	true;						// bool true
+	false;						// bool false
+	10;							// int
+	10.1;						// float
+	10E-3;						// float (exp notation)
+	10.1e+3;					// float (exp notation)
+	0xABC;						// int (hex)
+	0x10_ABCD;					// int (hex, with separator)
+	0b10110;					// int (binary)
+	0b10_0110;					// int (binary, with separator)
+	0o775;						// int (octal)
+	'a';						// char literal
+	'\0';						// char literal with escape
+	'本';						// unicode char literal
+	[10; 3];					// array (sequence)
+	[10, 20, 30];				// array
+	[10, 20.0, true];			// tuple
+	['h', 'e', 'l' ,'l', 'o'];	// string
+	"hello world\n";			// string with escape
+	`no\escape!`;				// no-escape string
+	fn() {};					// fn literal
+	fn() : int { return 1; };	// with return type
+	fn() { return 1; };			// infer return type
+	fn(x: int) { return x+1; };	// with argument
+	fn => 1;					// lambda syntax
+	fn x: int => x+1;			// with argument
+
+	// types
+
+	// tests
+	[10, "hello", [10, true]];	// tuple literal with arrays and tuples
+
+}
+
 
 var x : long = 2;
 
-def f = fn a : long => a^2;
 
-def puts : fn(str : char*) : int = void;
-def _putws : fn(str : wchar*) : int = void;
+/*
+
+public, package, private
+
+extern
+
+pure
+nothrow (do we have exceptions?)
+
+
+
+const (method) ?
+
+
+*/
+
+
+
 /+
-struct SS {
+struct SS
+{
 	var x : int;
 	var y : float = 2;
 	def z = 100;
@@ -54,17 +111,52 @@ fn f(x : int&)
 	return x*5;
 }
 +/
-fn main(argc : long, argv : [char*; 3]&) : int
+/+
+fn poo()
 {
-	var str = "hello world!\0";
-	puts(cast(char*)str);
-	puts(str.ptr);
-	puts(argv[0]);
+	var b: byte;
+	var ub: ubyte;
+	var i: int;
+	var ui: uint;
+	var l: long;
+	var ul: ulong;
 
-	if(t : int = 1; t) return cast(double)t+10;
-	var s : int = 10;
-	argc/f(s);
-	return (~argc + argc*argc << 2) >= argc%2;
+	if (b < ub);
+	if (b < i);
+	if (b < ui);
+	if (ub < b);
+	if (ub < i);
+	if (ub < ui);
+	if (i < b);
+	if (i < ub);
+	if (i < ui);
+	if (ui < b);
+	if (ui < ub);
+	if (ui < i);
+}
++/
+@extern_c fn main(argc: long, argv: [const(char*); 3]&) : int
+{
+//	x += 2;
+//
+////	test();
+//
+//	var str = "hello world!\0";
+//	puts(cast(char*)str);
+//	puts(str.ptr);
+//	puts(argv[0]);
+//	var wstr = "rar!"w;
+//	wstr[1] = 'ô'w;
+//	_putws(wstr.ptr);
+//
+//	if(t : int = 1; t != 0)
+//	{
+//	   return cast(double)t+10;
+//	}
+//	var s : int = 10;
+//	argc/f(s);
+//	return (~argc + argc*argc << 2) >= argc%2;
+return 0;
 }
 
 /+

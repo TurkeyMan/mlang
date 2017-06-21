@@ -21,6 +21,7 @@ void yyerror(const char *s);
 #undef CONST
 #undef VOID
 
+#include "parse.h"
 #include "arrayholder.h"
 #include "error.h"
 
@@ -28,96 +29,6 @@ using namespace m;
 
 static Array<Statement*> parseTree;
 static String filename;
-
-const char *join_strings(const char *s1, const char *s2)
-{
-	size_t sz1 = strlen(s1);
-	size_t sz2 = strlen(s2);
-	char *buffer = (char*)malloc(sz1 + sz2 + 2);
-	strcpy_s(buffer, sz1 + sz2 + 2, s1);
-	strcpy_s(buffer + sz1 + 1, sz2 + 1, s2);
-	buffer[sz1] = '.';
-	return buffer;
-}
-
-char32_t parse_char(const char *s, PrimType &type)
-{
-	Slice<const char> str(s);
-
-	type = PrimType::v;
-	if (str[str.length - 1] == 'w')
-	{
-		type = PrimType::c16;
-		str.pop_back();
-	}
-	else if (str[str.length - 1] == 'd')
-	{
-		type = PrimType::c32;
-		str.pop_back();
-	}
-
-	assert(str[0] == '\'' && str[str.length - 1] == '\'');
-
-	str = str.slice(1, str.length - 1);
-
-	char32_t c = str.pop_front_char();
-	if (c == '\\')
-	{
-		c = str.pop_front_char();
-		switch (c)
-		{
-			case '0':	c = '\0';	break;
-			case 'a':	c = '\a';	break;
-			case 'b':	c = '\b';	break;
-			case 'f':	c = '\f';	break;
-			case 'n':	c = '\n';	break;
-			case 'r':	c = '\r';	break;
-			case 't':	c = '\t';	break;
-			case 'v':	c = '\v';	break;
-			case 'x':
-			{
-				if (str.length < 2 || !detail::is_hex(str[0]) || !detail::is_hex(str[1]))
-					yyerror("Invalid hexadecimal character.");
-				c = (char32_t)str.pop_front(2).parse_int<16>();
-				break;
-			}
-			case 'u':
-			{
-				if (str.length < 4 || !detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]))
-					yyerror("Invalid hexadecimal character.");
-				c = (char32_t)str.pop_front(4).parse_int<16>();
-				break;
-			}
-			case 'U':
-			{
-				if (str.length < 8 ||
-					!detail::is_hex(str[0]) || !detail::is_hex(str[1]) || !detail::is_hex(str[2]) || !detail::is_hex(str[3]) ||
-					!detail::is_hex(str[4]) || !detail::is_hex(str[5]) || !detail::is_hex(str[6]) || !detail::is_hex(str[7]))
-					yyerror("Invalid hexadecimal character.");
-				c = (char32_t)str.pop_front(8).parse_int<16>();
-				break;
-			}
-			default:
-				break;
-		}
-	}
-
-	if (!str.empty())
-		yyerror("Invalid character literal.");
-	if (type == PrimType::c16 && c >= 0x10000)
-		yyerror("Character can not be encoded by wchar.");
-	if (type == PrimType::v)
-	{
-		if (c >= 0x10000)
-			type = PrimType::c32;
-		else if (c >= 0x80)
-			type = PrimType::c16;
-		else
-			type = PrimType::c8;
-	}
-
-	return c;
-}
 
 %}
 
@@ -134,6 +45,7 @@ char32_t parse_char(const char *s, PrimType &type)
 	TypeExprList typeExprList;
 	m::Statement *statement;
 	StatementList statementList;
+	m::ScopeStatement *scopeStmnt;
 	m::ValDecl *decl;
 	DeclList declList;
 	m::UnaryOp unaryOp;
@@ -173,8 +85,10 @@ char32_t parse_char(const char *s, PrimType &type)
 %type <type> known_type type known_type_primary known_type_postfix type_postfix known_type_prefix known_type_infix1 known_type_infix2 known_type_infix3 known_type_infix4 known_type_infix5 known_type_infix6 known_type_infix7 known_type_infix8 known_type_infix9 known_type_infix10 known_type_infix11 known_type_infix12
 %type <typeExprList> known_type_list  // type_list
 
-%type <statement> module_stmnt struct_stmnt code_stmnt module_statement import_statement def_statement var_statement expression_statement empty_statement control_statement body
-%type <statementList> module_statemtnts struct_statements code_statements body_block
+%type <statement> module_stmnt struct_stmnt code_stmnt_no_scope code_stmnt module_statement import_statement def_statement var_statement expression_statement empty_statement control_statement
+%type <statementList> module_statemtnts struct_statements code_statements
+
+%type <scopeStmnt> scope_statement body
 
 %type <decl> var_decl var_decl_assign var_decl_assign_void
 %type <declList> var_decl_list var_decl_assign_list function_arguments
@@ -206,12 +120,14 @@ struct_stmnt		: def_statement						{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
 code_statements		: code_stmnt						{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
 					| code_statements code_stmnt		{ $$ = $2 ? $1.append($2) : $1; }
-code_stmnt			: def_statement						{ $$ = $1; }
+code_stmnt_no_scope	: def_statement						{ $$ = $1; }
 					| var_statement						{ $$ = $1; }
 					| expression_statement				{ $$ = $1; }
 					| control_statement					{ $$ = $1; }
 					| import_statement					{ $$ = $1; }
 					| empty_statement					{ $$ = $1; }
+code_stmnt			: code_stmnt_no_scope				{ $$ = $1; }
+					| scope_statement					{ $$ = $1; }
 
 var_decl			: IDENTIFIER								{ $$ = new VarDecl($1, nullptr, nullptr, nullptr, SourceLocation(yylineno)); }
 					| IDENTIFIER ':' type						{ $$ = new VarDecl($1, $3, nullptr, nullptr, SourceLocation(yylineno)); }
@@ -266,12 +182,11 @@ parameters			: '(' ')'									{ $$ = ExprList::empty(); }
 					| '(' value_list ')'						{ $$ = $2; }
 function_arguments	: '(' ')'									{ $$ = DeclList::empty(); }
 					| '(' var_decl_assign_list ')'				{ $$ = $2; }
+					| '(' var_decl_assign_list ',' ELIPSIS ')'	{ $$ = $2.append(new VarDecl("va_args", new CVarArgType(SourceLocation(yylineno)), nullptr, nullptr, SourceLocation(yylineno))); }
 array				: '[' ']'									{ $$ = ExprList::empty(); }
 					| '[' value_list ']'						{ $$ = $2; }
-body_block			: code_stmnt								{ $$ = StatementList::empty(); if ($1) $$ = $$.append($1); }
-					| '{' '}'									{ $$ = StatementList::empty(); }
-					| '{' code_statements '}'					{ $$ = $2; }
-body				: body_block								{ $$ = new ScopeStatement($1.get(), nullptr, SourceLocation(yylineno)); }
+body				: code_stmnt_no_scope						{ $$ = new ScopeStatement($1 ? Array<Statement*>{ $1 } : Array<Statement*>(), nullptr, SourceLocation(yylineno)); }
+					| scope_statement							{ $$ = $1; }
 
 /**** STATEMENTS ****/
 
@@ -302,23 +217,25 @@ expression_statement	: value_assign ';'														{ $$ = new ExpressionStatem
 control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr, SourceLocation(yylineno)); }
 						| RETURN value ';'														{ $$ = new ReturnStatement($2, SourceLocation(yylineno)); }
 //						| BREAK ';'
-						| IF '(' value ')' body ELSE body										{ $$ = new IfStatement($3, (ScopeStatement*)$5, (ScopeStatement*)$7, nullptr, SourceLocation(yylineno)); }
-						| IF '(' value ')' body										%prec THEN	{ $$ = new IfStatement($3, (ScopeStatement*)$5, nullptr, nullptr, SourceLocation(yylineno)); }
-						| IF '(' var_decl_assign_list ';' value ')' body ELSE body				{ $$ = new IfStatement($5, (ScopeStatement*)$7, (ScopeStatement*)$9, $3.get(), SourceLocation(yylineno)); }
-						| IF '(' var_decl_assign_list ';' value ')' body			%prec THEN	{ $$ = new IfStatement($5, (ScopeStatement*)$7, nullptr, $3.get(), SourceLocation(yylineno)); }
-						| DO body																{ $$ = new LoopStatement(nullptr, nullptr, nullptr, (ScopeStatement*)$2, SourceLocation(yylineno)); }
-						| WHILE '(' value ')' body												{ $$ = new LoopStatement(nullptr, $3, nullptr, (ScopeStatement*)$5, SourceLocation(yylineno)); }
-						| FOR '('                      ';'       ';'                   ')' body	{ $$ = new LoopStatement(nullptr, nullptr, nullptr, (ScopeStatement*)$6, SourceLocation(yylineno)); }
-						| FOR '('                      ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, nullptr, $5.get(), (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '('                      ';' value ';'                   ')' body	{ $$ = new LoopStatement(nullptr, $4, nullptr, (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '('                      ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, $4, $6.get(), (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';'       ';'                   ')' body	{ $$ = new LoopStatement($3.get(), nullptr, nullptr, (ScopeStatement*)$7, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), nullptr, $6.get(), (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';' value ';'                   ')' body	{ $$ = new LoopStatement($3.get(), $5, nullptr, (ScopeStatement*)$8, SourceLocation(yylineno)); }
-						| FOR '(' var_decl_assign_list ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), $5, $7.get(), (ScopeStatement*)$9, SourceLocation(yylineno)); }
-						| FOREACH '(' value ')' body											{ $$ = makeForEach(nullptr, $3, (ScopeStatement*)$5, SourceLocation(yylineno)); }
-						| FOREACH '(' var_decl_list ';' value ')' body							{ $$ = makeForEach($3.get(), $5, (ScopeStatement*)$7, SourceLocation(yylineno)); }
+						| IF '(' value ')' body ELSE body										{ $$ = new IfStatement($3, $5, $7, nullptr, SourceLocation(yylineno)); }
+						| IF '(' value ')' body										%prec THEN	{ $$ = new IfStatement($3, $5, nullptr, nullptr, SourceLocation(yylineno)); }
+						| IF '(' var_decl_assign_list ';' value ')' body ELSE body				{ $$ = new IfStatement($5, $7, $9, $3.get(), SourceLocation(yylineno)); }
+						| IF '(' var_decl_assign_list ';' value ')' body			%prec THEN	{ $$ = new IfStatement($5, $7, nullptr, $3.get(), SourceLocation(yylineno)); }
+						| DO body																{ $$ = new LoopStatement(nullptr, nullptr, nullptr, $2, SourceLocation(yylineno)); }
+						| WHILE '(' value ')' body												{ $$ = new LoopStatement(nullptr, $3, nullptr, $5, SourceLocation(yylineno)); }
+						| FOR '('                      ';'       ';'                   ')' body	{ $$ = new LoopStatement(nullptr, nullptr, nullptr, $6, SourceLocation(yylineno)); }
+						| FOR '('                      ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, nullptr, $5.get(), $7, SourceLocation(yylineno)); }
+						| FOR '('                      ';' value ';'                   ')' body	{ $$ = new LoopStatement(nullptr, $4, nullptr, $7, SourceLocation(yylineno)); }
+						| FOR '('                      ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement(nullptr, $4, $6.get(), $8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';'       ';'                   ')' body	{ $$ = new LoopStatement($3.get(), nullptr, nullptr, $7, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), nullptr, $6.get(), $8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';' value ';'                   ')' body	{ $$ = new LoopStatement($3.get(), $5, nullptr, $8, SourceLocation(yylineno)); }
+						| FOR '(' var_decl_assign_list ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), $5, $7.get(), $9, SourceLocation(yylineno)); }
+						| FOREACH '(' value ')' body											{ $$ = makeForEach(nullptr, $3, $5, SourceLocation(yylineno)); }
+						| FOREACH '(' var_decl_list ';' value ')' body							{ $$ = makeForEach($3.get(), $5, $7, SourceLocation(yylineno)); }
 //						| MATCH body
+scope_statement			: '{' '}'																{ $$ = new ScopeStatement(nullptr, nullptr, SourceLocation(yylineno)); }
+						| '{' code_statements '}'												{ $$ = new ScopeStatement($2.get(), nullptr, SourceLocation(yylineno)); }
 
 
 /**** EXPRESSION PRODUCTIONS ****/

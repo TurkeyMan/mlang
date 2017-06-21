@@ -2,34 +2,16 @@
 //** Statement nodes **
 //*********************
 
-class Declaration : public Statement
+class Statement : public virtual Node
 {
 	friend class Semantic;
-protected:
-
-	Array<Node*> _attributes;
-
-	SharedString _name;
-	mutable SharedString _mangledName;
-
-	Scope *_owner = nullptr;
-
 public:
-	const SharedString& name() const { return _name; }
-	const SharedString& mangledName() const;
 
-	Declaration(SharedString name, Array<Node*> attrs, SourceLocation loc)
-		: Statement(loc), _attributes(std::move(attrs)), _name(std::move(name))
+	Statement(SourceLocation loc)
+		: Node(loc)
 	{}
 
-	Array<Node*>& attributes() { return _attributes; }
-	const Array<Node*>& attributes() const { return _attributes; }
-
-	bool didReturn() const override { return false; }
-
-	Node *getMember(String name) override;
-
-	void accept(ASTVisitor &v) override;
+	virtual bool didReturn() const = 0;
 };
 
 class ExpressionStatement : public Statement

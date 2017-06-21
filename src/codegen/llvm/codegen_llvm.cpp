@@ -410,7 +410,9 @@ void LLVMGenerator::visit(Namespace &n)
 	if (compiler.debug)
 	{
 		// TODO: get namespace name...
-//		cg->discope = DBuilder->createNameSpace(scopeCg()->discope, str_ref(n.givenName()), scopeCg()->file(), n.getLine());
+//		LLVMData *scope = scopeCg();
+//		assert(scope->discope);
+//		cg->discope = DBuilder->createNameSpace(scope->discope, str_ref(n.givenName()), scope->file(), n.getLine());
 	}
 
 	pushScope(&n);
@@ -479,6 +481,15 @@ void LLVMGenerator::visit(ScopeStatement &n)
 {
 	if (n.doneCodegen()) return;
 
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	if (compiler.debug)
+	{
+		LLVMData *scope = scopeCg();
+		assert(scope->discope);
+		cg->discope = DBuilder->createLexicalBlock(scope->discope, scope->file(), n.getLoc().line, n.getLoc().col);
+	}
+
 	pushScope(&n);
 	for (auto &s : n.statements())
 	{
@@ -495,14 +506,35 @@ void LLVMGenerator::visit(IfStatement &n)
 {
 	if (n.doneCodegen()) return;
 
+	LLVMData *cg = n.cgData<LLVMData>();
+
 	Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
 	if (n.initStatements().length > 0)
 	{
+		if (compiler.debug)
+		{
+			LLVMData *scope = scopeCg();
+			assert(scope->discope);
+			cg->discope = DBuilder->createLexicalBlock(scope->discope, scope->file(), n.getLoc().line, n.getLoc().col);
+		}
+
 		pushScope(&n);
 
 		for (auto &s : n.initStatements())
+		{
+			if (compiler.debug)
+				emitLocation(s);
+
 			s->accept(*this);
+		}
+	}
+	else if (compiler.debug)
+	{
+		// if there's no init-block, then we don't need a scope
+		LLVMData *scope = scopeCg();
+		assert(scope->discope);
+		cg->discope = scope->discope;
 	}
 
 	BasicBlock *thenBlock = BasicBlock::Create(ctx, "if.then", TheFunction);
@@ -510,8 +542,8 @@ void LLVMGenerator::visit(IfStatement &n)
 	BasicBlock *afterBlock = !(n.thenReturned() && n.elseReturned()) ? BasicBlock::Create(ctx, "if.end") : nullptr;
 
 	n.cond()->accept(*this);
-	LLVMData *cg = n.cond()->cgData<LLVMData>();
-	Builder.CreateCondBr(cg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
+	LLVMData *condCg = n.cond()->cgData<LLVMData>();
+	Builder.CreateCondBr(condCg->value, thenBlock, elseBlock ? elseBlock : afterBlock);
 
 	// emit 'then' block
 	Builder.SetInsertPoint(thenBlock);
@@ -564,12 +596,26 @@ void LLVMGenerator::visit(LoopStatement &n)
 
 	Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	if (compiler.debug)
+	{
+		LLVMData *scope = scopeCg();
+		assert(scope->discope);
+		cg->discope = DBuilder->createLexicalBlock(scope->discope, scope->file(), n.getLoc().line, n.getLoc().col);
+	}
+
 	// emit loop block
 	pushScope(&n);
 
 	// emit iterators
 	for (auto i : n.iterators())
+	{
+		if (compiler.debug)
+			emitLocation(i);
+
 		i->accept(*this);
+	}
 
 	Expr *cond = n.cond();
 
@@ -740,6 +786,7 @@ void LLVMGenerator::visit(ModifiedType &n)
 
 	LLVMData *innerCg = n.innerType()->cgData<LLVMData>();
 	cg->type = innerCg->type;
+	cg->ditype = innerCg->ditype;
 }
 
 void LLVMGenerator::visit(PointerType &n)
@@ -779,10 +826,15 @@ void LLVMGenerator::visit(Struct &n)
 
 	if (compiler.debug)
 	{
+		LLVMData *scope = scopeCg();
+		assert(scope->discope);
 		SmallVector<Metadata*, 8> dielements;
 		for (auto &m : n.dataMembers())
-			dielements.push_back(m.decl->cgData<LLVMData>()->divalue);
-		cg->discope = cg->ditype = DBuilder->createStructType(scopeCg()->discope, str_ref(n.givenName()), scopeCg()->file(), n.defLoc().line, n.size(), n.alignment(), 0, nullptr, DBuilder->getOrCreateArray(dielements), 0, nullptr/*, n.mangledName()*/);
+		{
+			DIDerivedType *memberdi = DBuilder->createMemberType(scope->discope, str_ref(m.decl->name()), scope->file(), m.decl->getLoc().line, m.decl->type()->size() * 8, m.decl->type()->alignment() * 8, m.offset * 8, 0, m.decl->cgData<LLVMData>()->ditype);
+			dielements.push_back(memberdi);
+		}
+		cg->discope = cg->ditype = DBuilder->createStructType(scope->discope, str_ref(n.givenName()), scope->file(), n.defLoc().line, n.size(), n.alignment(), 0, nullptr, DBuilder->getOrCreateArray(dielements), 0, nullptr/*, n.mangledName()*/);
 	}
 }
 
@@ -795,19 +847,29 @@ void LLVMGenerator::visit(FunctionType &n)
 	n.returnType()->accept(*this);
 	llvm::Type *r = n.returnType()->cgData<LLVMData>()->type;
 
-	Array<TypeExpr*> argList = n.argTypes();
+	Slice<TypeExpr*> argList = n.argTypes();
 	SmallVector<llvm::Type*, 8> args;
 
+	bool isVarArg = false;
 	for (auto a : argList)
 	{
+		assert(!isVarArg);
+
 		a->accept(*this);
-		args.push_back(a->cgData<LLVMData>()->type);
+
+		if (dynamic_cast<CVarArgType*>(a))
+			isVarArg = true;
+		else
+			args.push_back(a->cgData<LLVMData>()->type);
 	}
 
-	cg->type = llvm::FunctionType::get(r, args, false);
+	cg->type = llvm::FunctionType::get(r, args, isVarArg);
 
 	if (compiler.debug)
 	{
+		if (isVarArg)
+			argList.pop_back();
+
 		SmallVector<Metadata*, 8> types;
 
 		if (!n.returnType()->isVoid())
@@ -818,6 +880,20 @@ void LLVMGenerator::visit(FunctionType &n)
 
 		cg->ditype = DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(types));
 	}
+}
+
+void LLVMGenerator::visit(CVarArgType &n)
+{
+	if (n.doneCodegen()) return;
+
+//	LLVMData *cg = n.cgData<LLVMData>();
+//
+//	cg->type = llvm::FunctionType::get(r, args, false);
+//
+//	if (compiler.debug)
+//	{
+////		cg->ditype = DBuilder->createSubroutineType(DBuilder->getOrCreateTypeArray(types));
+//	}
 }
 
 void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
@@ -835,7 +911,7 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	case PrimType::i8:
 		cg->value = ConstantInt::get(ctx, APInt(8, n.getInt(), true)); break;
 	case PrimType::u8:
-		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(8, n.getUint(), false)); break;
 	case PrimType::c8:
 		cg->value = ConstantInt::get(ctx, APInt(8, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i16:
@@ -847,7 +923,7 @@ void LLVMGenerator::visit(PrimitiveLiteralExpr &n)
 	case PrimType::i32:
 		cg->value = ConstantInt::get(ctx, APInt(32, n.getInt(), true)); break;
 	case PrimType::u32:
-		cg->value = ConstantInt::get(ctx, APInt(16, n.getUint(), false)); break;
+		cg->value = ConstantInt::get(ctx, APInt(32, n.getUint(), false)); break;
 	case PrimType::c32:
 		cg->value = ConstantInt::get(ctx, APInt(32, (uint64_t)n.getChar(), false)); break;
 	case PrimType::i64:
@@ -926,7 +1002,9 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 
 	if (compiler.debug)
 	{
-		DISubprogram *di = DBuilder->createFunction(scopeCg()->discope, str_ref(n.givenName()), str_ref(n.givenName()), scopeCg()->file(), n.defLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), true, true, n.getLoc().line, 0, compiler.opt > 0);
+		LLVMData *scope = scopeCg();
+		assert(scope->discope);
+		DISubprogram *di = DBuilder->createFunction(scope->discope, str_ref(n.givenName()), str_ref(n.givenName()), scope->file(), n.defLoc().line, dyn_cast<DISubroutineType>(n.type()->cgData<LLVMData>()->ditype), true, true, n.getLoc().line, 0, compiler.opt > 0);
 		function->setSubprogram(di);
 		cg->divalue = cg->discope = di;
 
@@ -1321,43 +1399,39 @@ void LLVMGenerator::visit(BinaryExpr &n)
 	{
 		PrimType primType = pt->type();
 
+		// TODO: bool operations assert, they should WORK (promote to integer?)
 		switch (n.op())
 		{
 		case BinOp::Add:
-			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFAdd(lhCg->value, rhCg->value, "fadd");
 			else
 				cg->value = Builder.CreateAdd(lhCg->value, rhCg->value, "add");
 			break;
 		case BinOp::Sub:
-			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFSub(lhCg->value, rhCg->value, "fsub");
 			else
 				cg->value = Builder.CreateSub(lhCg->value, rhCg->value, "sub");
 			break;
 		case BinOp::Mul:
-			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFMul(lhCg->value, rhCg->value, "fmul");
 			else
 				cg->value = Builder.CreateMul(lhCg->value, rhCg->value, "mul");
 			break;
 		case BinOp::Div:
-			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFDiv(lhCg->value, rhCg->value, "fdiv");
-			else if (isUnsignedInt(primType))
+			else if (isUnsignedIntegral(primType))
 				cg->value = Builder.CreateUDiv(lhCg->value, rhCg->value, "udiv");
 			else
 				cg->value = Builder.CreateSDiv(lhCg->value, rhCg->value, "sdiv");
 			break;
 		case BinOp::Mod:
-			assert(primType > PrimType::u1);
 			if (isFloat(primType))
 				cg->value = Builder.CreateFRem(lhCg->value, rhCg->value, "fmod");
-			else if (isUnsignedInt(primType))
+			else if (isUnsignedIntegral(primType))
 				cg->value = Builder.CreateURem(lhCg->value, rhCg->value, "umod");
 			else
 				cg->value = Builder.CreateSRem(lhCg->value, rhCg->value, "smod");
@@ -1401,27 +1475,18 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			cg->value = Builder.CreateLShr(lhCg->value, rhCg->value, "lsr");
 			break;
 		case BinOp::BitAnd:
+		case BinOp::LogicAnd:
 			assert(isNotFloat(primType));
 			cg->value = Builder.CreateAnd(lhCg->value, rhCg->value, "and");
 			break;
 		case BinOp::BitOr:
+		case BinOp::LogicOr:
 			assert(isNotFloat(primType));
 			cg->value = Builder.CreateOr(lhCg->value, rhCg->value, "or");
 			break;
 		case BinOp::BitXor:
-			assert(isNotFloat(primType));
-			cg->value = Builder.CreateXor(lhCg->value, rhCg->value, "xor");
-			break;
-		case BinOp::LogicAnd:
-			assert(isBool(primType));
-			cg->value = Builder.CreateAnd(lhCg->value, rhCg->value, "and");
-			break;
-		case BinOp::LogicOr:
-			assert(isBool(primType));
-			cg->value = Builder.CreateOr(lhCg->value, rhCg->value, "or");
-			break;
 		case BinOp::LogicXor:
-			assert(isBool(primType));
+			assert(isNotFloat(primType));
 			cg->value = Builder.CreateXor(lhCg->value, rhCg->value, "xor");
 			break;
 		case BinOp::Eq:
@@ -1454,6 +1519,56 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			}
 			break;
 		}
+
+		// TODO: THESE NEED TO HANDLE SIGNED/UNSIGNED COMPARISONS!!
+		// ie; signed x < unsigned y == x < 0 || x < y
+/*
+		PrimType types[2] = { pl->type(), pr->type() };
+
+		if (isNotFloat(types[0]) && isNotFloat(types[1]))
+		{
+			uint8_t tf = tyFlags(types[0]) & tyFlags(types[1]) & (TF_Signed | TF_Unsigned);
+
+			// if there is a signed/unsigned mismatch
+			if (tf == 0)
+			{
+				static_assert(false, "here");
+				// signed/unsigned mismatch
+				int unsignedOne = typeFlags[(int)types[1]] & 1;
+				int larger = typeWidth[(int)types[1]] > typeWidth[(int)types[0]];
+				int smaller = typeWidth[(int)types[1]] < typeWidth[(int)types[0]];
+
+				// 1. unsigned type is smaller -> promote to signed type
+				if (unsignedOne == 1 && smaller == 1)
+					return let;
+
+				if (typeWidth[(int)types[unsignedOne]] < 64)
+				{
+					// 2. unsigned type is same/larger -> promote to even larger signed type
+
+				}
+				else
+				{
+					// 3. unsigned type is ulong -> need to do 2 comparisons
+
+
+
+				}
+
+				return let;
+
+
+			}
+			else
+			{
+				// matching signed-ness
+			}
+		}
+		else
+		{
+
+		}
+*/
 		case BinOp::Gt:
 		{
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(lhs->type());
@@ -1462,9 +1577,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOGT(lhCg->value, rhCg->value, "fgt");
-				else if (isUnsignedInt(lhPrimType))
+				else if (isUnsignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpUGT(lhCg->value, rhCg->value, "ugt");
-				else if (isSignedInt(lhPrimType))
+				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSGT(lhCg->value, rhCg->value, "sgt");
 				else
 					assert(false);
@@ -1479,9 +1594,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOGE(lhCg->value, rhCg->value, "fge");
-				else if (isUnsignedInt(lhPrimType))
+				else if (isUnsignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpUGE(lhCg->value, rhCg->value, "uge");
-				else if (isSignedInt(lhPrimType))
+				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSGE(lhCg->value, rhCg->value, "sge");
 				else
 					assert(false);
@@ -1496,9 +1611,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOLT(lhCg->value, rhCg->value, "flt");
-				else if (isUnsignedInt(lhPrimType))
+				else if (isUnsignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpULT(lhCg->value, rhCg->value, "ult");
-				else if (isSignedInt(lhPrimType))
+				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSLT(lhCg->value, rhCg->value, "slt");
 				else
 					assert(false);
@@ -1513,9 +1628,9 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				PrimType lhPrimType = lhpt->type();
 				if (isFloat(lhPrimType))
 					cg->value = Builder.CreateFCmpOLE(lhCg->value, rhCg->value, "fle");
-				else if (isUnsignedInt(lhPrimType))
+				else if (isUnsignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpULE(lhCg->value, rhCg->value, "ule");
-				else if (isSignedInt(lhPrimType))
+				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSLE(lhCg->value, rhCg->value, "sle");
 				else
 					assert(false);
@@ -1732,11 +1847,30 @@ void LLVMGenerator::visit(Tuple &n)
 			for (auto e : n.shape())
 				e->accept(*this);
 
-			Type *ty = t->cgData<LLVMData>()->type;
+			LLVMData *tCg = t->cgData<LLVMData>();
+			Type *ty = tCg->type;
 			if (!n.isDynamicSize())
-				cg->type = ArrayType::get(ty, n.numElements());
+			{
+				size_t numElements = n.numElements();
+				cg->type = ArrayType::get(ty, numElements);
+
+				if (compiler.debug)
+				{
+					// make array DI type
+					SmallVector<Metadata*, 8> subscripts;
+					subscripts.push_back(DBuilder->getOrCreateSubrange(0, numElements));
+					cg->ditype = DBuilder->createArrayType(n.size() * 8, n.alignment() * 8, tCg->ditype, DBuilder->getOrCreateArray(subscripts));
+				}
+			}
 			else
+			{
 				cg->type = ty;
+
+				if (compiler.debug)
+				{
+					assert(false);
+				}
+			}
 		}
 		else
 		{
@@ -1754,6 +1888,24 @@ void LLVMGenerator::visit(Tuple &n)
 
 			// make LLVM struct
 			cg->type = StructType::get(ctx, elements);
+
+			if (compiler.debug)
+			{
+				// make tuple DI type
+				LLVMData *scope = scopeCg(); // HAX: i think this is meant to be the struct scope maybe?
+				assert(scope->discope);
+				SmallVector<Metadata*, 8> dielements;
+				Slice<Node*> elements = n.elements();
+				for (size_t i = 0; i < elements.length; ++i)
+				{
+					char istr[16];
+					sprintf_s(istr, "%zu", i);
+					TypeExpr *t = dynamic_cast<TypeExpr*>(elements[i]);
+					DIDerivedType *memberdi = DBuilder->createMemberType(scope->discope, str_ref(istr), scope->file(), n.getLine(), t->size() * 8, t->alignment() * 8, n.elementOffsets()[i] * 8, 0, t->cgData<LLVMData>()->ditype);
+					dielements.push_back(memberdi);
+				}
+				cg->ditype = DBuilder->createStructType(scope->discope, str_ref("tuple"), scope->file(), n.getLoc().line, n.size() * 8, n.alignment() * 8, 0, nullptr, DBuilder->getOrCreateArray(dielements), 0, nullptr/*, n.mangledName()*/);
+			}
 		}
 	}
 	else if (n.isExpr())
@@ -2026,6 +2178,13 @@ void LLVMGenerator::visit(VarDecl &n)
 			AllocaInst *alloc = Builder.CreateAlloca(typeCg, arrayLen ? arrayLen->cgData<LLVMData>()->value : nullptr, llvm::Twine(str_ref(n.name()), ".addr"));
 			alloc->setAlignment(n.targetType()->alignment());
 
+			if (compiler.debug)
+			{
+				LLVMData *sCg = scopeCg();
+				DILocalVariable *divar = DBuilder->createAutoVariable(sCg->discope, str_ref(n.name()), sCg->file(), n.getLoc().line, n.targetType()->cgData<LLVMData>()->ditype, false, 0);
+				DBuilder->insertDeclare(alloc, divar, DBuilder->createExpression(), DebugLoc::get(n.getLoc().line, 0, sCg->discope), Builder.GetInsertBlock());
+			}
+
 			cg->value = alloc;
 			if (!n.init()->type()->isVoid())
 			{
@@ -2193,6 +2352,7 @@ void LLVMGenerator::emitLocation(Node *node)
 		return Builder.SetCurrentDebugLocation(DebugLoc());
 
 	DIScope *s = scopeCg()->discope;
+	assert(s);
 	Builder.SetCurrentDebugLocation(DebugLoc::get(node->getLine(), node->getCol(), s));
 }
 

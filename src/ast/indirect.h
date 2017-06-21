@@ -196,6 +196,7 @@ public:
 	static Tuple* makeStringLiteral(String str, PrimType type, bool unescape, SourceLocation loc);
 
 	const Array<Node*>& elements() const { return _elements; }
+	const Array<size_t>& elementOffsets() const { return _offsets; }
 
 	bool isSequence() const { return _element != nullptr; }
 	Node* seqElement() { return _element; }

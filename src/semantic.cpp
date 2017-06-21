@@ -311,6 +311,12 @@ void Semantic::visit(FunctionType &n)
 	}
 }
 
+void Semantic::visit(CVarArgType &n)
+{
+	if (n.doneSemantic()) return;
+
+}
+
 void Semantic::visit(PrimitiveLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
@@ -537,6 +543,14 @@ void Semantic::visit(BinaryExpr &n)
 	n._lhs->accept(*this);
 	n._rhs = n._rhs->makeConversion(type);
 	n._rhs->accept(*this);
+
+	// if both sides are const, calculate the result
+	if (n._lhs->isConstant() && n._rhs->isConstant())
+	{
+		assert(false);
+		// TODO:
+		//...
+	}
 }
 
 void Semantic::visit(CallExpr &n)
@@ -559,21 +573,34 @@ void Semantic::visit(CallExpr &n)
 		funcType = n._func->type()->asFunction();
 	}
 
-	Array<TypeExpr*> args = funcType->argTypes();
+	Slice<TypeExpr*> args = funcType->argTypes();
 
-	for (size_t i = 0; i < args.length; ++i)
+	bool isVarArgs = args.length > 0 && dynamic_cast<CVarArgType*>(args[args.length - 1]);
+
+	if (n._callArgs.length > args.length)
 	{
-		if (i < n._callArgs.length)
+		// verify it is a varargs function...
+		if (!isVarArgs) // TODO: put function name in error message!
+			error(scopeFilename().c_str(), n.getLine(), "too many args for function call");
+	}
+
+	if (isVarArgs)
+		args.pop_back();
+
+	size_t i = 0;
+	for (; i < n._callArgs.length; ++i)
+	{
+		n._callArgs[i]->accept(*this);
+		if (i < args.length)
 		{
-			n._callArgs[i]->accept(*this);
 			n._callArgs[i] = n._callArgs[i]->makeConversion(args[i]);
 			n._callArgs[i]->accept(*this);
 		}
-		else
-		{
-			// TODO: handle default args...
-			assert(false);
-		}
+	}
+	for (; i < args.length; ++i)
+	{
+		// TODO: handle default args...
+		assert(false);
 	}
 }
 

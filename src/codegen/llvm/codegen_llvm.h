@@ -13,6 +13,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -135,6 +136,7 @@ public:
 	void visit(PointerType &v) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &v) override;
+	void visit(CVarArgType &v) override;
 	void visit(PrimitiveLiteralExpr &n) override;
 	void visit(AggregateLiteralExpr &n) override;
 	void visit(FunctionLiteralExpr &n) override;

@@ -237,3 +237,31 @@ public:
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
+
+class CVarArgType : public TypeExpr
+{
+	friend class Semantic;
+
+public:
+	CVarArgType(SourceLocation loc)
+		: Node(loc), TypeExpr(loc) {}
+	~CVarArgType() {}
+
+	Expr* init() const override;
+
+	size_t size() const override { return 0; }
+	size_t alignment() const override { return 0; }
+
+	Node *getMember(String name) override { assert(false); return nullptr; }
+
+	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
+	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	MutableString64 stringof() const override;
+	MutableString64 mangleof() const override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};

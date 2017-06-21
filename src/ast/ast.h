@@ -44,16 +44,18 @@ extern uint8_t typeFlags[];
 extern uint8_t typeWidth[];
 extern uint8_t typeBytes[];
 
-#define isFloat(pt) (typeFlags[(int)pt] & TF_Float)
-#define isNotFloat(pt) (typeFlags[(int)pt] & ~TF_Float)
-#define isSignedInt(pt) (typeFlags[(int)pt] & TF_Signed)
-#define isUnsignedInt(pt) (typeFlags[(int)pt] & TF_Unsigned)
-#define isInt(pt) (typeFlags[(int)pt] > 0 && typeFlags[(int)pt] < TF_Char)
-#define isChar(pt) (typeFlags[(int)pt] & TF_Char)
-#define isBool(pt) (typeFlags[(int)pt] & TF_Bool)
-
+#define tyFlags(pt) typeFlags[(int)pt]
 #define tyWidth(pt) typeWidth[(int)pt]
 #define tyBytes(pt) typeBytes[(int)pt]
+
+#define isFloat(pt) (tyFlags(pt) & TF_Float)
+#define isNotFloat(pt) (tyFlags(pt) & ~TF_Float)
+#define isSignedIntegral(pt) (tyFlags(pt) & TF_Signed)
+#define isUnsignedIntegral(pt) (tyFlags(pt) & TF_Unsigned)
+#define isInt(pt) (tyFlags(pt) > 0 && tyFlags(pt) < TF_Char)
+#define isChar(pt) (tyFlags(pt) & TF_Char)
+#define isIntOrChar(pt) (tyFlags(pt) > 0 && tyFlags(pt) < TF_Float)
+#define isBool(pt) (tyFlags(pt) & TF_Bool)
 
 
 inline raw_ostream &indent(raw_ostream &O, int size) {
@@ -315,18 +317,6 @@ public:
 	}
 
 //	raw_ostream &dump(raw_ostream &out, int ind) override {}
-};
-
-class Statement : public virtual Node
-{
-	friend class Semantic;
-public:
-
-	Statement(SourceLocation loc)
-		: Node(loc)
-	{}
-
-	virtual bool didReturn() const = 0;
 };
 
 class Namespace : public virtual Node, public Scope

@@ -9,6 +9,7 @@ void ModifiedType::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
+void CVarArgType::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 const char *primTypeNames[(size_t)PrimType::__NumTypes] =
@@ -177,16 +178,16 @@ ConvType PrimitiveType::convertible(const TypeExpr *target) const
 			else if ((isInt(_type) || isChar(_type) || isBool(_type)) && tyWidth(_type) < tyWidth(pt))
 				return ConvType::Convertible;
 		}
-		else if (isSignedInt(pt))
+		else if (isSignedIntegral(pt))
 		{
-			if (isUnsignedInt(_type) && tyWidth(_type) < tyWidth(pt))
+			if (isUnsignedIntegral(_type) && tyWidth(_type) < tyWidth(pt))
 				return ConvType::Convertible;
-			else if (isSignedInt(_type) && tyWidth(_type) <= tyWidth(pt))
+			else if (isSignedIntegral(_type) && tyWidth(_type) <= tyWidth(pt))
 				return ConvType::Convertible;
 		}
-		else if (isUnsignedInt(pt))
+		else if (isUnsignedIntegral(pt))
 		{
-			if (isUnsignedInt(_type) && tyWidth(_type) <= tyWidth(pt))
+			if (isUnsignedIntegral(_type) && tyWidth(_type) <= tyWidth(pt))
 				return ConvType::Convertible;
 		}
 		return ConvType::LosesPrecision;
@@ -643,6 +644,19 @@ raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 	for (auto a : _argTypes)
 		a->dump(indent(out, ind + 1), ind + 1);
 	return indent(out, ind) << ")\n";
+}
+
+Expr* CVarArgType::init() const
+{
+	return new PrimitiveLiteralExpr(PrimType::v, 0ull, getLoc());
+}
+
+MutableString64 CVarArgType::stringof() const { return "..."; }
+MutableString64 CVarArgType::mangleof() const { assert(false); return ""; }
+
+raw_ostream &CVarArgType::dump(raw_ostream &out, int ind)
+{
+	return out << "...\n";
 }
 
 }

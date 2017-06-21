@@ -39,6 +39,7 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\parser\mlang.flex.cpp" />
     <ClCompile Include="src\parser\mlang.tab.cpp" />
+    <ClCompile Include="src\parser\parse.cpp" />
     <ClCompile Include="src\semantic.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -56,6 +57,7 @@
     <ClInclude Include="src\mlang.h" />
     <ClInclude Include="src\parser\arrayholder.h" />
     <ClInclude Include="src\parser\mlang.tab.h" />
+    <ClInclude Include="src\parser\parse.h" />
     <ClInclude Include="src\semantic.h" />
     <ClInclude Include="src\sourceloc.h" />
     <ClInclude Include="src\util.h" />
