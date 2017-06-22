@@ -47,8 +47,8 @@ public:
 	const Array<Statement*>& statements() const { return _ns->statements(); }
 	bool didReturn() const override { return false; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -71,8 +71,8 @@ public:
 
 	bool didReturn() const override { return false; }
 
-	MutableString64 stringof() const override { return _name; assert(false); } // TODO: test me!
-	MutableString64 mangleof() const override { return MutableString64(Concat, "_M", _name); assert(false); } // TODO: test me!
+	MutableString64 stringof() const override { ice("test me!"); return _name; }
+	MutableString64 mangleof() const override { ice("test me!"); return MutableString64(Concat, "_M", _name); }
 
 	Node *getMember(String name) override;
 
@@ -100,8 +100,8 @@ public:
 
 	bool didReturn() const override { return false; }
 
-	MutableString64 stringof() const override { return _name; assert(false); } // TODO: test me!
-	MutableString64 mangleof() const override { return MutableString64(Concat, "_M", _name); assert(false); } // TODO: test me!
+	MutableString64 stringof() const override { ice("test me!"); return _name; }
+	MutableString64 mangleof() const override { ice("test me!"); return MutableString64(Concat, "_M", _name); }
 
 	Node *getMember(String name) override;
 
@@ -161,7 +161,7 @@ public:
 class VarDecl : public ValDecl
 {
 	friend class Semantic;
-	friend Statement* makeForEach(Array<ValDecl*>, Expr*, ScopeStatement*, SourceLocation);
+	friend Statement* makeForEach(Array<VarDecl*>, Expr*, ScopeStatement*, SourceLocation);
 protected:
 	TypeExpr *_valType;
 	Expr *_init;

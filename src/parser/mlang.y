@@ -46,7 +46,7 @@ static String filename;
 	m::Statement *statement;
 	StatementList statementList;
 	m::ScopeStatement *scopeStmnt;
-	m::ValDecl *decl;
+	m::VarDecl *decl;
 	DeclList declList;
 	m::UnaryOp unaryOp;
 	m::BinOp binaryOp;
@@ -78,8 +78,8 @@ static String filename;
 %type <ambiguous> unknown unknown_primary unknown_postfix unknown_prefix unknown_infix1 unknown_infix2 unknown_infix3 unknown_infix4 unknown_infix5 unknown_infix6 unknown_infix7 unknown_infix8 unknown_infix9 unknown_infix10 unknown_infix11 unknown_infix12
 
 %type <expr> literal function_literal_inner function_literal lambda call unary
-%type <expr> known_value value known_value_primary known_value_postfix value_postfix known_value_prefix value_prefix known_value_infix1 value_infix1 known_value_infix2 value_infix2 known_value_infix3 value_infix3 known_value_infix4 value_infix4 known_value_infix5 value_infix5 known_value_infix6 value_infix6 known_value_infix7 value_infix7 known_value_infix8 value_infix8 known_value_infix9 value_infix9 known_value_infix10 value_infix10 known_value_infix11 value_infix11 known_value_infix12 value_infix12 value_assign
-%type <exprList> value_list known_value_list assign_value_list parameters array
+%type <expr> known_value value slice value_or_slice known_value_primary known_value_postfix value_postfix known_value_prefix value_prefix known_value_infix1 value_infix1 known_value_infix2 value_infix2 known_value_infix3 value_infix3 known_value_infix4 value_infix4 known_value_infix5 value_infix5 known_value_infix6 value_infix6 known_value_infix7 value_infix7 known_value_infix8 value_infix8 known_value_infix9 value_infix9 known_value_infix10 value_infix10 known_value_infix11 value_infix11 known_value_infix12 value_infix12 value_assign
+%type <exprList> value_list value_or_slice_list known_value_list assign_value_list parameters array
 
 %type <type> primitive struct function struct_def ref
 %type <type> known_type type known_type_primary known_type_postfix type_postfix known_type_prefix known_type_infix1 known_type_infix2 known_type_infix3 known_type_infix4 known_type_infix5 known_type_infix6 known_type_infix7 known_type_infix8 known_type_infix9 known_type_infix10 known_type_infix11 known_type_infix12
@@ -172,6 +172,11 @@ unknown_list		: unknown									{ $$ = NodeList::empty().append($1); }
 //					| type_list ',' type						{ $$ = $1.append($3); }
 value_list			: value										{ $$ = ExprList::empty().append($1); }
 					| value_list ',' value						{ $$ = $1.append($3); }
+slice				: value SLICE value							{ $$ = new SliceExpr($1, $3, SourceLocation(yylineno)); }
+value_or_slice		: value										{ $$ = $1; }
+					| slice										{ $$ = $1; }
+value_or_slice_list	: value_or_slice							{ $$ = ExprList::empty().append($1); }
+					| value_or_slice_list ',' value_or_slice	{ $$ = $1.append($3); }
 known_type_list		: known_type								{ $$ = TypeExprList::empty().append($1); }
 					| known_type_list ',' known_type			{ $$ = $1.append($3); }
 known_value_list	: known_value								{ $$ = ExprList::empty().append($1); }
@@ -184,7 +189,7 @@ function_arguments	: '(' ')'									{ $$ = DeclList::empty(); }
 					| '(' var_decl_assign_list ')'				{ $$ = $2; }
 					| '(' var_decl_assign_list ',' ELIPSIS ')'	{ $$ = $2.append(new VarDecl("va_args", new CVarArgType(SourceLocation(yylineno)), nullptr, nullptr, SourceLocation(yylineno))); }
 array				: '[' ']'									{ $$ = ExprList::empty(); }
-					| '[' value_list ']'						{ $$ = $2; }
+					| '[' value_or_slice_list ']'				{ $$ = $2; }
 body				: code_stmnt_no_scope						{ $$ = new ScopeStatement($1 ? Array<Statement*>{ $1 } : Array<Statement*>(), nullptr, SourceLocation(yylineno)); }
 					| scope_statement							{ $$ = $1; }
 
@@ -231,8 +236,8 @@ control_statement		: RETURN ';'															{ $$ = new ReturnStatement(nullptr
 						| FOR '(' var_decl_assign_list ';'       ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), nullptr, $6.get(), $8, SourceLocation(yylineno)); }
 						| FOR '(' var_decl_assign_list ';' value ';'                   ')' body	{ $$ = new LoopStatement($3.get(), $5, nullptr, $8, SourceLocation(yylineno)); }
 						| FOR '(' var_decl_assign_list ';' value ';' assign_value_list ')' body	{ $$ = new LoopStatement($3.get(), $5, $7.get(), $9, SourceLocation(yylineno)); }
-						| FOREACH '(' value ')' body											{ $$ = makeForEach(nullptr, $3, $5, SourceLocation(yylineno)); }
-						| FOREACH '(' var_decl_list ';' value ')' body							{ $$ = makeForEach($3.get(), $5, $7, SourceLocation(yylineno)); }
+						| FOREACH '(' value_or_slice ')' body									{ $$ = makeForEach(nullptr, $3, $5, SourceLocation(yylineno)); }
+						| FOREACH '(' var_decl_list ';' value_or_slice ')' body					{ $$ = makeForEach($3.get(), $5, $7, SourceLocation(yylineno)); }
 //						| MATCH body
 scope_statement			: '{' '}'																{ $$ = new ScopeStatement(nullptr, nullptr, SourceLocation(yylineno)); }
 						| '{' code_statements '}'												{ $$ = new ScopeStatement($2.get(), nullptr, SourceLocation(yylineno)); }

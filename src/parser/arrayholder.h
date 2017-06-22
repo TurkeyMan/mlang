@@ -54,4 +54,4 @@ using NodeList = ArrayHolder<m::Node*>;
 using ExprList = ArrayHolder<m::Expr*>;
 using TypeExprList = ArrayHolder<m::TypeExpr*>;
 using StatementList = ArrayHolder<m::Statement*>;
-using DeclList = ArrayHolder<m::ValDecl*>;
+using DeclList = ArrayHolder<m::VarDecl*>;

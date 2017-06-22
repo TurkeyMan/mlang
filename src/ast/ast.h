@@ -183,8 +183,8 @@ public:
 		: Node(loc), _parentScope(parent)
 	{}
 
-	MutableString64 stringof() const override { assert(false); return String(); }
-	MutableString64 mangleof() const override { assert(false); return String(); }
+	MutableString64 stringof() const override { ice("TODO"); return String(); }
+	MutableString64 mangleof() const override { ice("TODO"); return String(); }
 
 	Module *module() const { return _module; }
 	Scope *parentScope() const { return _parentScope; }
@@ -434,8 +434,8 @@ public:
 		: Declaration(""), Scope(nullptr), Proto(std::move(Proto)), Body(std::move(Body))
 	{}
 
-	MutableString64 stringof() const override { assert(false); return std::string(); }
-	MutableString64 mangleof() const override { assert(false); return std::string(); }
+	MutableString64 stringof() const override { ice("TODO"); return std::string(); }
+	MutableString64 mangleof() const override { ice("TODO"); return std::string(); }
 
 	void accept(ASTVisitor &v) override;
 
@@ -449,7 +449,7 @@ public:
 };
 */
 
-Statement* makeForEach(Array<ValDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc);
+Statement* makeForEach(Array<VarDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc);
 
 Node* makePragma(String identifier, Array<Node*> args);
 

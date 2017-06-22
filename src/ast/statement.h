@@ -31,7 +31,7 @@ public:
 	bool didReturn() const override { return false; }
 
 	MutableString64 stringof() const override { return _expression->stringof(); }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -55,7 +55,7 @@ public:
 	bool didReturn() const override { return true; }
 
 	MutableString64 stringof() const override { return MutableString64(Concat, "return ", _expression->stringof()); }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -65,7 +65,7 @@ public:
 class ScopeStatement : public Statement, public Scope
 {
 	friend class Semantic;
-	friend Statement* makeForEach(Array<ValDecl*>, Expr*, ScopeStatement*, SourceLocation);
+	friend Statement* makeForEach(Array<VarDecl*>, Expr*, ScopeStatement*, SourceLocation);
 
 	Array<Statement*> _statements;
 
@@ -81,8 +81,8 @@ public:
 	const Array<Statement*>& statements() const { return _statements; }
 	bool didReturn() const override { return _didReturn; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -97,16 +97,16 @@ class IfStatement : public Statement, public Scope
 	ScopeStatement *_then = nullptr;
 	ScopeStatement *_else = nullptr;
 
-	Array<ValDecl*> _initStatements;
+	Array<VarDecl*> _initStatements;
 
 public:
-	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, Array<ValDecl*> initStatements, SourceLocation loc)
+	IfStatement(Expr *cond, ScopeStatement *thenStatements, ScopeStatement *elseStatements, Array<VarDecl*> initStatements, SourceLocation loc)
 		: Node(loc), Statement(loc), Scope(nullptr, loc), _cond(cond), _then(thenStatements), _else(elseStatements), _initStatements(std::move(initStatements))
 	{}
 
 	Expr *cond() { return _cond; }
 
-	const Array<ValDecl*>& initStatements() { return _initStatements; }
+	const Array<VarDecl*>& initStatements() { return _initStatements; }
 
 	ScopeStatement* thenStatements() { return _then; }
 	ScopeStatement* elseStatements() { return _else; }
@@ -115,8 +115,8 @@ public:
 	bool elseReturned() const { return _else && _else->didReturn(); }
 	bool didReturn() const override { return thenReturned() && elseReturned(); }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -127,18 +127,18 @@ class LoopStatement : public Statement, public Scope
 {
 	friend class Semantic;
 
-	Array<ValDecl*> _iterators;
+	Array<VarDecl*> _iterators;
 	Expr *_cond;
 	Array<Expr*> _increments;
 
 	ScopeStatement* _body;
 
 public:
-	LoopStatement(Array<ValDecl*> iterators, Expr *cond, Array<Expr*> increments, ScopeStatement* body, SourceLocation loc)
+	LoopStatement(Array<VarDecl*> iterators, Expr *cond, Array<Expr*> increments, ScopeStatement* body, SourceLocation loc)
 		: Node(loc), Statement(loc), Scope(nullptr, loc), _iterators(std::move(iterators)), _cond(cond), _increments(std::move(increments)), _body(body)
 	{}
 
-	const Array<ValDecl*>& iterators() { return _iterators; }
+	const Array<VarDecl*>& iterators() { return _iterators; }
 
 	Expr *cond() { return _cond; }
 
@@ -147,8 +147,8 @@ public:
 
 	bool didReturn() const override { return _body->didReturn(); }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 

@@ -39,7 +39,7 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *
 			return PrimitiveType::get(PrimType::u1, SourceLocation(-1));
 		case BinOp::Is:
 		case BinOp::IsNot:
-			assert(false); // TODO: 'is' operator doesn't need matcing types on either side... maybe another node type?
+			ice("TODO"); // TODO: 'is' operator doesn't need matcing types on either side... maybe another node type?
 	}
 
 	TypeExpr *let = left->evalType();
@@ -64,7 +64,7 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *
 				return typeWidth[(int)pl->type()] > typeWidth[(int)pr->type()] ? let : ret;
 			}
 			else
-				assert(false); // dunno...
+				ice("TODO"); // dunno...
 			break;
 		case BinOp::SHL:
 		case BinOp::ASR:
@@ -112,9 +112,9 @@ TypeExpr* Semantic::typeForBinaryExpression(BinOp op, TypeExpr *left, TypeExpr *
 			break;
 		}
 		case BinOp::Cat:
-			assert(false);
+			ice("TODO");
 		default:
-			assert(false); // what op?
+			ice("unknown binary operator...?"); // what op?
 	}
 	return nullptr; // dunno?!
 }
@@ -283,6 +283,13 @@ void Semantic::visit(Struct &n)
 	n._init = new AggregateLiteralExpr(members, &n, n.getLoc());
 }
 
+void Semantic::visit(SliceType &n)
+{
+	if (n.doneSemantic()) return;
+
+	ice("TODO");
+}
+
 void Semantic::visit(FunctionType &n)
 {
 	if (n.doneSemantic()) return;
@@ -330,7 +337,7 @@ void Semantic::visit(AggregateLiteralExpr &n)
 {
 	if (n.doneSemantic()) return;
 
-	assert(false);
+	ice("TODO");
 }
 
 void Semantic::visit(FunctionLiteralExpr &n)
@@ -354,13 +361,10 @@ void Semantic::visit(FunctionLiteralExpr &n)
 
 	for (auto a : n.args())
 	{
-		VarDecl *decl = dynamic_cast<VarDecl*>(a);
-		iceAssert(decl, "var declaration expected!");
+		a->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, n.getLoc());
+		a->accept(*this);
 
-		decl->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, n.getLoc());
-		decl->accept(*this);
-
-		n.argTypes = n.argTypes.append(decl->targetType());
+		n.argTypes = n.argTypes.append(a->targetType());
 	}
 
 	bool didReturn = false;
@@ -482,7 +486,7 @@ void Semantic::visit(BinaryExpr &n)
 	{
 		case BinOp::Pow:
 		{
-			assert(false); // call the pow intrinsic...
+			ice("TODO"); // call the pow intrinsic...
 			PrimitiveType *lhpt = dynamic_cast<PrimitiveType*>(n.lhs()->type());
 			PrimitiveType *rhpt = dynamic_cast<PrimitiveType*>(n.rhs()->type());
 			if (lhpt && rhpt)
@@ -547,7 +551,7 @@ void Semantic::visit(BinaryExpr &n)
 	// if both sides are const, calculate the result
 	if (n._lhs->isConstant() && n._rhs->isConstant())
 	{
-		assert(false);
+		ice("TODO");
 		// TODO:
 		//...
 	}
@@ -565,7 +569,7 @@ void Semantic::visit(CallExpr &n)
 		PointerType *ptr = n._func->type()->asPointer();
 
 		if (!ptr)
-			assert(false); // not call-able!
+			ice("TODO"); // not call-able!
 
 		n._func = new DerefExpr(n._func, n.getLoc());
 		n._func->accept(*this);
@@ -596,11 +600,21 @@ void Semantic::visit(CallExpr &n)
 			n._callArgs[i] = n._callArgs[i]->makeConversion(args[i]);
 			n._callArgs[i]->accept(*this);
 		}
+		else
+		{
+			// for varargs; should we deref pointers?
+			//              what about strings? ... this needs thought
+			while (n._callArgs[i]->type()->ptrDepth())
+			{
+				n._callArgs[i] = new DerefExpr(n._callArgs[i], n.getLoc());
+				n._callArgs[i]->accept(*this);
+			}
+		}
 	}
 	for (; i < args.length; ++i)
 	{
 		// TODO: handle default args...
-		assert(false);
+		ice("TODO");
 	}
 }
 
@@ -640,7 +654,18 @@ void Semantic::visit(BindExpr &n)
 {
 	if (n.doneSemantic()) return;
 
-	assert(false);
+	ice("TODO");
+}
+
+void Semantic::visit(SliceExpr &n)
+{
+	if (n.doneSemantic()) return;
+
+	n._from->accept(*this);
+	n._to->accept(*this);
+
+	n.type();
+	n._tup->accept(*this);
 }
 
 void Semantic::visit(UnknownExpr &n)
@@ -701,7 +726,13 @@ void Semantic::visit(Tuple &n)
 	n.analyse();
 
 	if (n.isExpr())
+	{
 		n.type()->accept(*this);
+
+		MutableString64 name(Sprintf, "tuple_lit_%d", n.getLine());
+		n._tupDecl = new VarDecl(name, n.type(), n.resolveExpr(), nullptr, n.getLoc());
+		n._tupDecl->accept(*this);
+	}
 	if (n.isType())
 		n.init()->accept(*this);
 
@@ -1110,7 +1141,7 @@ void Semantic::visit(ValDecl &n)
 	}
 
 	if (!n._value)
-		assert(false);// , "def statement needs a value!");
+		ice("TODO");// , "def statement needs a value!");
 
 	n._value->accept(*this);
 
@@ -1145,7 +1176,7 @@ void Semantic::visit(VarDecl &n)
 	visit((Declaration&)n);
 
 	if (!n._valType && !n._init)
-		assert(false);// , "var statement needs either type or init value!");
+		ice("TODO");// , "var statement needs either type or init value!");
 
 	Scope *s = scope();
 	n._owner = s;

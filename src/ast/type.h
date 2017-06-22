@@ -151,6 +151,40 @@ public:
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
 
+class SliceType : public TypeExpr
+{
+	friend class Semantic;
+
+	PtrType _type;
+	TypeExpr *_elementType;
+	Expr *_init = nullptr;
+
+public:
+	SliceType(TypeExpr *elementType, SourceLocation loc)
+		: Node(loc), TypeExpr(loc), _elementType(elementType) {}
+	~SliceType() {}
+
+	PtrType ptrType() const { return _type; }
+	TypeExpr *elementType() const { return _elementType; }
+	Expr* init() const override { return _init; }
+
+	size_t size() const override { return typeBytes[(int)SizeT_Type] * 2; }
+	size_t alignment() const override { return typeBytes[(int)SizeT_Type]; }
+
+	Node *getMember(String name) override;
+
+	bool isSame(const TypeExpr *other) const override;
+	ConvType convertible(const TypeExpr *target) const override;
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override;
+
+	void accept(ASTVisitor &v) override;
+
+	MutableString64 stringof() const override;
+	MutableString64 mangleof() const override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
 class Struct : public TypeExpr, public Scope
 {
 	friend class Semantic;
@@ -196,7 +230,7 @@ public:
 	void accept(ASTVisitor &v) override;
 
 	MutableString64 stringof() const override;
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	raw_ostream &dump(raw_ostream &out, int ind) override;
 };
@@ -207,25 +241,25 @@ class FunctionType : public TypeExpr
 
 	TypeExpr *_returnType = nullptr;
 	Array<TypeExpr*> _argTypes;
-	Array<ValDecl*> _args;
+	Array<VarDecl*> _args;
 
 public:
 	FunctionType(TypeExpr *returnType, Array<TypeExpr*> args, SourceLocation loc)
 		: Node(loc), TypeExpr(loc), _returnType(returnType), _argTypes(std::move(args)) {}
-	FunctionType(TypeExpr *returnType, Array<ValDecl*> args, SourceLocation loc)
+	FunctionType(TypeExpr *returnType, Array<VarDecl*> args, SourceLocation loc)
 		: Node(loc), TypeExpr(loc), _returnType(returnType), _args(std::move(args)) {}
 	~FunctionType() {}
 
-	Expr* init() const override { assert(false); return nullptr; }
+	Expr* init() const override { ice("TODO"); return nullptr; }
 
 	size_t size() const override { return 0; }
 	size_t alignment() const override { return 0; }
 
-	Node *getMember(String name) override { assert(false); return nullptr; }
+	Node *getMember(String name) override { ice("TODO"); return nullptr; }
 
 	bool isSame(const TypeExpr *other) const override;
 	ConvType convertible(const TypeExpr *target) const override;
-	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { ice("TODO"); return nullptr; }
 
 	TypeExpr* returnType() const { return _returnType; }
 	const Array<TypeExpr*>& argTypes() const { return _argTypes; }
@@ -252,11 +286,11 @@ public:
 	size_t size() const override { return 0; }
 	size_t alignment() const override { return 0; }
 
-	Node *getMember(String name) override { assert(false); return nullptr; }
+	Node *getMember(String name) override { ice("TODO"); return nullptr; }
 
-	bool isSame(const TypeExpr *other) const override { assert(false); return false; }
-	ConvType convertible(const TypeExpr *target) const override { assert(false); return ConvType::NoConversion; }
-	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { assert(false); return nullptr; }
+	bool isSame(const TypeExpr *other) const override { ice("TODO"); return false; }
+	ConvType convertible(const TypeExpr *target) const override { ice("TODO"); return ConvType::NoConversion; }
+	Expr* makeConversion(Expr *expr, TypeExpr *targetType, bool implicit = true) const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 

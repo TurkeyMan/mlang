@@ -134,6 +134,7 @@ public:
 	void visit(PrimitiveType &n) override;
 	void visit(ModifiedType &v) override;
 	void visit(PointerType &v) override;
+	void visit(SliceType &n) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &v) override;
 	void visit(CVarArgType &v) override;
@@ -148,6 +149,7 @@ public:
 	void visit(CallExpr &n) override;
 	void visit(AssignExpr &n) override;
 	void visit(BindExpr &n) override;
+	void visit(SliceExpr &n) override;
 	void visit(UnknownExpr &n) override;
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;

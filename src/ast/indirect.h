@@ -85,7 +85,7 @@ public:
 	{
 		if (isType())
 			return _type->mangleof();
-		assert(false); // TODO: what is the scope of the symbol?
+		ice("TODO"); // TODO: what is the scope of the symbol?
 		if (_module)
 			return _module->mangleof();
 		return _var->mangleof();
@@ -144,7 +144,7 @@ public:
 	{
 		if (isType())
 			return _result->mangleof();
-		assert(false);
+		ice("TODO");
 		return nullptr;
 	}
 
@@ -181,6 +181,8 @@ class Tuple : public AmbiguousExpr
 	Tuple *_type = nullptr;
 	Tuple *_init = nullptr;
 
+	VarDecl *_tupDecl;
+
 public:
 	Tuple(Array<Node*> elements, SourceLocation loc)
 		: Node(loc), AmbiguousExpr(loc), _elements(std::move(elements))
@@ -213,7 +215,7 @@ public:
 
 	// expr overrides
 	TypeExpr* type() override;
-	Expr* constEval() override { assert(false); return nullptr; };
+	Expr* constEval() override { ice("TODO"); return nullptr; };
 
 	Expr* resolveExpr() override { return this; }
 	TypeExpr* resolveType() override { return this; }
@@ -289,7 +291,7 @@ public:
 	{
 		if (isType())
 			return _result->mangleof();
-		assert(false);
+		ice("TODO");
 		return nullptr;
 	}
 

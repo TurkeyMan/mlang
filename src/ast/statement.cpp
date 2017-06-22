@@ -12,11 +12,44 @@ void IfStatement::accept(ASTVisitor &v) { v.visit(*this); }
 void LoopStatement::accept(ASTVisitor &v) { v.visit(*this); }
 
 
-Statement* makeForEach(Array<ValDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc)
+Statement* makeForEach(Array<VarDecl*> iterators, Expr *range, ScopeStatement *body, SourceLocation loc)
 {
-	assert(false); // TODO!!
+	SliceExpr *intRange = dynamic_cast<SliceExpr*>(range);
+	if (intRange)
+	{
+		if (iterators.length > 1)
+			error("file", loc.line, "only one iterator supported for range foreach");
 
-				   // only [value], or [key, value] are allowed!
+		MutableString64 iteratorName;
+		// if no explicit iterator was defined, we need an implicit one
+		if (iterators.length == 0)
+		{
+			iteratorName = MutableString64(Sprintf, "__it%d", loc.line);
+			iterators.push_back(new VarDecl(iteratorName, intRange->from()->type(), intRange->from(), nullptr, loc));
+		}
+		else
+		{
+			iteratorName = iterators[0]->name();
+
+			// if the iterator was un-typed, infer the type from the range
+			if (!iterators[0]->_type)
+				iterators[0]->_type = intRange->from()->type();
+
+			// update the iterator's init value to the start of the range
+			iterators[0]->_init = intRange->from()->makeConversion(iterators[0]->type(), true);
+		}
+
+		Identifier *pIterIdent = new Identifier(iteratorName, loc);
+		BinaryExpr *cond = new BinaryExpr(BinOp::Ne, pIterIdent, intRange->to(), loc);
+		UnaryExpr *inc = new UnaryExpr(UnaryOp::PreInc, pIterIdent, loc);
+//		AssignExpr *inc = new AssignExpr(pIterIdent, new PrimitiveLiteralExpr(PrimType::u8, 1ull, loc), BinOp::Add, loc);
+
+		return new LoopStatement(std::move(iterators), cond, Array<Expr*>(Concat, (Expr*)inc), body, loc);
+	}
+
+	ice("TODO"); // TODO!!
+
+	// only [value], or [key, value] are allowed!
 	assert(iterators.length <= 2);
 
 	// assign void initialisation for counters (initialised at head of loop body)
@@ -24,7 +57,7 @@ Statement* makeForEach(Array<ValDecl*> iterators, Expr *range, ScopeStatement *b
 		((VarDecl*)i)->_init = new PrimitiveLiteralExpr(PrimType::v, 0ull, loc);
 
 	VarDecl *r = new VarDecl("__loop_range", nullptr, range, Array<Node*>(), loc);
-	iterators = Array<ValDecl*>(Concat, r, iterators);
+	iterators = Array<VarDecl*>(Concat, r, iterators);
 
 	Expr *cond = nullptr; // cast(bool)__loop_range.empty()
 

@@ -19,6 +19,7 @@ public:
 	virtual void visit(PrimitiveType &n) {}
 	virtual void visit(ModifiedType &n) {}
 	virtual void visit(PointerType &n) {}
+	virtual void visit(SliceType &n) {}
 	virtual void visit(Struct &n) {}
 	virtual void visit(FunctionType &n) {}
 	virtual void visit(CVarArgType &n) {}
@@ -33,6 +34,7 @@ public:
 	virtual void visit(CallExpr &n) {}
 	virtual void visit(AssignExpr &n) {}
 	virtual void visit(BindExpr &n) {}
+	virtual void visit(SliceExpr &n) {}
 	virtual void visit(UnknownExpr &n) {}
 	virtual void visit(Identifier &n) {}
 	virtual void visit(MemberLookup &n) {}

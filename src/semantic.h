@@ -48,6 +48,7 @@ private:
 	void visit(PrimitiveType &n) override;
 	void visit(ModifiedType &v) override;
 	void visit(PointerType &v) override;
+	void visit(SliceType &v) override;
 	void visit(Struct &n) override;
 	void visit(FunctionType &n) override;
 	void visit(CVarArgType &n) override;
@@ -62,6 +63,7 @@ private:
 	void visit(CallExpr &n) override;
 	void visit(AssignExpr &n) override;
 	void visit(BindExpr &n) override;
+	void visit(SliceExpr &n) override;
 	void visit(UnknownExpr &n) override;
 	void visit(Identifier &n) override;
 	void visit(MemberLookup &n) override;

@@ -7,6 +7,7 @@ namespace m {
 void PrimitiveType::accept(ASTVisitor &v) { v.visit(*this); }
 void ModifiedType::accept(ASTVisitor &v) { v.visit(*this); }
 void PointerType::accept(ASTVisitor &v) { v.visit(*this); }
+void SliceType::accept(ASTVisitor &v) { v.visit(*this); }
 void Struct::accept(ASTVisitor &v) { v.visit(*this); }
 void FunctionType::accept(ASTVisitor &v) { v.visit(*this); }
 void CVarArgType::accept(ASTVisitor &v) { v.visit(*this); }
@@ -401,11 +402,11 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 		TypeExpr *target = targetType;
 
 		bool srcConst = false, targetConst = false;
-		//		if (target->isConst())
-		//		{
-		//			targetConst = true;
-		//			target = target->asModified()->innerType();
-		//		}
+//		if (target->isConst())
+//		{
+//			targetConst = true;
+//			target = target->asModified()->innerType();
+//		}
 
 		PointerType *ptrt = targetType->asPointer();
 
@@ -423,20 +424,20 @@ Expr* PointerType::makeConversion(Expr *expr, TypeExpr *targetType, bool implici
 			{
 				toStack[toDepth++] = ptrt;
 				target = ptrt->targetType();
-				//				if (target->isConst())
-				//				{
-				//					targetConst = true;
-				//					target = target->asModified()->innerType();
-				//				}
+//				if (target->isConst())
+//				{
+//					targetConst = true;
+//					target = target->asModified()->innerType();
+//				}
 				ptrt = target->asPointer();
 			}
 			fromStack[fromDepth++] = ptrf;
 			from = ptrf->targetType();
-			//			if (from->isConst())
-			//			{
-			//				srcConst = true;
-			//				from = from->asModified()->innerType();
-			//			}
+//			if (from->isConst())
+//			{
+//				srcConst = true;
+//				from = from->asModified()->innerType();
+//			}
 			ptrf = from->asPointer();
 		} while (ptrt || ptrf);
 
@@ -502,10 +503,10 @@ MutableString64 PointerType::stringof() const
 {
 	return MutableString64(Concat, _pointerTarget->stringof(), '*');
 }
+static const char *ptr_ty[] = { "P", "U", "R", "" };
 MutableString64 PointerType::mangleof() const
 {
-	static const char *ty[] = { "P", "U", "R", "" };
-	return MutableString64(Concat, ty[(int)_type], _pointerTarget->mangleof());
+	return MutableString64(Concat, ptr_ty[(int)_type], _pointerTarget->mangleof());
 }
 raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 {
@@ -513,6 +514,59 @@ raw_ostream &PointerType::dump(raw_ostream &out, int ind)
 	++ind;
 	if (_pointerTarget)
 		_pointerTarget->dump(indent(out, ind) << "target: ", ind);
+	if (_init)
+		_init->dump(indent(out, ind) << "init: ", ind);
+	return out;
+}
+
+Node *SliceType::getMember(String name)
+{
+	Node *r = TypeExpr::getMember(name);
+	if (r)
+		return r;
+
+	// TODO: length property
+	//       - address property?
+
+	return nullptr;
+
+}
+
+bool SliceType::isSame(const TypeExpr *other) const
+{
+	const SliceType *t = dynamic_cast<const SliceType*>(other);
+	if (!t)
+		return false;
+	return _type == t->_type && _elementType->isSame(t->_elementType);
+}
+ConvType SliceType::convertible(const TypeExpr *target) const
+{
+	ice("TODO");
+	// TODO: if pointer types are convertible AND same indirection depth, then slice types are convertible...?
+	return ConvType::NoConversion;
+}
+Expr* SliceType::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) const
+{
+	ice("TODO");
+	return nullptr;
+}
+
+MutableString64 SliceType::stringof() const
+{
+	return MutableString64(Concat, '[', _elementType->stringof(), "; ..]");
+}
+MutableString64 SliceType::mangleof() const
+{
+//	return MutableString64(Concat, "S", ptr_ty[(int)_type], _elementType->mangleof());
+	return MutableString64(Concat, "S", _elementType->mangleof());
+}
+
+raw_ostream &SliceType::dump(raw_ostream &out, int ind)
+{
+	TypeExpr::dump(out << "slice", ind) << "\n";
+	++ind;
+	if (_elementType)
+		_elementType->dump(indent(out, ind) << "target: ", ind);
 	if (_init)
 		_init->dump(indent(out, ind) << "init: ", ind);
 	return out;
@@ -548,7 +602,7 @@ Node *Struct::getMember(String name)
 
 bool Struct::isSame(const TypeExpr *other) const
 {
-	assert(false);
+	ice("TODO");
 	return false;
 }
 
@@ -564,7 +618,7 @@ Expr* Struct::makeConversion(Expr *expr, TypeExpr *targetType, bool implicit) co
 	TypeExpr *to = targetType->resolveType();
 	if (from == to)
 		return expr;
-	assert(false); // can't convert struct type...
+	ice("TODO"); // can't convert struct type...
 	return nullptr;
 }
 
@@ -628,7 +682,7 @@ MutableString64 FunctionType::stringof() const
 	r.append(')');
 	return r;
 }
-MutableString64 FunctionType::mangleof() const { assert(false); return ""; }
+MutableString64 FunctionType::mangleof() const { ice("TODO"); return ""; }
 
 raw_ostream &FunctionType::dump(raw_ostream &out, int ind)
 {
@@ -652,7 +706,7 @@ Expr* CVarArgType::init() const
 }
 
 MutableString64 CVarArgType::stringof() const { return "..."; }
-MutableString64 CVarArgType::mangleof() const { assert(false); return ""; }
+MutableString64 CVarArgType::mangleof() const { ice("TODO"); return ""; }
 
 raw_ostream &CVarArgType::dump(raw_ostream &out, int ind)
 {

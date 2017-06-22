@@ -164,24 +164,32 @@ void LLVMGenerator::codegen()
 	if (compiler.runtime.eq("MT"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MT_StaticRelease");
+		linkOptions.push_back("/DEFAULTLIB:LIBUCRT");
+		linkOptions.push_back("/DEFAULTLIB:LIBVCRUNTIME");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
 	else if (compiler.runtime.eq("MTd"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MTd_StaticDebug");
+		linkOptions.push_back("/DEFAULTLIB:LIBUCRTD");
+		linkOptions.push_back("/DEFAULTLIB:LIBVCRUNTIMED");
 		linkOptions.push_back("/DEFAULTLIB:LIBCMTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
 	else if (compiler.runtime.eq("MD"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MD_DynamicRelease");
+		linkOptions.push_back("/DEFAULTLIB:UCRT");
+		linkOptions.push_back("/DEFAULTLIB:VCRUNTIME");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRT");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
 	else if (compiler.runtime.eq("MDd"))
 	{
 		linkOptions.push_back("/FAILIFMISMATCH:RuntimeLibrary=MDd_DynamicDebug");
+		linkOptions.push_back("/DEFAULTLIB:UCRTD");
+		linkOptions.push_back("/DEFAULTLIB:VCRUNTIMED");
 		linkOptions.push_back("/DEFAULTLIB:MSVCRTD");
 		linkOptions.push_back("/DEFAULTLIB:OLDNAMES");
 	}
@@ -229,7 +237,7 @@ void LLVMGenerator::codegen()
 		if (compiler.mode == Mode::OutputBC)
 		{
 			// TODO:...
-			assert(false);
+			ice("TODO");
 			return;
 		}
 
@@ -342,12 +350,12 @@ void LLVMGenerator::codegen()
 				if (!StartAfter.empty() || !StopAfter.empty()) {
 					errs() << str_ref(compiler.outFile) << ": start-after and/or stop-after passes are "
 						"redundant when run-pass is specified.\n";
-					assert(false);
+					ice("TODO");
 				}
 				const PassInfo *PI = PR->getPassInfo(RunPass);
 				if (!PI) {
 					errs() << str_ref(compiler.outFile) << ": run-pass pass is not registered.\n";
-					assert(false);
+					ice("TODO");
 				}
 				StopAfterID = StartBeforeID = PI->getTypeInfo();
 			}
@@ -356,7 +364,7 @@ void LLVMGenerator::codegen()
 					const PassInfo *PI = PR->getPassInfo(StartAfter);
 					if (!PI) {
 						errs() << str_ref(compiler.outFile) << ": start-after pass is not registered.\n";
-						assert(false);
+						ice("TODO");
 					}
 					StartAfterID = PI->getTypeInfo();
 				}
@@ -364,7 +372,7 @@ void LLVMGenerator::codegen()
 					const PassInfo *PI = PR->getPassInfo(StopAfter);
 					if (!PI) {
 						errs() << str_ref(compiler.outFile) << ": stop-after pass is not registered.\n";
-						assert(false);
+						ice("TODO");
 					}
 					StopAfterID = PI->getTypeInfo();
 				}
@@ -376,7 +384,7 @@ void LLVMGenerator::codegen()
 			if (Target->addPassesToEmitFile(PM, *OS, fileType, true, StartBeforeID,
 				StartAfterID, StopAfterID, nullptr)) {
 				errs() << str_ref(compiler.outFile) << ": target does not support generation of this file type!\n";
-				assert(false);
+				ice("TODO");
 			}
 
 			// Before executing passes, print the final values of the LLVM options.
@@ -772,7 +780,7 @@ void LLVMGenerator::visit(PrimitiveType &n)
 //		cg->type = Type::getX86_FP80Ty(ctx); break;
 //		cg->type = Type::getPPC_FP128Ty(ctx); break;
 	default:
-		assert(false);
+		ice("unknown PrimType!");
 	}
 }
 
@@ -801,6 +809,15 @@ void LLVMGenerator::visit(PointerType &n)
 	cg->type = llvm::PointerType::getUnqual(targetCg->type);
 	if (compiler.debug)
 		cg->ditype = DBuilder->createPointerType(targetCg->ditype, 64); // TODO: machine pointer size? 32bit?
+}
+
+void LLVMGenerator::visit(SliceType &n)
+{
+	if (n.doneCodegen()) return;
+
+	LLVMData *cg = n.cgData<LLVMData>();
+
+	ice("TODO");
 }
 
 void LLVMGenerator::visit(Struct &n)
@@ -1085,7 +1102,7 @@ void LLVMGenerator::visit(FunctionLiteralExpr &n)
 		os.flush();
 		std::string err = os.take();
 		printf("%s\n", err.c_str());
-//		assert(false);
+//		ice("TODO");
 	}
 
 //	// Error reading body, remove function.
@@ -1271,7 +1288,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 		if (!from_pt)
 		{
 			// TODO: can 'from_type' be wrangled into a primitive type??
-			assert(false);
+			ice("TODO");
 		}
 		else
 			src = from_pt->type();
@@ -1294,7 +1311,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 	{
 		if (exprType->asPrimitive())
 		{
-			assert(false); // test!
+			ice("TODO"); // test!
 			cg->value = Builder.CreateBitOrPointerCast(exprCg->value, typeCg->type, "cast");
 			return;
 		}
@@ -1306,7 +1323,7 @@ void LLVMGenerator::visit(TypeConvertExpr &n)
 		}
 	}
 
-	assert(false);
+	ice("TODO");
 	// can 'type' be constructed from a 'from_type'
 }
 
@@ -1351,19 +1368,19 @@ void LLVMGenerator::visit(UnaryExpr &n)
 			break;
 		case UnaryOp::PreDec:
 //				n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
-			assert(false);
+			ice("TODO");
 			break;
 		case UnaryOp::PreInc:
 //				n.codegenData = Builder.CreateXor(operandCg->value, (uint64_t)-1);
-			assert(false);
+			ice("TODO");
 			break;
 		default:
-			assert(false);
+			ice("TODO");
 			break;
 		}
 	}
 	else
-		assert(false);
+		ice("TODO");
 
 
 //	Value *OperandV = Operand->codegen();
@@ -1460,7 +1477,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 			break;
 		}
 		case BinOp::Cat:
-			assert(false);
+			ice("TODO");
 			break;
 		case BinOp::SHL:
 			assert(isNotFloat(primType));
@@ -1500,7 +1517,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isNotFloat(lhPrimType))
 					cg->value = Builder.CreateICmpEQ(lhCg->value, rhCg->value, "eq");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1515,7 +1532,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isNotFloat(lhPrimType))
 					cg->value = Builder.CreateICmpNE(lhCg->value, rhCg->value, "ne");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1582,7 +1599,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSGT(lhCg->value, rhCg->value, "sgt");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1599,7 +1616,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSGE(lhCg->value, rhCg->value, "sge");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1616,7 +1633,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSLT(lhCg->value, rhCg->value, "slt");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1633,7 +1650,7 @@ void LLVMGenerator::visit(BinaryExpr &n)
 				else if (isSignedIntegral(lhPrimType))
 					cg->value = Builder.CreateICmpSLE(lhCg->value, rhCg->value, "sle");
 				else
-					assert(false);
+					ice("unexpect!");
 			}
 			break;
 		}
@@ -1727,7 +1744,7 @@ void LLVMGenerator::visit(CallExpr &n)
 		return;
 	}
 
-	assert(false);
+	ice("TODO");
 
 //	KSDbgInfo.emitLocation(this);
 //
@@ -1772,6 +1789,13 @@ void LLVMGenerator::visit(BindExpr &n)
 	if (n.doneCodegen()) return;
 
 	int x = 0;
+}
+
+void LLVMGenerator::visit(SliceExpr &n)
+{
+	if (n.doneCodegen()) return;
+
+	ice("TODO");
 }
 
 void LLVMGenerator::visit(UnknownExpr &n)
@@ -1868,7 +1892,7 @@ void LLVMGenerator::visit(Tuple &n)
 
 				if (compiler.debug)
 				{
-					assert(false);
+					ice("TODO");
 				}
 			}
 		}
@@ -2108,7 +2132,7 @@ void LLVMGenerator::visit(VarDecl &n)
 	if (pFunc)
 	{
 		// function pointer
-		assert(false);
+		ice("TODO");
 	}
 	else
 	{
@@ -2122,7 +2146,7 @@ void LLVMGenerator::visit(VarDecl &n)
 			if (global != nullptr)
 			{
 				// already exists!!
-				assert(false);
+				ice("TODO");
 			}
 
 			TypeExpr *targetTy = n.targetType();
@@ -2151,7 +2175,7 @@ void LLVMGenerator::visit(VarDecl &n)
 				else if (ty->isIntegerTy())
 					constant = ConstantInt::get(ty, 0);
 				else
-					assert(false);
+					ice("TODO");
 			}
 			global->setInitializer(constant);
 

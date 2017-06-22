@@ -207,7 +207,7 @@ Tuple* Tuple::makeStringLiteral(String str, PrimType type, bool unescape, Source
 			s = s.append(new PrimitiveLiteralExpr(type, c, loc));
 		}
 		else
-			assert(false);
+			ice("expected character type...?");
 	}
 
 	PrimitiveType *ty = PrimitiveType::get(type, loc);
@@ -272,6 +272,7 @@ void Tuple::analyse()
 			allExpr = true;
 			_alignment = expr->type()->alignment();
 			_size = expr->type()->size();
+			_isConstant = expr->isConstant();
 		}
 		else
 		{
@@ -293,6 +294,7 @@ void Tuple::analyse()
 	{
 		allExpr = true;
 		allTypes = _elements.length > 0;
+		_isConstant = true;
 		for (auto e : _elements)
 		{
 			size_t size = 0;
@@ -304,10 +306,14 @@ void Tuple::analyse()
 				size = expr->type()->size();
 				align = expr->type()->alignment();
 
+				_isConstant = _isConstant && expr->isConstant();
+
 				allTypes = false;
 			}
 			else
 			{
+				_isConstant = false;
+
 				TypeExpr *type = e->asType();
 				if (type)
 				{
@@ -322,7 +328,7 @@ void Tuple::analyse()
 					allTypes = false;
 
 					// accept other nodes in tuples?
-					assert(false);
+					ice("accept other nodes in tuples?");
 				}
 			}
 
@@ -592,7 +598,16 @@ Node *Tuple::getMember(String name)
 			return _shape[0];
 		return new PrimitiveLiteralExpr(SizeT_Type, _elements.length, getLoc());
 	}
-	if (isType())
+	if (isExpr())
+	{
+		if (name.eq("ptr"))
+		{
+			if (!_type->isSequence())
+				error("file", getLine(), "can't take pointer for a tuple");
+			return dynamic_cast<RefExpr*>(_tupDecl->value())->makeConversion(new PointerType(PtrType::RawPtr, _type->_element->asType(), getLoc()), false);
+		}
+	}
+	if (!isType())
 	{
 		if (name.eq("init"))
 			return init();

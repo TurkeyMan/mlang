@@ -15,6 +15,7 @@ void BinaryExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void CallExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void AssignExpr::accept(ASTVisitor &v) { v.visit(*this); }
 void BindExpr::accept(ASTVisitor &v) { v.visit(*this); }
+void SliceExpr::accept(ASTVisitor &v) { v.visit(*this); }
 
 
 //**********************
@@ -239,6 +240,22 @@ raw_ostream &BindExpr::dump(raw_ostream &out, int ind)
 	ind++;
 	_target->dump(indent(out, ind) << "target: ", ind + 1);
 	_expr->dump(indent(out, ind) << "expr: ", ind + 1);
+	return out;
+}
+
+TypeExpr* SliceExpr::type()
+{
+	if (!_tup)
+		_tup = new Tuple({ _from, _to }, getLoc());
+	return _tup->resolveExpr()->type();
+}
+
+raw_ostream &SliceExpr::dump(raw_ostream &out, int ind)
+{
+	Expr::dump(out << "..\n", ind);
+	ind++;
+	_from->dump(indent(out, ind) << "from: ", ind + 1);
+	_to->dump(indent(out, ind) << "to: ", ind + 1);
 	return out;
 }
 

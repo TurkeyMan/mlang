@@ -38,7 +38,7 @@ public:
 	PrimitiveLiteralExpr* constEval() override { return this; };
 
 	MutableString64 stringof() const override;
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -60,8 +60,8 @@ public:
 
 	const Array<Expr*>& items() { return _items; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -74,7 +74,7 @@ class FunctionLiteralExpr : public Expr, public Scope
 
 	Array<Statement*> bodyStatements;
 
-	Array<ValDecl*> _args;
+	Array<VarDecl*> _args;
 	TypeExpr *returnType;
 	bool inferReturnType;
 
@@ -85,7 +85,7 @@ class FunctionLiteralExpr : public Expr, public Scope
 	SourceLocation _defLoc = SourceLocation(0);
 
 public:
-	FunctionLiteralExpr(Array<Statement*> bodyStatements, Array<ValDecl*> args, TypeExpr *returnType, SourceLocation loc)
+	FunctionLiteralExpr(Array<Statement*> bodyStatements, Array<VarDecl*> args, TypeExpr *returnType, SourceLocation loc)
 		: Node(loc), Expr(true, loc), Scope(nullptr, loc), bodyStatements(std::move(bodyStatements)), _args(std::move(args)), returnType(returnType), inferReturnType(returnType == nullptr)
 	{
 		static int literalCount = 0;
@@ -94,7 +94,7 @@ public:
 
 	FunctionType* type() override { return _type; }
 
-	const Array<ValDecl*>& args() const { return _args; }
+	const Array<VarDecl*>& args() const { return _args; }
 	const Array<Statement*>& statements() { return bodyStatements; }
 
 	Node *getMember(String name) override { return Expr::getMember(name); }
@@ -102,8 +102,8 @@ public:
 	SharedString& givenName() { return _givenName; }
 	SourceLocation& defLoc() { return _defLoc; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -174,8 +174,8 @@ public:
 
 	Node *getMember(String name) override;
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -195,8 +195,8 @@ public:
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _expr->type()->asPointer()->targetType(); }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -218,8 +218,8 @@ public:
 	Expr* expr() { return _expr; }
 	TypeExpr* type() override { return _newType; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -247,8 +247,8 @@ public:
 
 	TypeExpr* type() override { return _type; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -282,8 +282,8 @@ public:
 
 	TypeExpr* type() override { return _type; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -313,8 +313,8 @@ public:
 
 	Node* getMember(String name) override;
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -339,8 +339,8 @@ public:
 	Expr *target() { return _target; }
 	Expr *expr() { return _expr; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
@@ -364,8 +364,35 @@ public:
 	Expr *target() { return _target; }
 	Expr *expr() { return _expr; }
 
-	MutableString64 stringof() const override { assert(false); return nullptr; }
-	MutableString64 mangleof() const override { assert(false); return nullptr; }
+	MutableString64 stringof() const override { ice("TODO"); return nullptr; }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
+
+	void accept(ASTVisitor &v) override;
+
+	raw_ostream &dump(raw_ostream &out, int ind) override;
+};
+
+class SliceExpr : public Expr
+{
+	friend class Semantic;
+
+	Expr *_from;
+	Expr *_to;
+
+	Tuple *_tup = nullptr;
+
+public:
+	SliceExpr(Expr *from, Expr *to, SourceLocation loc)
+		: Node(loc), Expr(false, loc), _from(from), _to(to)
+	{}
+
+	TypeExpr* type() override;
+
+	Expr *from() { return _from; }
+	Expr *to() { return _to; }
+
+	MutableString64 stringof() const override { return MutableString64(Concat, _from->stringof(), "..", _to->stringof()); }
+	MutableString64 mangleof() const override { ice("TODO"); return nullptr; }
 
 	void accept(ASTVisitor &v) override;
 
